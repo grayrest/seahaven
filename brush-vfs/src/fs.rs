@@ -222,12 +222,17 @@ pub struct FileFacts {
     pub is_sticky: bool,
     /// Owning user and group, which `-O` and `-G` compare.
     pub uid_gid: (u32, u32),
-    /// Device and inode, which `-ef` compares.
+    /// Device and inode, which `-ef` compares, or `None` where the platform
+    /// has no such pair.
+    ///
+    /// `None` rather than a placeholder: a placeholder makes every file
+    /// identical to every other one, so `-ef` would answer *true* for any two
+    /// files rather than losing the ability to answer at all.
     ///
     /// These are host values, so they leak the host's mount layout into a
     /// namespace that otherwise hides it. Synthesising stable per-session
     /// identifiers is an open question.
-    pub dev_ino: (u64, u64),
+    pub dev_ino: Option<(u64, u64)>,
 }
 
 impl FileFacts {
@@ -239,14 +244,17 @@ impl FileFacts {
             use cap_std::fs::MetadataExt as _;
             (
                 metadata.mode(),
-                metadata.dev(),
-                metadata.ino(),
+                Some(metadata.dev()),
+                Some(metadata.ino()),
                 metadata.uid(),
                 metadata.gid(),
             )
         };
+        // No device and inode numbers off Unix. `None` rather than a placeholder
+        // pair, because a placeholder makes every file identical to every other
+        // one -- which is what `-ef` would then report.
         #[cfg(not(unix))]
-        let (mode, dev, ino, uid, gid) = (0u32, 0u64, 0u64, 0u32, 0u32);
+        let (mode, dev, ino, uid, gid) = (0u32, None, None, 0u32, 0u32);
 
         #[cfg(unix)]
         let (is_block_device, is_char_device, is_fifo, is_socket) = {
@@ -274,7 +282,7 @@ impl FileFacts {
             is_setgid: mode & 0o2000 != 0,
             is_sticky: mode & 0o1000 != 0,
             uid_gid: (uid, gid),
-            dev_ino: (dev, ino),
+            dev_ino: dev.zip(ino),
         }
     }
 }

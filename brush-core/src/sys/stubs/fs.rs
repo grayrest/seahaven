@@ -119,6 +119,13 @@ pub const fn normalize_path_separators(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Borrowed(s)
 }
 
+/// Returns true if the path's *name* permits it being executable.
+///
+/// Stub implementation: names carry no execution meaning.
+pub const fn name_permits_execution(_path: &std::path::Path) -> bool {
+    true
+}
+
 /// Returns the paths that could name the executable requested by `path`.
 ///
 /// In the stub implementation, a name is its own only candidate.

@@ -30,7 +30,15 @@ pub fn to_virtual_path(
 }
 
 /// Returns true if the namespace has an executable file at the given path.
+///
+/// The name is consulted before the namespace because `access(2)`'s executable
+/// mode has no Windows equivalent: cap-primitives maps it to opening the file
+/// for reading, so on Windows the namespace alone answers yes for every
+/// readable file. On Unix the name says nothing and this is a no-op.
 pub fn is_executable(session: &brush_vfs::Session, path: &Path) -> bool {
+    if !crate::sys::fs::name_permits_execution(path) {
+        return false;
+    }
     to_virtual_path(session, path).is_ok_and(|p| {
         session.vfs().access(
             &p,

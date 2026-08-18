@@ -595,7 +595,12 @@ fn files_refer_to_same_device_and_inode_numbers(
         return false;
     };
 
-    left.dev_ino == right.dev_ino
+    // A platform with no device and inode pair cannot tell two files apart, so
+    // the honest answer is that they are not known to be the same file.
+    match (left.dev_ino, right.dev_ino) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
 }
 
 /// Facts about `operand` as a `test` predicate sees it, or `None` when the path

@@ -45,6 +45,17 @@ fn has_executable_extension(path: &Path) -> bool {
     })
 }
 
+/// Returns true if the path's *name* permits it being executable.
+///
+/// Windows has no execute bit; what makes a file runnable is its extension
+/// being in `PATHEXT`. This matters because `access(2)`'s executable mode has
+/// no Windows equivalent either -- cap-primitives maps it to opening the file
+/// for reading -- so asking the namespace alone would report every readable
+/// file as executable. Callers gate on this first.
+pub fn name_permits_execution(path: &Path) -> bool {
+    has_executable_extension(path)
+}
+
 /// Returns the paths that could name the executable requested by `path`.
 ///
 /// Purely lexical: nothing here touches the filesystem, because the caller

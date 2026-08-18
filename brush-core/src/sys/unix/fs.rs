@@ -12,14 +12,6 @@ pub use std::os::unix::fs::MetadataExt;
 // _PATH_DEFPATH in https://android.googlesource.com/platform/bionic/+/refs/heads/main/libc/include/paths.h
 const ANDROID_DEFPATH: &str = "/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/apex/com.android.virt/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin";
 
-fn try_get_file_type(path: &Path) -> Option<std::fs::FileType> {
-    path.metadata().map(|metadata| metadata.file_type()).ok()
-}
-
-fn try_get_file_mode(path: &Path) -> Option<u32> {
-    path.metadata().map(|metadata| metadata.mode()).ok()
-}
-
 /// Splits a platform-specific PATH-like value into individual paths.
 ///
 /// On Unix, this delegates to [`std::env::split_paths`].
@@ -251,6 +243,15 @@ pub fn push_path_for_pattern(path: &mut std::path::PathBuf, component: &str) {
 /// On Unix, this is a no-op since paths already use `/`.
 pub const fn normalize_path_separators(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Borrowed(s)
+}
+
+/// Returns true if the path's *name* permits it being executable.
+///
+/// Purely lexical, and the whole answer on Unix is yes: the execute bit is a
+/// property of the file, not of its name. Windows decides otherwise, which is
+/// why callers ask before consulting the namespace.
+pub const fn name_permits_execution(_path: &Path) -> bool {
+    true
 }
 
 /// Returns the paths that could name the executable requested by `path`.
