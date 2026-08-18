@@ -94,6 +94,38 @@ fn with<T>(
     op(session.vfs(), &vpath)
 }
 
+// -- Where we are ----------------------------------------------------------
+
+/// The session's working directory, as a virtual path.
+///
+/// The rewrite target for `std::env::current_dir()` in code that goes on to
+/// build an absolute path from it. `uucore::fs::canonicalize` is the motivating
+/// case: it joins a relative argument onto the process cwd before resolving,
+/// and leaving that join on the *host* cwd made the result half-virtual — the
+/// prefix from the host, the existence checks from the namespace. A `Session`
+/// carries its own cwd precisely so a subshell can differ from its parent, and
+/// this is how routed code reads it.
+///
+/// # Errors
+/// If no session is installed.
+pub fn current_dir() -> io::Result<PathBuf> {
+    Ok(PathBuf::from(current()?.cwd().as_str()))
+}
+
+/// Opens a directory as a capability, for `*at`-anchored traversal.
+///
+/// The narrow exception to the path-based facade; see [`crate::dir`] and D3's
+/// amendment. Callers that are already descriptor-shaped — `safe_traversal`'s
+/// recursive walk — use this rather than re-resolving a path per operation,
+/// since every re-resolution is a fresh chance for a component to change under
+/// them.
+///
+/// # Errors
+/// As [`open`], and if the path is not a directory.
+pub fn open_dir(path: impl AsRef<Path>) -> io::Result<crate::dir::Dir> {
+    with(path, crate::fs::Vfs::open_dir)
+}
+
 // -- Opening ---------------------------------------------------------------
 
 /// Opens a file for reading. The rewrite target for `File::open(path)`.

@@ -1,14 +1,27 @@
 //! Filesystem operations over the virtual namespace.
 //!
 //! The API is **path-based and `std`-typed**: it takes [`VirtualPath`] and hands
-//! back `std::fs::File` and `std::fs::Metadata`. Callers never hold a directory
-//! capability. That is not a stylistic choice — the utilities this eventually
-//! has to accommodate carry owned paths and re-open them repeatedly, so an API
-//! demanding a `Dir` would force them to be restructured rather than rewritten.
+//! back `std::fs::File` and `std::fs::Metadata`. That is not a stylistic choice
+//! — the utilities this eventually has to accommodate carry owned paths and
+//! re-open them repeatedly, so an API *demanding* a `Dir` would force them to be
+//! restructured rather than rewritten.
 //!
 //! It is sound because confinement comes from *resolution*, not from the handle
 //! type. Once a descriptor has been opened beneath a mount it carries no ambient
 //! authority, so returning a plain `std::fs::File` gives nothing away.
+//!
+//! # The one exception
+//!
+//! A caller that is *already* descriptor-shaped may ask for a directory
+//! capability instead: see [`crate::dir`]. `uucore::safe_traversal::DirFd` is
+//! the motivating case — an `openat`-anchored walk written so a recursive
+//! `chmod -R` cannot be redirected between the check and the use. Handing it
+//! paths to re-resolve would confine it while destroying the property it exists
+//! for.
+//!
+//! This narrows D3 rather than reversing it. Path-based access stays the default
+//! and is the only thing the codemod emits; the capability is opt-in, and the
+//! type it hands back can perform `*at` operations but cannot name a host path.
 //!
 //! # Symlinks
 //!
@@ -84,6 +97,10 @@ pub struct OpenMode {
     create: bool,
     create_new: bool,
     truncate: bool,
+    /// Refuse a final symlink (`O_NOFOLLOW`).
+    nofollow: bool,
+    /// Permission bits for a newly created inode.
+    mode: Option<u32>,
 }
 
 impl OpenMode {
@@ -97,6 +114,8 @@ impl OpenMode {
             create: false,
             create_new: false,
             truncate: false,
+            nofollow: false,
+            mode: None,
         }
     }
 
@@ -110,6 +129,8 @@ impl OpenMode {
             create: true,
             create_new: false,
             truncate: true,
+            nofollow: false,
+            mode: None,
         }
     }
 
@@ -123,6 +144,8 @@ impl OpenMode {
             create: true,
             create_new: false,
             truncate: false,
+            nofollow: false,
+            mode: None,
         }
     }
 
@@ -168,6 +191,32 @@ impl OpenMode {
         self
     }
 
+    /// Refuses to follow a final symlink, failing with `ELOOP` instead.
+    ///
+    /// What `uucore::safe_copy` opens its source and destination with, and the
+    /// reason it does is worth keeping: an attacker who plants a symlink at the
+    /// path between the caller's `lstat` and this open would otherwise redirect
+    /// the read — or, for a destination, redirect a truncate onto any file the
+    /// caller can write. `cap-std` resolution already refuses a link *out* of
+    /// the namespace; this refuses one inside it too, which is the caller's
+    /// intent rather than the namespace's.
+    #[must_use]
+    pub const fn with_nofollow(mut self, yes: bool) -> Self {
+        self.nofollow = yes;
+        self
+    }
+
+    /// Sets the permission bits a *newly created* file is given.
+    ///
+    /// Only applies when the open creates the inode; an existing file keeps its
+    /// mode, which is why `safe_copy` widens permissions after the content copy
+    /// rather than at open time.
+    #[must_use]
+    pub const fn with_mode(mut self, mode: u32) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+
     /// Whether this mode would modify the filesystem in any way.
     ///
     /// Creation counts even without `write`: making a file is a change to the
@@ -178,7 +227,7 @@ impl OpenMode {
     }
 
     /// The equivalent `cap-std` options.
-    fn to_cap_std(self) -> cap_std::fs::OpenOptions {
+    pub(crate) fn to_cap_std(self) -> cap_std::fs::OpenOptions {
         let mut options = cap_std::fs::OpenOptions::new();
         options
             .read(self.read)
@@ -187,6 +236,22 @@ impl OpenMode {
             .create(self.create)
             .create_new(self.create_new)
             .truncate(self.truncate);
+
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt as _;
+
+            // `custom_flags` is additive over what cap-std computes, which is
+            // what lets `O_NOFOLLOW` ride alongside the resolution flags rather
+            // than replacing them.
+            if self.nofollow {
+                options.custom_flags(libc::O_NOFOLLOW);
+            }
+            if let Some(mode) = self.mode {
+                options.mode(mode);
+            }
+        }
+
         options
     }
 }
@@ -332,6 +397,27 @@ impl Vfs {
     /// Locates a path, following symlinks throughout.
     fn locate_follow(&self, path: &VirtualPath) -> std::io::Result<Located<'_>> {
         self.locate(path, true)
+    }
+
+    /// Resolves `path` and opens it as a confined `cap-std` directory handle,
+    /// reporting whether its mount permits writes.
+    ///
+    /// The single place a directory capability is minted. Everything a
+    /// [`crate::dir::Dir`] can do afterwards is `*at`-relative to what this
+    /// returns, so confinement is established here exactly once.
+    pub(crate) fn locate_dir(
+        &self,
+        path: &VirtualPath,
+    ) -> std::io::Result<(cap_std::fs::Dir, bool)> {
+        let located = self.locate_follow(path)?;
+        let writable = located.mount.access().is_writable();
+        let dir = if located.relative.as_os_str().is_empty() {
+            // The mount point itself has no relative path to descend.
+            located.mount.dir().try_clone()?
+        } else {
+            located.mount.dir().open_dir(&located.relative)?
+        };
+        Ok((dir, writable))
     }
 
     /// Walks `path` component by component, resolving symlinks as it goes.

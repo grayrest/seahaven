@@ -79,6 +79,28 @@ caught (verified). Completeness against the residue needs the OS layer — see D
 which pulls a Landlock-backed test into the first milestone precisely so the
 negative claim becomes an executable one.
 
+**Amended (D4's uucore increment) — one capability escapes, under a wrapper
+that cannot name a host path.** The original claim was that `cap-std` handles
+stay inside `brush-vfs` and callers only ever receive `std::fs::File` and
+`std::fs::Metadata`. That holds for every path-shaped caller and remains the
+default; the facade the codemod emits is unchanged. It does not hold for a
+caller that is *already* descriptor-shaped. `uucore::safe_traversal::DirFd` is
+1,464 lines of `openat`/`fstatat`/`unlinkat`/`mkdirat` built precisely so a
+recursive walk cannot be redirected between the check and the use, and it is
+what `chmod -R` and `chown -R` descend with. Handing it paths to re-resolve
+would confine it while destroying the property it exists for, so `brush-vfs`
+grows a directory capability and `DirFd` is rooted in one.
+
+The amendment is narrow and the narrowness is the point. What escapes is a
+wrapper exposing `*at` operations and **no way to recover a host path** — no
+`PathBuf`-returning method, no host-absolute string, no raw fd handed out for a
+caller to reconstruct one from `/proc/self/fd`. That single property is what
+keeps the original claim's *substance*: a consumer still cannot name a location
+outside the namespace, which is what "handles do not escape" was protecting.
+Since a mechanism whose failure mode is silence needs proving on — the same
+reasoning that gave the ban its positive control — it is asserted by test, not
+by review convention.
+
 And the ban can silently switch itself off in three ways, all verified: globs are
 not expanded, a typo'd entry warns but exits 0, and a member-crate `clippy.toml`
 shadows the root. **That is why it needs a positive control** rather than trust —

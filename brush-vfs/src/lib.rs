@@ -13,6 +13,7 @@
 #![deny(missing_docs)]
 
 pub mod ambient;
+pub mod dir;
 pub mod fs;
 pub mod mount;
 pub mod path;
