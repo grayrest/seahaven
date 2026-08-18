@@ -1,0 +1,27 @@
+name: "Resource limits"
+# Deliberate divergences from bash, which imposes no limit here and exhausts
+# memory instead. These live outside the oracle suite because bash has no
+# matching behaviour to compare against.
+cases:
+  - name: "Oversized brace range is refused, not expanded"
+    args: ["-c", "echo {1..1000000000}"]
+    expected_exit_code: 1
+    expected_stdout: ""
+
+  - name: "Brace range at the extreme of i64 does not overflow"
+    # `end - start` overflows i64 here; the length is computed in i128.
+    args: ["-c", "echo {-9223372036854775807..9223372036854775807}"]
+    expected_exit_code: 1
+    expected_stdout: ""
+
+  - name: "Cartesian brace product is refused"
+    # Thirty two-element pieces: 2^30 fields from sixty characters, with every
+    # piece far under the per-piece cap. Only the running product catches it.
+    args: ["-c", "echo {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}"]
+    expected_exit_code: 1
+    expected_stdout: ""
+
+  - name: "Brace expansion within limits still works"
+    args: ["-c", "echo {1..5}{a,b}"]
+    expected_exit_code: 0
+    expected_stdout: "1a 1b 2a 2b 3a 3b 4a 4b 5a 5b\n"

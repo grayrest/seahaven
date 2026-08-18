@@ -790,7 +790,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
 
         tracing::debug!(target: trace_categories::EXPANSION, "Brace expansion pieces: {brace_expansion_pieces:?}");
 
-        let result = braceexpansion::generate_and_combine_brace_expansions(brace_expansion_pieces)
+        let result = braceexpansion::generate_and_combine_brace_expansions(brace_expansion_pieces)?
             .into_iter()
             .map(|s| if s.is_empty() { "\"\"".into() } else { s })
             .join(" ");

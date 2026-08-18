@@ -148,11 +148,20 @@ pub fn open_null_file() -> Result<std::fs::File, error::Error> {
 
 /// Gives the platform an opportunity to handle a special file path (e.g. `/dev/null`).
 pub fn try_open_special_file(path: &Path) -> Option<Result<std::fs::File, std::io::Error>> {
-    if path.ends_with("dev/null") && path.is_absolute() {
-        Some(open_null_file().map_err(std::io::Error::other))
-    } else {
-        None
-    }
+    // Match the whole path, not a trailing component run.
+    //
+    // The previous check was `path.ends_with("dev/null") && path.is_absolute()`,
+    // which was wrong in both directions. `Path::ends_with` compares trailing
+    // *components*, so a real file at `C:\repo\dev\null` was silently opened as
+    // `NUL`. And `is_absolute` requires a drive prefix on Windows, so it never
+    // fired for the bare `/dev/null` this function exists to intercept -- which
+    // is checked here, ahead of path resolution, precisely because it is not a
+    // valid native path.
+    let path = path.to_str()?;
+    let path = path.replace('\\', "/");
+
+    path.eq_ignore_ascii_case("/dev/null")
+        .then(|| open_null_file().map_err(std::io::Error::other))
 }
 
 /// Returns the default paths where executables are typically found on Windows.
