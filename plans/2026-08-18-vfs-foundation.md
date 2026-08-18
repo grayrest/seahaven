@@ -4,10 +4,11 @@ First milestone of the sandbox architecture in
 `notes/2026-08-18-sandbox-architecture-decision-log.md`. It builds **only** the
 foundation every later decision rests on: a virtual root composed from mounts,
 enforced by `cap-std`. No forks, no wasm guest, no broker, no closed world.
-Nothing here has been implemented.
 
-**Revised twice on 2026-08-18, after two adversarial reviews.** Step 0's items
-and the wasm removal have landed; the vfs itself is unimplemented. Round-two
+**Status: implemented.** See "Where it landed" at the end for what was built,
+what was built differently from this plan, and what was not built at all.
+
+**Revised twice on 2026-08-18, after two adversarial reviews.** Round-two
 corrections are `C18`–`C25` in the decision log, and one review angle —
 enforcement and gate design — was never received because that reviewer died on
 an API error.
@@ -387,3 +388,58 @@ reconsider the architecture rather than continuing to chase cases. There is also
 no story yet for carrying this diff across the next `reubeno/brush` import; D13
 has a maintenance model for the *uutils* forks and none for the *brush* fork,
 which is the one about to become invasive.
+
+## Where it landed
+
+Written after the fact. The plan above is left as written so the difference is
+visible.
+
+### Built as planned
+
+Steps 1–4, 6–9, 11 and 12. `brush-vfs` with its path grammar, mount table and
+`Session`; the `--mount VIRTUAL:HOST[:ro|:rw]` flag and the identity policy;
+every open, predicate, traversal and executable lookup in `brush-core`,
+`brush-builtins` and `brush-interactive` routed through the namespace; the
+`clippy.toml` ban with `cargo xtask check ban` as its positive control; and the
+Landlock completeness test.
+
+Gates 1–5, 8 and 9 exist and can fail. Gates 6 and 7 were built rather than
+dropped: `.github/workflows/fuzz.yaml` runs `fuzz_vfs_resolve` nightly against
+a committed corpus, and `compare-benchmark-results.py --baseline` enforces
+absolute ceilings committed in `brush-shell/benches/baseline.json`.
+
+### Built differently
+
+**Step 5 — `absolute_path` was not made fallible.** The property it existed to
+provide is that no host-shaped path reaches the filesystem unchecked. That is
+provided instead by routing each call site through the namespace, which rejects
+at resolution. Twenty-one of the thirty-four call sites are `test` predicates
+that must answer *false* rather than error, so `?` would have been wrong at
+most of them anyway. `absolute_path` still returns a `PathBuf`; nothing
+consumes one without asking the namespace about it.
+
+**Step 9 — `try_open_special_file` did not move after path resolution.** It
+became the lexical predicate `is_null_device_path` and still runs first,
+because `absolute_path` mangles `/dev/null` on Windows, where it is not an
+absolute path, before a later check would ever see it. The hazard that motivated
+moving it — a repository containing `dev/null` matching a trailing-component
+comparison — was fixed at the comparison instead.
+
+**Step 9 — the "every other `/dev` path is a hard error" rule was not written.**
+It would be dead code: `/dev` is not mounted under a restrictive policy, so the
+namespace already answers `ENOENT`, and if an operator mounts something there
+the namespace's answer is the correct one.
+
+**Gate 3 — the ban is not run for `x86_64-linux-android`.** It runs on Linux,
+macOS and Windows, which is the existing `check` matrix and free.
+
+**Gate 9 — all five banned crates were already in the tree.** They arrive
+through the bundled uutils coreutils, and `xattr` through `uucore`, which
+`brush-builtins` itself depends on. Each direct parent is named as a `wrappers`
+entry rather than the feature being exempted, so the list is an inventory of
+what is knowingly unrouted and a *new* coreutil reaching for one still fails.
+
+### Not built
+
+The owner decisions listed at the top of the decision log, including whether to
+delete `sys/wasm`. Everything under "What stays behind, deliberately".
