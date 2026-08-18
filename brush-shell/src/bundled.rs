@@ -86,6 +86,18 @@ pub fn registry() -> Option<&'static HashMap<String, BundledFn>> {
     REGISTRY.get()
 }
 
+/// The trusted launcher for the closed world (D2): this executable, permitted
+/// to run only when re-invoked with [`DISPATCH_FLAG`] to deliver a bundled
+/// command.
+///
+/// Returns `None` when the running executable's own path cannot be determined,
+/// in which case a closed world could not run bundled commands and the caller
+/// should refuse to enter one rather than seal the shell's own utilities away.
+#[must_use]
+pub fn trusted_launcher() -> Option<brush_core::TrustedLauncher> {
+    self_exe().map(|path| brush_core::TrustedLauncher::new(path.clone(), DISPATCH_FLAG))
+}
+
 /// Runs the bundled-command fast path if the process was invoked for it.
 ///
 /// If the process was invoked as `brush <DISPATCH_FLAG> <NAME> [ARGS...]`

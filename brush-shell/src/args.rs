@@ -122,6 +122,17 @@ pub struct CommandLineArgs {
     #[clap(long = "mount", value_name = "VIRTUAL:HOST[:ro|:rw]", help_heading = HEADING_STANDARD_OPTIONS)]
     pub mounts: Vec<String>,
 
+    /// Seal external execution (D2): refuse every external program except the
+    /// shell's own bundled commands.
+    ///
+    /// Independent of `--mount`: that decides what a running process can name,
+    /// this decides what may be run. With it set, `cargo`, `/bin/sh` and every
+    /// other host program fail to launch; the bundled `ls`, `cat` and the rest
+    /// still work, because they are this executable re-invoking itself rather
+    /// than external programs.
+    #[clap(long = "closed-world", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub closed_world: bool,
+
     /// Don't process "rc" files if the shell is interactive (e.g., `~/.bashrc`, `~/.brushrc`).
     #[clap(long = "norc", help_heading = HEADING_STANDARD_OPTIONS)]
     pub no_rc: bool,

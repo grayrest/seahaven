@@ -405,6 +405,23 @@ async fn initialize_shell(
         shell_ref.lock().await.set_mounts(mounts);
     }
 
+    // Seal external execution independently of the namespace (D2). A launcher
+    // confining the filesystem to a project tree usually wants both, but they
+    // are separate axes: `--mount` decides what a running process can name,
+    // `--closed-world` decides what may be run.
+    if args.closed_world {
+        let launcher = bundled::trusted_launcher().ok_or_else(|| {
+            brush_interactive::ShellError::from(std::io::Error::other(
+                "--closed-world: cannot determine this executable's path, so bundled \
+                 commands could not run",
+            ))
+        })?;
+        shell_ref
+            .lock()
+            .await
+            .set_external_execution(brush_core::ExternalExecution::Bundled(launcher));
+    }
+
     // Compute desired profile-loading behavior.
     let profile = if args.no_profile {
         brush_core::ProfileLoadBehavior::Skip
