@@ -2,6 +2,10 @@
 
 #![allow(missing_docs)]
 #![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "benchmark fixtures are built on the host, which is the one place that is the point"
+)]
 
 #[cfg(unix)]
 mod unix {
@@ -9,6 +13,10 @@ mod unix {
     use brush_parser::SourceSpan;
     use criterion::Criterion;
     use std::hint::black_box;
+
+    /// How many files the glob benchmark's directory holds. Large enough that
+    /// the per-entry cost dominates the fixed cost of one listing.
+    const GLOB_ENTRY_COUNT: usize = 200;
 
     async fn instantiate_shell() -> brush_core::Shell {
         brush_core::Shell::builder()
@@ -42,6 +50,17 @@ mod unix {
     async fn expand_string(shell: &mut brush_core::Shell, s: &str) {
         let params = shell.default_exec_params();
         let _ = shell.basic_expand_string(&params, s).await.unwrap();
+    }
+
+    /// Full expansion, which is the one that includes pathname expansion.
+    /// `basic_expand_string` deliberately stops short of globbing.
+    async fn expand_and_split_string(shell: &mut brush_core::Shell, s: &str) -> usize {
+        let params = shell.default_exec_params();
+        shell
+            .full_expand_and_split_string(&params, s)
+            .await
+            .unwrap()
+            .len()
     }
 
     fn eval_arithmetic_expr(shell: &mut brush_core::Shell, expr: &str) {
@@ -155,6 +174,51 @@ mod unix {
                 },
                 criterion::BatchSize::SmallInput,
             );
+        });
+
+        // Benchmark: glob expansion over a populated directory.
+        //
+        // Pathname expansion is one directory listing plus one probe per
+        // candidate, and both go through the namespace now. It is tracked
+        // because a per-entry cost here is multiplied by the size of whatever
+        // directory the user happens to be standing in.
+        let glob_dir = tempfile::tempdir().unwrap();
+        for i in 0..GLOB_ENTRY_COUNT {
+            std::fs::write(glob_dir.path().join(format!("entry-{i:03}.txt")), "").unwrap();
+        }
+        let mut shell = rt.block_on(instantiate_shell());
+        shell.set_working_dir(glob_dir.path()).unwrap();
+        c.bench_function("glob_expansion", |b| {
+            b.iter_batched_ref(
+                || shell.clone(),
+                |s| {
+                    let matched = rt.block_on(expand_and_split_string(s, "*.txt"));
+                    // A glob that matched nothing would make this benchmark
+                    // measure the parser rather than the namespace.
+                    assert_eq!(matched, GLOB_ENTRY_COUNT);
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        });
+
+        // Benchmark: resolving a command name against PATH.
+        //
+        // The largest predicted cost of routing the shell through the
+        // namespace: executability used to be a mode-bit check on a
+        // `Metadata`, and is an `access(2)` through the namespace now -- once
+        // per PATH entry, per command, on the miss path. Tracked separately
+        // from `run_echo_builtin_command` because a builtin never reaches it.
+        let shell = rt.block_on(instantiate_shell());
+        c.bench_function("find_first_executable_in_path", |b| {
+            b.iter(|| black_box(shell.find_first_executable_in_path("sh")));
+        });
+
+        // The same lookup for a name that is in no PATH entry, which is the
+        // expensive direction: a hit stops at the first match, a miss pays for
+        // every entry.
+        let shell = rt.block_on(instantiate_shell());
+        c.bench_function("find_first_executable_in_path_miss", |b| {
+            b.iter(|| black_box(shell.find_first_executable_in_path("brush-no-such-command")));
         });
     }
 }

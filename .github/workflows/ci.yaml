@@ -584,7 +584,18 @@ jobs:
         run: |
           ./pr/scripts/compare-benchmark-results.py -b main/benchmarks.txt -t pr/benchmarks.txt >benchmark-results.md
 
+      # Advisory above, enforced here. The report against main is for a person
+      # to read; this is the gate, and it fails.
+      - name: Check the performance budget
+        run: |
+          ./pr/scripts/compare-benchmark-results.py \
+            -t pr/benchmarks.txt \
+            --baseline pr/brush-shell/benches/baseline.json \
+            | tee benchmark-budget.md
+
+      # Always: a budget failure is exactly when the numbers are worth reading.
       - name: Upload performance results
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perf-reports
@@ -592,6 +603,7 @@ jobs:
             pr/benchmarks.txt
             main/benchmarks.txt
             benchmark-results.md
+            benchmark-budget.md
 
   # Run bash-completion test suite
   bash-completion-tests:
