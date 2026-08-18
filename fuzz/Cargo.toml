@@ -27,6 +27,9 @@ tokio = { version = "1.52.3", features = ["rt"] }
 [dependencies.brush-core]
 path = "../brush-core"
 
+[dependencies.brush-vfs]
+path = "../brush-vfs"
+
 [dependencies.brush-parser]
 path = "../brush-parser"
 features = ["arbitrary"]
@@ -52,6 +55,13 @@ bench = false
 [[bin]]
 name = "fuzz_highlight"
 path = "fuzz_targets/fuzz_highlight.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_vfs_resolve"
+path = "fuzz_targets/fuzz_vfs_resolve.rs"
 test = false
 doc = false
 bench = false

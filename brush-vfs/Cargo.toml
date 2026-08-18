@@ -1,0 +1,21 @@
+[package]
+name = "brush-vfs"
+description = "Virtual filesystem namespace and capability-based resolution for brush"
+version = "0.1.0"
+categories.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2.0.19"
+unicode-normalization = "0.1.25"
