@@ -1,0 +1,68 @@
+name: "Sandbox policy"
+# The shell-level half of the escape suite. These cannot live in cases/compat:
+# the oracle there is bash, which has no namespace to disagree about.
+#
+# `--mount /work:.` mounts the harness's temp working directory, since a YAML
+# file cannot know an absolute host path.
+cases:
+  - name: "A mounted tree is readable and writable"
+    args: ["--mount", "/work:.", "-c", "echo hi > /work/f.txt; cat < /work/f.txt"]
+    expected_exit_code: 0
+    expected_stdout: "hi\n"
+
+  - name: "Supplying a mount makes everything else unnameable"
+    # Not merely unreadable: /etc is not part of the namespace at all.
+    args: ["--mount", "/work:.", "-c", "cat < /etc/passwd"]
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+
+  - name: "Dotdot cannot climb out of the namespace"
+    args: ["--mount", "/work:.", "-c", "cat < /work/../etc/passwd"]
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+
+  - name: "Dotdot that stays inside still resolves"
+    # The escape check must not be "reject ..", or ordinary navigation breaks.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "mkdir -p /work/sub; echo deep > /work/f.txt; cat < /work/sub/../f.txt"
+    expected_exit_code: 0
+    expected_stdout: "deep\n"
+
+  - name: "Climbing above the virtual root is refused"
+    args: ["--mount", "/work:.", "-c", "cat < /.."]
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+
+  - name: "A read-only mount refuses writes"
+    args: ["--mount", "/work:.:ro", "-c", "echo nope > /work/f.txt"]
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+
+  - name: "A read-only mount still allows reads"
+    args: ["--mount", "/work:.:ro", "-c", "cat < /work/seed.txt"]
+    expected_exit_code: 0
+    expected_stdout: "seeded\n"
+    test_files:
+      - path: "seed.txt"
+        contents: "seeded\n"
+
+  - name: "Host path syntax is not virtual path syntax"
+    # A drive letter is a colon, which the grammar forbids outright.
+    args: ["--mount", "/work:.", "-c", "cat < /C:/Windows/win.ini"]
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+
+  - name: "Without --mount the shell is unconfined"
+    # The identity policy, which is what keeps the compat suite running the
+    # production binary. It proves the absence of regressions, not confinement.
+    args: ["-c", "echo hi > f.txt && cat < f.txt"]
+    expected_exit_code: 0
+    expected_stdout: "hi\n"

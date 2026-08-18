@@ -113,6 +113,15 @@ pub struct CommandLineArgs {
     #[clap(long = "noprofile", help_heading = HEADING_STANDARD_OPTIONS)]
     pub no_profile: bool,
 
+    /// Confine the shell to the given mounts: `VIRTUAL:HOST[:ro|:rw]`, repeatable.
+    ///
+    /// Without this the shell runs under the identity policy, where the host
+    /// filesystem is the namespace and nothing is confined. Supplying even one
+    /// mount replaces that namespace entirely, so anything not mounted becomes
+    /// unnameable rather than merely unreadable.
+    #[clap(long = "mount", value_name = "VIRTUAL:HOST[:ro|:rw]", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub mounts: Vec<String>,
+
     /// Don't process "rc" files if the shell is interactive (e.g., `~/.bashrc`, `~/.brushrc`).
     #[clap(long = "norc", help_heading = HEADING_STANDARD_OPTIONS)]
     pub no_rc: bool,

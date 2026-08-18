@@ -181,30 +181,59 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// * `params` - Execution parameters.
     pub(crate) fn open_file(
         &self,
-        options: &std::fs::OpenOptions,
+        mode: brush_vfs::OpenMode,
         path: impl AsRef<Path>,
         params: &ExecutionParameters,
     ) -> Result<openfiles::OpenFile, std::io::Error> {
-        // Give platform-specific code a chance to handle special files
-        // (e.g. /dev/null on Windows, which needs to open NUL instead).
-        // This is checked before absolute_path so that paths like /dev/null
-        // are intercepted on platforms where they aren't valid native paths.
+        // Platform special files first, before path resolution. That ordering
+        // was previously a hazard -- the Windows check compared trailing path
+        // *components*, so a repo containing `dev/null` matched -- but the check
+        // now compares the whole path, so running it early is safe and is in
+        // fact required: `absolute_path` mangles `/dev/null` on Windows, where
+        // it is not an absolute path, before the check would ever see it.
         if let Some(result) = crate::sys::fs::try_open_special_file(path.as_ref()) {
             return result.map(openfiles::OpenFile::from);
         }
 
         let path_to_open = self.absolute_path(path.as_ref());
 
-        // See if this is a reference to a file descriptor. These paths should
-        // reflect the shell's current execution fds, which can differ from the
-        // host process fds after redirections like here-docs.
+        // Synthetic fd paths address the shell's own descriptor table rather
+        // than the filesystem, so they are answered before the namespace is
+        // consulted at all.
         if let Some(fd_num) = shell_fd_path_to_fd(&path_to_open)
             && let Some(open_file) = params.try_fd(self, fd_num)
         {
             return Ok(open_file);
         }
 
-        Ok(options.open(path_to_open)?.into())
+        let virtual_path = self.to_virtual_path(&path_to_open)?;
+        self.session()
+            .vfs()
+            .open_with(&virtual_path, mode)
+            .map(openfiles::OpenFile::from)
+    }
+
+    /// Interprets a host-shaped absolute path as a virtual one.
+    ///
+    /// Transitional. The shell still carries its working directory as a host
+    /// `PathBuf`, so paths reaching the vfs are host-shaped and need
+    /// translating. Under the identity policy the two coincide on Unix; on
+    /// Windows the drive prefix is dropped, since the virtual grammar has no
+    /// syntax for one. This disappears once the working directory is itself
+    /// virtual.
+    pub(crate) fn to_virtual_path(
+        &self,
+        path: &Path,
+    ) -> Result<brush_vfs::VirtualPath, std::io::Error> {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let text = match text.split_once(":/") {
+            Some((prefix, rest)) if prefix.len() == 1 => format!("/{rest}"),
+            _ => text,
+        };
+
+        self.session()
+            .resolve(&text)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
     }
 
     /// Replaces the shell's currently configured open files with the given set.

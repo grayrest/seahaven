@@ -395,6 +395,16 @@ async fn initialize_shell(
     shell_ref: &brush_interactive::ShellRef<impl brush_core::ShellExtensions>,
     args: &CommandLineArgs,
 ) -> Result<(), brush_interactive::ShellError> {
+    // Install the sandbox namespace before anything runs. Doing it here rather
+    // than after config loading matters: profile and rc scripts are the first
+    // filesystem access a shell performs, and they must be subject to the same
+    // policy as everything after them.
+    if !args.mounts.is_empty() {
+        let mounts = build_mount_table(&args.mounts)
+            .map_err(|e| brush_interactive::ShellError::from(std::io::Error::other(e)))?;
+        shell_ref.lock().await.set_mounts(mounts);
+    }
+
     // Compute desired profile-loading behavior.
     let profile = if args.no_profile {
         brush_core::ProfileLoadBehavior::Skip
@@ -414,6 +424,33 @@ async fn initialize_shell(
     shell_ref.lock().await.load_config(&profile, &rc).await?;
 
     Ok(())
+}
+
+/// Parses `--mount` specifications into a mount table.
+///
+/// The syntax is `VIRTUAL:HOST[:ro|:rw]`. An access suffix is stripped from the
+/// right before the remainder is split, because a host path may legitimately
+/// contain a colon while a virtual path may not -- the grammar forbids it.
+fn build_mount_table(specs: &[String]) -> Result<brush_vfs::MountTable, String> {
+    let mut builder = brush_vfs::MountTable::builder();
+
+    for spec in specs {
+        let (rest, access) = match spec {
+            s if s.ends_with(":ro") => (s.trim_end_matches(":ro"), brush_vfs::Access::ReadOnly),
+            s if s.ends_with(":rw") => (s.trim_end_matches(":rw"), brush_vfs::Access::ReadWrite),
+            s => (s.as_str(), brush_vfs::Access::ReadWrite),
+        };
+
+        let (at, host) = rest
+            .split_once(':')
+            .ok_or_else(|| format!("--mount needs VIRTUAL:HOST[:ro|:rw], got '{spec}'"))?;
+
+        builder = builder
+            .mount(at, host, access)
+            .map_err(|e| format!("--mount '{spec}': {e}"))?;
+    }
+
+    builder.build().map_err(|e| format!("--mount: {e}"))
 }
 
 /// Instantiates a shell from command-line arguments. Does *not* run any code in the shell.

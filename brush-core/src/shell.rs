@@ -70,6 +70,14 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
     /// The current working directory.
     working_dir: PathBuf,
 
+    /// The sandbox namespace this shell resolves paths against.
+    ///
+    /// Skipped by serde because a mount is a live directory capability, not
+    /// data. A deserialized shell gets the fail-closed empty namespace and the
+    /// caller must reinstall a policy, which is the safe direction to fail.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    session: brush_vfs::Session,
+
     /// The shell environment, containing shell variables.
     env: ShellEnvironment,
 
@@ -154,6 +162,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
             traps: self.traps.clone(),
             open_files: self.open_files.clone(),
             working_dir: self.working_dir.clone(),
+            session: self.session.clone(),
             env: self.env.clone(),
             funcs: self.funcs.clone(),
             options: self.options.clone(),
@@ -201,6 +210,19 @@ impl<SE: extensions::ShellExtensions> AsMut<Self> for Shell<SE> {
 }
 
 impl<SE: extensions::ShellExtensions> Shell<SE> {
+    /// The sandbox namespace this shell resolves paths against.
+    pub const fn session(&self) -> &brush_vfs::Session {
+        &self.session
+    }
+
+    /// Replaces the sandbox namespace.
+    ///
+    /// The working directory is reset to the virtual root, because a cwd from
+    /// the previous namespace names nothing in the new one.
+    pub fn set_mounts(&mut self, mounts: brush_vfs::MountTable) {
+        self.session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
+    }
+
     /// Returns a new shell instance created with the given options.
     /// Does *not* load any configuration files (e.g., bashrc).
     ///
@@ -221,6 +243,13 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
             version: options.shell_version,
             product_display_str: options.shell_product_display_str,
             working_dir: options.working_dir.map_or_else(std::env::current_dir, Ok)?,
+            // Identity by default: the shell behaves exactly as it did before
+            // the vfs existed. A launcher installs a real policy with
+            // `set_mounts`.
+            session: brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(
+                brush_vfs::Policy::identity()
+                    .map_err(|e| error::ErrorKind::from(std::io::Error::other(e.to_string())))?,
+            ))),
             builtins: options.builtins,
             parser_impl: options.parser,
             key_bindings: options.key_bindings,

@@ -24,6 +24,17 @@ pub struct Session {
     cwd: VirtualPath,
 }
 
+impl Default for Session {
+    /// A session with no mounts, in which nothing is reachable.
+    ///
+    /// Failing closed matters because this is what a `Shell` built without an
+    /// explicit policy gets: an empty namespace denies everything, where a
+    /// default of "the host" would silently grant everything.
+    fn default() -> Self {
+        Self::new(Arc::new(Vfs::new(MountTable::default())))
+    }
+}
+
 impl Session {
     /// Creates a session rooted at `/` in the given namespace.
     #[must_use]

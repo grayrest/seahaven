@@ -1656,7 +1656,7 @@ pub(crate) async fn setup_redirect(
         ast::IoRedirect::File(specified_fd_num, kind, target) => {
             match target {
                 ast::IoFileRedirectTarget::Filename(f) => {
-                    let mut options = std::fs::File::options();
+                    let mut options = brush_vfs::OpenMode::default();
 
                     let mut expanded_fields =
                         expansion::full_expand_and_split_word(shell, params, f).await?;
@@ -1671,7 +1671,7 @@ pub(crate) async fn setup_redirect(
                     let default_fd_if_unspecified = get_default_fd_for_redirect_kind(kind);
                     match kind {
                         ast::IoFileRedirectKind::Read => {
-                            options.read(true);
+                            options = options.with_read(true);
                         }
                         ast::IoFileRedirectKind::Write => {
                             if shell
@@ -1681,44 +1681,44 @@ pub(crate) async fn setup_redirect(
                                 // First check to see if the path points to an existing regular
                                 // file.
                                 if !expanded_file_path.is_file() {
-                                    options.create(true);
+                                    options = options.with_create(true);
                                 } else {
-                                    options.create_new(true);
+                                    options = options.with_create_new(true);
                                 }
-                                options.write(true);
+                                options = options.with_write(true);
                             } else {
-                                options.create(true);
-                                options.write(true);
-                                options.truncate(true);
+                                options = options.with_create(true);
+                                options = options.with_write(true);
+                                options = options.with_truncate(true);
                             }
                         }
                         ast::IoFileRedirectKind::Append => {
-                            options.create(true);
-                            options.append(true);
+                            options = options.with_create(true);
+                            options = options.with_append(true);
                         }
                         ast::IoFileRedirectKind::ReadAndWrite => {
-                            options.create(true);
-                            options.read(true);
-                            options.write(true);
+                            options = options.with_create(true);
+                            options = options.with_read(true);
+                            options = options.with_write(true);
                         }
                         ast::IoFileRedirectKind::Clobber => {
-                            options.create(true);
-                            options.write(true);
-                            options.truncate(true);
+                            options = options.with_create(true);
+                            options = options.with_write(true);
+                            options = options.with_truncate(true);
                         }
                         ast::IoFileRedirectKind::DuplicateInput => {
-                            options.read(true);
+                            options = options.with_read(true);
                         }
                         ast::IoFileRedirectKind::DuplicateOutput => {
-                            options.create(true);
-                            options.write(true);
+                            options = options.with_create(true);
+                            options = options.with_write(true);
                         }
                     }
 
                     let fd_num = specified_fd_num.unwrap_or(default_fd_if_unspecified);
 
                     let opened_file = shell
-                        .open_file(&options, &expanded_file_path, params)
+                        .open_file(options, &expanded_file_path, params)
                         .map_err(|err| {
                             error::ErrorKind::RedirectionFailure(
                                 expanded_file_path.to_string_lossy().to_string(),
@@ -1879,15 +1879,14 @@ fn setup_redirect_output_and_error_to(
 ) -> Result<(), error::Error> {
     let abs_file_path: PathBuf = shell.absolute_path(Path::new(file_path));
 
-    let mut file_options = std::fs::File::options();
-    file_options
-        .create(true)
-        .write(true)
-        .truncate(!append)
-        .append(append);
+    let file_options = brush_vfs::OpenMode::default()
+        .with_create(true)
+        .with_write(true)
+        .with_truncate(!append)
+        .with_append(append);
 
     let stdout_file = shell
-        .open_file(&file_options, &abs_file_path, params)
+        .open_file(file_options, &abs_file_path, params)
         .map_err(|err| {
             error::ErrorKind::RedirectionFailure(
                 abs_file_path.to_string_lossy().to_string(),

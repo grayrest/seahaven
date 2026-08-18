@@ -242,6 +242,8 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
             traps: traps::TrapHandlerConfig::default(),
             open_files: openfiles::OpenFiles::default(),
             working_dir: PathBuf::default(),
+            // Fail closed: an unconfigured shell reaches nothing.
+            session: brush_vfs::Session::default(),
             env: env::ShellEnvironment::default(),
             funcs: functions::FunctionEnv::default(),
             options: options::RuntimeOptions::default(),

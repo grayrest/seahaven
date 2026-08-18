@@ -119,6 +119,13 @@ impl OpenMode {
         self
     }
 
+    /// Appends rather than overwriting.
+    #[must_use]
+    pub const fn with_append(mut self, yes: bool) -> Self {
+        self.append = yes;
+        self
+    }
+
     /// Creates the file if it does not exist.
     #[must_use]
     pub const fn with_create(mut self, yes: bool) -> Self {
