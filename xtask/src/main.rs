@@ -9,6 +9,7 @@ mod analyze;
 #[cfg(unix)]
 mod bash_tests;
 mod check;
+mod codemod;
 mod ci;
 mod common;
 mod generate;
@@ -43,6 +44,8 @@ enum Command {
     /// Run code quality checks.
     #[clap(subcommand)]
     Check(check::CheckCommand),
+    /// Route a forked utility's filesystem access through the vfs (D4).
+    Codemod(codemod::CodemodCommand),
     /// Run CI workflows.
     #[clap(subcommand)]
     Ci(ci::CiCommand),
@@ -61,6 +64,7 @@ fn main() -> Result<()> {
         Command::Analyze(cmd) => analyze::run(cmd, verbose),
         Command::Gen(cmd) => generate::run(cmd, verbose),
         Command::Check(cmd) => check::run(cmd, verbose),
+        Command::Codemod(cmd) => codemod::run(cmd, verbose),
         Command::Test(cmd) => test::run(cmd, verbose),
         Command::Ci(cmd) => ci::run(cmd, verbose),
     }

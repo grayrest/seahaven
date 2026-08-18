@@ -1,0 +1,636 @@
+//! The D4 codemod: route a forked utility's filesystem access through the vfs.
+//!
+//! The transformation is an *identifier swap at call sites*, not a type swap
+//! (D34): the [`brush_vfs::ambient`] facade returns `std::fs` types, so
+//! `File::open(p)` becomes `brush_vfs::ambient::open(p)` and the surrounding
+//! code — the `File` the call yields, the `Metadata` a `metadata` call yields —
+//! is untouched. Because the rewrite targets are written as absolute paths, no
+//! `use` is added; the now-unused `std::fs` imports are pruned instead.
+//!
+//! It edits the original source by byte span rather than reprinting the parsed
+//! AST, so the diff is confined to the lines that actually change — which is
+//! what makes the residual patch set (D13's health metric) legible.
+//!
+//! ## Scope of this version
+//!
+//! Handled: `std::fs` free-function calls (`metadata(p)`, `fs::read(p)`) and the
+//! `File::open` / `File::create` associated calls. Inherent `Path` methods
+//! (`p.metadata()`, `p.exists()`) — the majority of a large utility's sites per
+//! the spike — are *reported*, not yet rewritten: a utility that has them is
+//! not fully routed, and the report says so rather than the tool pretending
+//! otherwise. `canonicalize` and `symlink_metadata` are owner-decision
+//! carve-outs (D34) the facade does not yet provide, so they are reported too.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use syn::spanned::Spanned;
+use syn::visit::Visit;
+
+/// The `codemod` subcommand.
+#[derive(clap::Parser)]
+pub struct CodemodCommand {
+    /// A `.rs` file, or a directory whose `.rs` files are all rewritten.
+    pub path: PathBuf,
+
+    /// Report what would change without writing anything.
+    #[clap(long)]
+    pub check: bool,
+}
+
+/// Runs the codemod command.
+pub fn run(cmd: &CodemodCommand, _verbose: bool) -> Result<()> {
+    let files = rust_files(&cmd.path)?;
+    if files.is_empty() {
+        anyhow::bail!("no .rs files under {}", cmd.path.display());
+    }
+
+    let mut total_rewrites = 0usize;
+    let mut total_unhandled = 0usize;
+    for file in &files {
+        let source = std::fs::read_to_string(file)
+            .with_context(|| format!("reading {}", file.display()))?;
+        let outcome = rewrite(&source)
+            .with_context(|| format!("rewriting {}", file.display()))?;
+
+        if !outcome.rewrites.is_empty() || !outcome.unhandled.is_empty() {
+            eprintln!("{}:", file.display());
+            for note in &outcome.rewrites {
+                eprintln!("  rewrote  {note}");
+            }
+            for note in &outcome.unhandled {
+                eprintln!("  UNROUTED {note}");
+            }
+        }
+        total_rewrites += outcome.rewrites.len();
+        total_unhandled += outcome.unhandled.len();
+
+        if !cmd.check && outcome.changed {
+            std::fs::write(file, &outcome.source)
+                .with_context(|| format!("writing {}", file.display()))?;
+        }
+    }
+
+    eprintln!(
+        "\n{} site(s) routed, {} inherent/carve-out site(s) left unrouted{}.",
+        total_rewrites,
+        total_unhandled,
+        if cmd.check { " (check only, nothing written)" } else { "" }
+    );
+    Ok(())
+}
+
+/// The free `std::fs` functions the [`brush_vfs::ambient`] facade provides.
+/// `canonicalize` and `symlink_metadata` are absent on purpose — they are
+/// owner-decision carve-outs (D34), so a call to them is reported unrouted
+/// rather than pointed at a function that does not exist.
+const FACADE_FREE_FNS: &[&str] = &[
+    "metadata",
+    "read",
+    "read_to_string",
+    "write",
+    "read_dir",
+    "read_link",
+    "create_dir_all",
+    "remove_file",
+    "remove_dir",
+    "remove_dir_all",
+    "rename",
+    "exists",
+];
+
+/// Inherent `Path`/`PathBuf` methods that read the filesystem and are named
+/// *distinctively* enough that a bare method name is a reliable signal without
+/// type inference. Encountering one is reported: routing it needs the method
+/// visitor, which handles receiver borrowing and is deliberately not in this
+/// version.
+///
+/// Deliberately excluded: `metadata` (also on `File` and `DirEntry`, where it
+/// needs no routing) and `is_dir` / `is_file` / `is_symlink` (also on
+/// `FileType`, which is pure). Flagging those without knowing the receiver's
+/// type reports pure calls as unrouted — `uu_cat`'s `filetype.is_dir()` is
+/// exactly that false positive. The type-aware method visitor, when it lands,
+/// distinguishes them; until then the ban and the Landlock test are the
+/// backstop for any genuinely unrouted `path.is_dir()`.
+const PATH_FS_METHODS: &[&str] = &[
+    "symlink_metadata",
+    "exists",
+    "try_exists",
+    "read_link",
+    "read_dir",
+    "canonicalize",
+];
+
+/// The facade path a rewrite points at.
+const FACADE: &str = "brush_vfs::ambient";
+
+/// What names `std::fs` items are bound to in a file.
+#[derive(Default)]
+struct Bindings {
+    /// Names that refer to the `std::fs` *module* (`use std::fs;`, `use std::fs
+    /// as f;`, `use std::fs::{self};`).
+    module_aliases: BTreeSet<String>,
+    /// Local binding name → real `std::fs` free-function name.
+    free_fns: BTreeMap<String, String>,
+    /// Local names bound to `std::fs::File`.
+    file_names: BTreeSet<String>,
+}
+
+/// The result of rewriting one file.
+struct Outcome {
+    source: String,
+    changed: bool,
+    rewrites: Vec<String>,
+    unhandled: Vec<String>,
+}
+
+/// A single byte-span replacement in the original source.
+struct Edit {
+    start: usize,
+    end: usize,
+    replacement: String,
+}
+
+/// Rewrites one file's source, returning the new text and a report.
+fn rewrite(source: &str) -> Result<Outcome> {
+    let ast: syn::File = syn::parse_file(source).context("parsing as Rust")?;
+
+    let mut bindings = Bindings::default();
+    let mut bv = BindingVisitor { b: &mut bindings };
+    bv.visit_file(&ast);
+
+    let mut collector = EditCollector {
+        bindings: &bindings,
+        edits: Vec::new(),
+        rewrites: Vec::new(),
+        unhandled: Vec::new(),
+        // How many times each imported name was consumed by a rewrite, so the
+        // import can be pruned only when nothing else still uses it.
+        consumed: BTreeMap::new(),
+    };
+    collector.visit_file(&ast);
+
+    // Prune now-unused `std::fs` imports.
+    let mut pruner = ReferenceCounter {
+        targets: bindings
+            .free_fns
+            .keys()
+            .chain(bindings.file_names.iter())
+            .cloned()
+            .collect(),
+        counts: BTreeMap::new(),
+    };
+    pruner.visit_file(&ast);
+
+    let import_edits = prune_imports(&ast, &bindings, &collector.consumed, &pruner.counts, source);
+
+    let mut edits = collector.edits;
+    edits.extend(import_edits);
+
+    let rewrites = collector.rewrites;
+    let unhandled = collector.unhandled;
+    let changed = !edits.is_empty();
+    let source = apply_edits(source, edits);
+
+    Ok(Outcome {
+        source,
+        changed,
+        rewrites,
+        unhandled,
+    })
+}
+
+/// Collects `std::fs` bindings from `use` items.
+struct BindingVisitor<'a> {
+    b: &'a mut Bindings,
+}
+
+impl<'ast> Visit<'ast> for BindingVisitor<'_> {
+    fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
+        collect_use(&i.tree, &mut Vec::new(), self.b);
+    }
+}
+
+/// Walks a `use` tree, recording any `std::fs::...` leaves.
+fn collect_use(tree: &syn::UseTree, prefix: &mut Vec<String>, b: &mut Bindings) {
+    match tree {
+        syn::UseTree::Path(p) => {
+            prefix.push(p.ident.to_string());
+            collect_use(&p.tree, prefix, b);
+            prefix.pop();
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                collect_use(item, prefix, b);
+            }
+        }
+        syn::UseTree::Name(n) => handle_leaf(prefix, &n.ident.to_string(), &n.ident.to_string(), b),
+        syn::UseTree::Rename(r) => {
+            handle_leaf(prefix, &r.ident.to_string(), &r.rename.to_string(), b);
+        }
+        // `use std::fs::*` brings every fs name into scope unqualified; treat
+        // each facade name as a free-fn binding under its own name.
+        syn::UseTree::Glob(_) => {
+            if prefix.as_slice() == ["std", "fs"] {
+                for name in FACADE_FREE_FNS {
+                    b.free_fns.insert((*name).to_string(), (*name).to_string());
+                }
+            }
+        }
+    }
+}
+
+/// Records one resolved `use` leaf. `real` is the upstream name; `local` is what
+/// it is bound to here (differs under `as`).
+fn handle_leaf(prefix: &[String], real: &str, local: &str, b: &mut Bindings) {
+    if prefix == ["std"] && real == "fs" {
+        // `use std::fs [as alias];`
+        b.module_aliases.insert(local.to_string());
+    } else if prefix == ["std", "fs"] {
+        match real {
+            "self" => {
+                b.module_aliases.insert(local.to_string());
+            }
+            "File" => {
+                b.file_names.insert(local.to_string());
+            }
+            _ => {
+                b.free_fns.insert(local.to_string(), real.to_string());
+            }
+        }
+    }
+}
+
+/// Collects the call-site rewrites.
+struct EditCollector<'a> {
+    bindings: &'a Bindings,
+    edits: Vec<Edit>,
+    rewrites: Vec<String>,
+    unhandled: Vec<String>,
+    consumed: BTreeMap<String, usize>,
+}
+
+impl<'ast> Visit<'ast> for EditCollector<'_> {
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = &*call.func {
+            self.try_rewrite_call(&p.path);
+        }
+        // Recurse so nested calls in the arguments are seen too.
+        syn::visit::visit_expr_call(self, call);
+    }
+
+    fn visit_expr_method_call(&mut self, mc: &'ast syn::ExprMethodCall) {
+        let method = mc.method.to_string();
+        if PATH_FS_METHODS.contains(&method.as_str()) {
+            let line = mc.method.span().start().line;
+            self.unhandled
+                .push(format!("line {line}: inherent method `.{method}()` (needs method visitor)"));
+        }
+        syn::visit::visit_expr_method_call(self, mc);
+    }
+}
+
+impl EditCollector<'_> {
+    /// Rewrites a call whose callee path names a routed `std::fs` operation.
+    fn try_rewrite_call(&mut self, path: &syn::Path) {
+        let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+        let span = path.segments.last().map(|s| s.ident.span());
+
+        // File::open / File::create, in any spelling that resolves to std::fs::File.
+        let (file_base, assoc) = match segs.as_slice() {
+            [a, m] if self.bindings.file_names.contains(a) => (Some(a.clone()), Some(m.clone())),
+            [s, f, a, m] if s == "std" && f == "fs" && a == "File" => {
+                (Some("File".to_string()), Some(m.clone()))
+            }
+            _ => (None, None),
+        };
+        if let (Some(base), Some(assoc)) = (file_base, assoc) {
+            if assoc == "open" || assoc == "create" {
+                self.push_call_edit(path, &format!("{FACADE}::{assoc}"));
+                *self.consumed.entry(base).or_default() += 1;
+                self.rewrites
+                    .push(format!("File::{assoc} -> {FACADE}::{assoc}"));
+            }
+            return;
+        }
+
+        // A free function: bare `metadata(p)`, `fs::metadata(p)`, or
+        // `std::fs::metadata(p)`.
+        let (binding, real) = match segs.as_slice() {
+            [only] => match self.bindings.free_fns.get(only) {
+                Some(real) => (Some(only.clone()), real.clone()),
+                None => (None, String::new()),
+            },
+            [module, f] if self.bindings.module_aliases.contains(module) => {
+                (None, f.clone())
+            }
+            [s, fs, f] if s == "std" && fs == "fs" => (None, f.clone()),
+            _ => (None, String::new()),
+        };
+        if real.is_empty() {
+            return;
+        }
+        if FACADE_FREE_FNS.contains(&real.as_str()) {
+            self.push_call_edit(path, &format!("{FACADE}::{real}"));
+            if let Some(b) = binding {
+                *self.consumed.entry(b).or_default() += 1;
+            }
+            self.rewrites.push(format!("{real}() -> {FACADE}::{real}()"));
+        } else if PATH_FS_METHODS.contains(&real.as_str()) || real == "symlink_metadata" {
+            // A known fs function the facade does not provide (carve-out).
+            let line = span.map_or(0, |s| s.start().line);
+            self.unhandled
+                .push(format!("line {line}: `{real}` is a carve-out (D34), facade has no equivalent"));
+        }
+    }
+
+    /// Replaces a callee path's byte span with `replacement`.
+    fn push_call_edit(&mut self, path: &syn::Path, replacement: &str) {
+        let range = path_byte_range(path);
+        self.edits.push(Edit {
+            start: range.0,
+            end: range.1,
+            replacement: replacement.to_string(),
+        });
+    }
+}
+
+/// Counts non-`use` references to a set of names, so an import is pruned only
+/// when nothing else in the file still needs it.
+struct ReferenceCounter {
+    targets: BTreeSet<String>,
+    counts: BTreeMap<String, usize>,
+}
+
+impl<'ast> Visit<'ast> for ReferenceCounter {
+    // Do not descend into `use` items: those references are the import itself.
+    fn visit_item_use(&mut self, _i: &'ast syn::ItemUse) {}
+
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        if let Some(first) = path.segments.first() {
+            let name = first.ident.to_string();
+            if self.targets.contains(&name) {
+                *self.counts.entry(name).or_default() += 1;
+            }
+        }
+        syn::visit::visit_path(self, path);
+    }
+}
+
+/// Produces edits removing the now-unused names from `use std::fs::...` items.
+fn prune_imports(
+    ast: &syn::File,
+    bindings: &Bindings,
+    consumed: &BTreeMap<String, usize>,
+    references: &BTreeMap<String, usize>,
+    source: &str,
+) -> Vec<Edit> {
+    // A name is prunable when every non-use reference to it was consumed by a
+    // rewrite.
+    let prunable = |name: &str| -> bool {
+        let refs = references.get(name).copied().unwrap_or(0);
+        let used = consumed.get(name).copied().unwrap_or(0);
+        // Only prune names we actually bound from std::fs.
+        (bindings.file_names.contains(name) || bindings.free_fns.contains_key(name))
+            && refs == used
+    };
+
+    let mut edits = Vec::new();
+    for item in &ast.items {
+        if let syn::Item::Use(use_item) = item {
+            if let Some(edit) = prune_use_item(use_item, &prunable, source) {
+                edits.push(edit);
+            }
+        }
+    }
+    edits
+}
+
+/// Rebuilds a single `use` item with prunable `std::fs` leaves removed, if any.
+fn prune_use_item(
+    use_item: &syn::ItemUse,
+    prunable: &impl Fn(&str) -> bool,
+    source: &str,
+) -> Option<Edit> {
+    // Only touch `use std::fs::...` items. Collect the surviving leaves.
+    let mut kept: Vec<String> = Vec::new();
+    let mut dropped = false;
+    let mut is_fs_import = false;
+    collect_fs_leaves(
+        &use_item.tree,
+        &mut Vec::new(),
+        prunable,
+        &mut kept,
+        &mut dropped,
+        &mut is_fs_import,
+    );
+
+    if !is_fs_import || !dropped {
+        return None;
+    }
+
+    let (start, end) = span_byte_range(use_item.span());
+    // Preserve any trailing newline the item owns by trimming to its own text.
+    let replacement = if kept.is_empty() {
+        // Remove the whole statement, including a trailing newline if present.
+        return Some(Edit {
+            start,
+            end: consume_trailing_newline(source, end),
+            replacement: String::new(),
+        });
+    } else if kept.len() == 1 {
+        format!("use std::fs::{};", kept[0])
+    } else {
+        format!("use std::fs::{{{}}};", kept.join(", "))
+    };
+    Some(Edit {
+        start,
+        end,
+        replacement,
+    })
+}
+
+/// Walks a `use` tree collecting the `std::fs` leaves to keep vs drop.
+fn collect_fs_leaves(
+    tree: &syn::UseTree,
+    prefix: &mut Vec<String>,
+    prunable: &impl Fn(&str) -> bool,
+    kept: &mut Vec<String>,
+    dropped: &mut bool,
+    is_fs_import: &mut bool,
+) {
+    match tree {
+        syn::UseTree::Path(p) => {
+            prefix.push(p.ident.to_string());
+            collect_fs_leaves(&p.tree, prefix, prunable, kept, dropped, is_fs_import);
+            prefix.pop();
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                collect_fs_leaves(item, prefix, prunable, kept, dropped, is_fs_import);
+            }
+        }
+        syn::UseTree::Name(n) => {
+            let name = n.ident.to_string();
+            if prefix.as_slice() == ["std", "fs"] {
+                *is_fs_import = true;
+                if prunable(&name) {
+                    *dropped = true;
+                } else {
+                    kept.push(name);
+                }
+            }
+        }
+        // Renames and globs are left alone: rare in the fork set, and pruning
+        // them safely needs more care than this version takes.
+        syn::UseTree::Rename(_) | syn::UseTree::Glob(_) => {
+            if prefix.as_slice() == ["std", "fs"] {
+                *is_fs_import = true;
+            }
+        }
+    }
+}
+
+/// The byte range a path's tokens occupy, from the first segment to the last.
+fn path_byte_range(path: &syn::Path) -> (usize, usize) {
+    let start = path
+        .leading_colon
+        .as_ref()
+        .map_or_else(
+            || {
+                path.segments
+                    .first()
+                    .map_or(0, |s| span_byte_range(s.ident.span()).0)
+            },
+            |c| span_byte_range(c.spans[0]).0,
+        );
+    let end = path
+        .segments
+        .last()
+        .map_or(start, |s| span_byte_range(s.ident.span()).1);
+    (start, end)
+}
+
+/// A span's byte range in the parsed source.
+fn span_byte_range(span: proc_macro2::Span) -> (usize, usize) {
+    let r = span.byte_range();
+    (r.start, r.end)
+}
+
+/// Extends `end` past a single trailing newline (and any preceding spaces), so
+/// removing a statement does not leave a blank line.
+fn consume_trailing_newline(source: &str, end: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut i = end;
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'\n' {
+        i += 1;
+    }
+    i
+}
+
+/// Applies edits to the source, back to front so earlier offsets stay valid.
+fn apply_edits(source: &str, mut edits: Vec<Edit>) -> String {
+    edits.sort_by_key(|e| std::cmp::Reverse(e.start));
+    let mut out = source.to_string();
+    for edit in edits {
+        out.replace_range(edit.start..edit.end, &edit.replacement);
+    }
+    out
+}
+
+/// Every `.rs` file at or under `path`.
+fn rust_files(path: &Path) -> Result<Vec<PathBuf>> {
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+            let entry = entry?;
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|e| e == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn routed(source: &str) -> Outcome {
+        rewrite(source).expect("parse")
+    }
+
+    #[test]
+    fn file_open_and_create_become_facade_calls() {
+        let out = routed(
+            "use std::fs::File;\nfn f(p: &str) { let _a = File::open(p); let _b = File::create(p); }\n",
+        );
+        assert!(out.source.contains("brush_vfs::ambient::open(p)"));
+        assert!(out.source.contains("brush_vfs::ambient::create(p)"));
+        // The now-unused import is pruned.
+        assert!(!out.source.contains("use std::fs::File;"));
+    }
+
+    #[test]
+    fn a_free_fn_becomes_a_facade_call_in_every_spelling() {
+        let bare = routed("use std::fs::metadata;\nfn f(p: &str) { let _ = metadata(p); }\n");
+        assert!(bare.source.contains("brush_vfs::ambient::metadata(p)"));
+        assert!(!bare.source.contains("use std::fs::metadata;"));
+
+        let module = routed("use std::fs;\nfn f(p: &str) { let _ = fs::read(p); }\n");
+        assert!(module.source.contains("brush_vfs::ambient::read(p)"));
+
+        let full = routed("fn f(p: &str) { let _ = std::fs::write(p, b\"x\"); }\n");
+        assert!(full.source.contains("brush_vfs::ambient::write(p"));
+    }
+
+    #[test]
+    fn a_partially_used_import_keeps_the_names_still_needed() {
+        // `File` is routed away but `Metadata` is used as a type, so the import
+        // shrinks rather than vanishing.
+        let out = routed(
+            "use std::fs::{File, Metadata};\nfn f(p: &str) -> Option<Metadata> { let _ = File::open(p); None }\n",
+        );
+        assert!(out.source.contains("brush_vfs::ambient::open(p)"));
+        assert!(out.source.contains("use std::fs::Metadata;"));
+        assert!(!out.source.contains("File"));
+    }
+
+    #[test]
+    fn a_filetype_method_is_not_mistaken_for_a_path_method() {
+        // The uu_cat false-positive: `ft` is a FileType, `is_dir` is pure, and
+        // nothing here reads the filesystem, so there is nothing to route or
+        // even report.
+        let out = routed(
+            "fn f(md: std::fs::Metadata) -> bool { let ft = md.file_type(); ft.is_dir() }\n",
+        );
+        assert!(out.unhandled.is_empty(), "is_dir on a FileType must not be flagged");
+        assert!(!out.changed);
+    }
+
+    #[test]
+    fn a_carve_out_free_fn_is_reported_not_rewritten() {
+        // canonicalize has virtual semantics the facade does not yet provide.
+        let out = routed("fn f(p: &str) { let _ = std::fs::canonicalize(p); }\n");
+        assert!(!out.source.contains("ambient::canonicalize"));
+        assert!(out.unhandled.iter().any(|u| u.contains("canonicalize")));
+    }
+
+    #[test]
+    fn an_inherent_path_method_is_reported() {
+        let out = routed("use std::path::Path;\nfn f(p: &Path) -> bool { p.exists() }\n");
+        assert!(out.unhandled.iter().any(|u| u.contains("exists")));
+    }
+}
