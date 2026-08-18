@@ -81,9 +81,22 @@ unexpressible:
   `set_symlink_times`. `fs_extra` (`uu_mv`) and `walkdir` (`uucore`) are
   recursive copy, move and walk, which a walk over `Vfs` expresses; there is no
   crate to swap in, but nothing is blocked.
-- **Not expressible.** `xattr` (via `uucore` — verified: `cap-fs-ext` exposes
-  `set_times`, `symlink`, `access` and `set_symlink_permissions`, and no xattr
-  surface at all) and `notify` (`uu_tail`).
+- **Not expressible: `notify` (`uu_tail`) alone.**
+
+  `xattr` was in this class and should not have been. The check was made
+  against `cap-fs-ext`'s API surface, which indeed has no xattr calls — but
+  `brush-vfs`'s contract is *descriptors*, not cap-fs-ext, and `uucore` already
+  ships the descriptor form: `uucore::fsxattr::copy_xattrs_fd(&File, &File)`,
+  whose own doc notes it pins both inodes so a concurrent renamer cannot
+  redirect it, unlike the path-based `copy_xattrs` that `uu_cp` calls today.
+  `std::fs::File` is exactly what `Vfs::open_with` returns. Same for `ls -l`'s
+  ACL indicator: `has_acl` is path-based, but `xattr::FileExt::list_xattr` is
+  not. Both are codemod targets.
+
+  `fs_extra` was also mis-scoped: `uu_mv` imports exactly
+  `fs_extra::dir::get_size`, used once to size a progress bar. The recursive
+  copy is `uu_cp`'s `walkdir`. The real blocker for `mv` is elsewhere — see
+  below.
 - **Not filesystem questions.** `uu_env`'s exec is governed by D2's predicate,
   not by the namespace. `onig` is a C regex library; its risk class is memory
   safety in a C dependency, and it was in this list by category error.
@@ -101,9 +114,28 @@ GNU that the upstream suites will name case by case.
 
 `env` is kept with its exec form refused: `env` with no command is `printenv`
 and is harmless, and `env CMD` already fails closed through D2's predicate, so
-the fork only has to make the failure legible. `onig` is replaced with
-`fancy-regex`, which is already a dependency, removing a C library and the
-`onig_sys` build-time toolchain from the fork.
+the fork only has to make the failure legible.
+
+`onig` is replaced with `fancy-regex`, and that is a **syntax change, not a
+dependency swap**. `uu_expr` uses POSIX *BRE* and relies on onig's dialect
+selection (`Syntax::grep()`), with a transpiler that deliberately leaves
+`\(`, `\)`, `\{`, `\|`, `\+` alone because grep syntax understands them.
+fancy-regex inverts exactly those: `(` groups and `\(` is a literal, so
+`expr "$s" : '\(.*\)'` — the canonical capture idiom — silently stops
+capturing. Also carried by onig and not by the swap: the GNU error messages
+keyed on onig's error codes, which the upstream `expr` suite asserts; non-UTF-8
+matching, survivable only because D33 pinned UTF-8; and `MatchParam`'s match-step
+limit, which D27's ReDoS bound needs re-established as
+`fancy_regex::RegexBuilder::backtrack_limit`. The swap stands, but it is a
+transpiler rewrite with an upstream test suite to satisfy, not a line in a
+manifest.
+
+**The real gap `mv` exposes is in `brush-vfs`, not in a dependency.** There is
+no `rename`, no `remove_dir_all` and no link creation: `clippy.toml` bans all of
+them as "not expressible in the namespace yet". So the cross-mount
+copy-then-delete fallback has no primitive — and **D26's "links are validated
+at creation" has no creation site to validate**, which makes that check
+unwritten rather than free.
 
 ## D5 — Re-exec now; in-process is a different project
 
@@ -139,9 +171,16 @@ it on Linux and leave macOS and Windows behaving differently, and a
 writer-holding broker would buy uniformity at the price of pulling a whole
 later milestone forward and paying IPC per open. The claim is therefore scoped
 rather than strengthened — **`ro` holds for code inside the `brush-vfs`
-boundary**, which the clippy ban bounds and the Landlock test exercises. It says
-nothing about code that reaches the filesystem another way, which today means
-the bundled coreutils.
+boundary**, which the clippy ban bounds. It says nothing about code that reaches
+the filesystem another way, which today means the bundled coreutils and every
+external command.
+
+**The Landlock test does not exercise `ro`, and an earlier draft of this entry
+claimed it did.** That test builds one mount, read-write, and its ruleset is
+`AccessFs::from_all`, so it could not distinguish a read-only mount even if it
+had one — Landlock would grant write regardless. `--mount VIRTUAL:HOST:ro` is a
+shipped flag, so `ro` is a live property whose only coverage is the vfs unit
+suite and the shell-level expectation cases.
 
 ## D7 — No in-memory mounts
 
@@ -262,6 +301,26 @@ declare its grant explicitly was rejected as breaking every existing recursive
 justfile until its parent is edited. The cost is real and accepted: a
 sub-justfile writing into a shared parent build directory now needs an explicit
 grant, and that pattern is common.
+
+**Three places in rocjust reach outside the tree before any sub-invocation
+exists, and the rule as stated forbids all of them.** `import` and `mod` resolve
+targets by joining and lexically cleaning, so `../shared.just` is expected and
+documented; a submodule's recipes run beside *its own* file, i.e. with a working
+directory outside the importer's tree. Neither is a D30 frame, so there is no
+invoker's grant to intersect with. And justfile discovery walks *upward* to the
+filesystem root looking for a candidate — which has to happen before a grant can
+be derived at all, so discovery needs its own explicitly stated ceiling rather
+than falling under this rule. `set fallback`, which rocjust parses and does not
+yet act on, retries in the parent directory and would intersect to empty the day
+it is wired up.
+
+Whether the intersection is computed on virtual or host paths, and before or
+after canonicalization, is load-bearing and unstated: after canonicalization a
+symlinked subdirectory intersects to empty, and before it grants a host tree the
+invoker never had. It must be the pre-canonicalization virtual path, with a
+symlinked justfile requiring an explicit grant. D31's per-project `HOME` needs
+naming separately — on virtual paths a sub-project silently inherits the
+invoker's home, and on host paths it gets none at all.
 
 ## D17 — Roc compiles to wasm by default; native is a trusted opt-in
 
@@ -508,15 +567,38 @@ until D14's hermetic mode exists, and the two flags are independent, so it can
 be added then. Killing the process from outside was rejected because it cannot
 unwind and, under D25, takes every sibling job with it.
 
+**Two qualifications this entry got wrong on first writing.** Epochs and fuel
+alike *do not* interrupt code blocked in a host call — Wasmtime's own
+`Config::epoch_interruption` documentation says so and recommends the async
+variant. D25's `wait_any` is a blocking host call, and so is a long read on a
+pipe, so the one shape the parallelism design centres on is precisely the shape
+epochs do not preempt. The deadline therefore has to be enforced *around* each
+host call by the host — `async_support` plus `epoch_deadline_async_yield_and_update`,
+or a `select!` on the host side — which is a design, not a flag, and drags in
+`async_stack_size` (required to be at least `max_wasm_stack`, so that pin
+becomes a startup constraint rather than a free knob).
+
+And "per-store deadlines so D25's parallel jobs each carry their own" is false
+under D25: one instance is one store, D25 puts several jobs in one instance, and
+D30 runs the sub-invocation there too. One deadline covers all of them, so one
+overrunning job trips it for its siblings — the exact failure this entry cites
+when rejecting "kill the process from outside". Either accept one deadline per
+invocation *chain* and say so, or give each job its own store and solve the
+shared memo table another way.
+
 Three Wasmtime settings are pinned rather than left at their defaults.
 **`allocation_strategy` is on-demand, not pooling** — pooling reuses memory
 slabs across instantiations, so a job could read residue from a previous job's
 heap; it may arrive later with an explicit zeroing guarantee and a test for it.
 **`wasm_threads` is off** — D25 establishes that Roc has no async or threads, so
 shared-memory threading adds a concurrency surface to the boundary and buys
-nothing. **`memory_maximum_size` and `max_wasm_stack` are given explicit
-values**, so a runaway allocation traps inside the guest instead of reaching an
-RSS quota that measures the whole host process.
+nothing. **`max_wasm_stack` is given an explicit
+value**, so a runaway recursion traps inside the guest instead of reaching an
+RSS quota that measures the whole host process. Memory has no
+`memory_maximum_size` knob under that name: growth is gated by the module's
+declared maximum and by `StoreLimitsBuilder::memory_size` through
+`Store::limiter`, which is per-*store* and therefore shares the collapse
+described above.
 
 ## D36 — The sandbox has no terminal
 
@@ -641,7 +723,19 @@ runs that sub-invocation in the same instance. So the adversary is the guest
 against its own narrowed frame, and guessing a sibling handle recovers authority
 the current frame gave up.
 
-**Each invocation frame owns its own handle tables; a handle indexes only the
+**The frame is itself a capability, and it is host-minted.** D30 makes the
+guest's main loop the dispatcher, so the host cannot infer which frame a call
+belongs to: "the innermost open one" is wrong, because depth 0 must keep reaping
+its own jobs while a sub-invocation runs. Leaving the guest to name the frame
+with an integer would reinstate the forgeable selector one level up, which is
+what this entry exists to remove. So every host function takes a frame handle as
+its first argument, minted by the host into a table the host owns, and never a
+raw index the guest chose. The host also keeps its own frame stack and rejects a
+`complete` that is duplicated or out of order — nothing in the protocol makes
+the guest send one at all, and a frame the guest abandons would otherwise never
+tear down while still counting against D30's depth cap.
+
+**Each frame owns its own handle tables; a handle indexes only the
 current frame's.** Forging an integer then yields one of the guest's own
 handles, so escalation is not expressible rather than rejected at runtime — and
 frame teardown drops the tables, so lifetimes come for free. Generational
@@ -652,6 +746,12 @@ own named mechanism rather than arriving by accident.
 **One table per kind** — sessions, jobs, and whatever follows. A type confusion
 is then not expressible either: the host function's signature selects the table,
 so there is no tag to check and no mismatch error to write.
+
+Frame teardown must also reap. A spawned child outlives the handle that names
+it by default (`kill_external_commands_on_drop` is false for ordinary shells),
+so a job spawned in a frame that exits before `wait_any` observes it would leave
+a live process holding that frame's mount handles and nobody to reap it. That
+option is mandatory for sandboxed sessions.
 
 Rejected: a single instance-wide table with a per-frame ownership check, which
 works but puts the boundary in a check that a new host function can forget; and

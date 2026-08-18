@@ -31,6 +31,32 @@ register of a proof and none of them is one.
 execution is still on, `pathsearch` still resolves host binaries, and ambient
 authority is fully intact.
 
+**And routing the *lookup* without routing the *exec* created a confused
+deputy, which is worse than leaving both unrouted.** Demonstrated with the
+shipped binary under `--mount /:<jail>:ro`, where the namespace's `/bin` holds
+exactly one file:
+
+```
+$ echo /bin/*        -> /bin/ls          (the mounted script)
+$ command -v ls      -> /bin/ls          (resolved through the namespace)
+$ ls /               -> Applications ... (the *host's* /bin/ls, listing the host root)
+```
+
+The namespace is asked whether `/bin/ls` may be run, answers about the mounted
+file, and that approval is then used to execute a different binary: the virtual
+path is handed to `std::process::Command::new` as if it were a host path. Under
+any chroot-shaped policy *every* command silently runs the host's version
+rather than the sandbox's. Two smaller variants: a command name containing `/`
+reaches `commands.rs:421` with no predicate at all, and `hash -p` writes an
+unchecked host path into the location cache that later lookups return without
+revalidating.
+
+The fix belongs to the execution milestone, and it is not "add a check": the
+resolved candidate has to be turned into a host path *by the mount table*, or
+better into an already-open descriptor. Recorded here because the intermediate
+state is a trap — a reader who sees executable lookup going through the
+namespace will reasonably assume execution does too.
+
 | Proven | Not proven |
 |---|---|
 | ~80 production fs sites compile against a vfs facade | that `ro` is enforced — it is a userspace field, not a property of a `Dir` fd (open decision 1) |
