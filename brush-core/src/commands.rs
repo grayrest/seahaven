@@ -177,7 +177,15 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     args: &[S],
     empty_env: bool,
 ) -> Result<std::process::Command, error::Error> {
-    let mut cmd = std::process::Command::new(command_name);
+    // The name the namespace resolved, translated into a host path. Without
+    // this the namespace's approval of a *virtual* path authorizes running the
+    // host's file at the same spelling -- so under `--mount /:jail` every
+    // command ran the host's binary rather than the mounted one.
+    let host_command = context
+        .shell
+        .host_path_for_execution(command_name)
+        .map_err(|_| error::ErrorKind::CommandNotFound(command_name.to_owned()))?;
+    let mut cmd = std::process::Command::new(&host_command);
 
     // Override argv[0].
     // NOTE: Not supported on all platforms.
@@ -186,17 +194,17 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     // Pass through args.
     cmd.args(args);
 
-    // Use the shell's current working dir.
-    // A host path handed to a child process, and one of the places external
-    // execution still bypasses the namespace entirely: the child resolves it
-    // against the host, not against any mount. Exempt rather than fixed because
-    // the whole external-execution path is a later milestone -- see D2 and the
-    // plan's "What this milestone does not prove".
+    // Use the shell's current working dir, translated the same way: the child
+    // resolves it against the host, so it has to be the host directory the
+    // namespace's cwd actually names.
+    let host_cwd = context
+        .shell
+        .host_path_for_execution(context.shell.working_dir())?;
     #[expect(
         clippy::disallowed_methods,
-        reason = "external execution does not go through the namespace yet"
+        reason = "a child process needs a host directory; the namespace chose which one"
     )]
-    cmd.current_dir(context.shell.working_dir());
+    cmd.current_dir(&host_cwd);
 
     // Start with a clear environment.
     cmd.env_clear();
@@ -396,6 +404,24 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
             if !builtin.disabled {
                 return self.execute_via_builtin(builtin).await;
             }
+        }
+
+        // A name containing a separator names a file directly rather than
+        // something to search for -- but it still has to be a file the namespace
+        // has, which this branch did not check at all.
+        if sys::fs::contains_path_separator(&self.command_name)
+            && !self
+                .shell
+                .is_executable_in_namespace(Path::new(&self.command_name))
+        {
+            let last_arg = Self::take_last_arg(&self.args);
+            self.shell.update_last_arg_variable(last_arg);
+
+            if let Some(post_execute) = self.post_execute {
+                let _ = post_execute(&mut self.shell);
+            }
+
+            return Err(ErrorKind::CommandNotFound(self.command_name).into());
         }
 
         // We still haven't found a command to invoke. We'll need to look for an external command.

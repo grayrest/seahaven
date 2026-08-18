@@ -76,6 +76,12 @@ impl builtins::Command for HashCommand {
                 }
             }
         } else if let Some(path) = &self.path_to_use {
+            // Deliberately unchecked, because bash accepts a path that does not
+            // exist here -- `hash -p` is a raw write to the location cache, and
+            // the compat suite asserts as much. It is not a hole: the cache only
+            // supplies a *name*, and translating that name into something the
+            // kernel can run goes through the namespace at the point of
+            // execution, where a path no mount contains fails closed.
             for name in &self.names {
                 context
                     .shell

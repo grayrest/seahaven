@@ -193,3 +193,47 @@ cases:
     args: ["--mount", "/work:.", "-c", "read -r line < /dev/fd/7"]
     expected_exit_code: 1
     ignore_stderr: true
+
+  - name: "A host binary is not executable through the namespace"
+    # Routing executable *lookup* through the namespace without routing the
+    # exec was a confused deputy: the namespace approved a virtual path and the
+    # kernel then ran the host's file of the same spelling. Under a policy whose
+    # layout echoes the host's, every command ran the host's version.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "/bin/sh -c 'echo escaped'; echo \"rc=$?\""
+    expected_exit_code: 0
+    expected_stdout: "rc=127\n"
+    ignore_stderr: true
+
+  - name: "A relative host binary is not executable either"
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "cd /work; ../bin/sh; echo \"rc=$?\""
+    expected_exit_code: 0
+    expected_stdout: "rc=127\n"
+    ignore_stderr: true
+
+  - name: "hash -p cannot smuggle a host path past the namespace"
+    # bash accepts a nonexistent path at `hash -p`, so the check is at the point
+    # of execution rather than at the point of naming.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "hash -p /bin/echo myecho; myecho leaked; echo \"rc=$?\""
+    expected_exit_code: 0
+    expected_stdout: "rc=127\n"
+    ignore_stderr: true
+
+  - name: "A confined shell lands somewhere it can name"
+    # Installing a policy that does not contain the launcher's working directory
+    # used to leave the shell holding a host path it could neither resolve
+    # against nor hand to a child.
+    args: ["--mount", "/work:.", "-c", "pwd; echo \"PWD=$PWD\""]
+    expected_exit_code: 0
+    expected_stdout: "/work\nPWD=/work\n"

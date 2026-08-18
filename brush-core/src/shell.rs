@@ -226,6 +226,34 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     /// the previous namespace names nothing in the new one.
     pub fn set_mounts(&mut self, mounts: brush_vfs::MountTable) {
         self.session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
+
+        // A fresh session starts at the virtual root, so the working directory
+        // the shell was started in -- a host path, and one the new policy very
+        // likely does not contain -- is now stale. Leaving it that way is not
+        // merely untidy: an external command is given the shell's working
+        // directory as its own, so a stale one hands the child a host directory
+        // the policy never granted.
+        //
+        // Land at the virtual root, which is where a policy mounting `/` puts
+        // everything, and otherwise at the shallowest mount point, the closest
+        // thing to a root the policy offers.
+        let root = brush_vfs::VirtualPath::root();
+        let landing = if self.session.vfs().exists(&root) {
+            Some(root)
+        } else {
+            self.session
+                .vfs()
+                .mounts()
+                .mounts()
+                .last()
+                .map(|m| m.mount_point().clone())
+        };
+
+        if let Some(landing) = landing {
+            // Through `set_working_dir` so that `$PWD` and the mirrored
+            // `PathBuf` move together with the session's own cwd.
+            let _ = self.set_working_dir(landing.as_str());
+        }
     }
 
     /// Returns a new shell instance created with the given options.

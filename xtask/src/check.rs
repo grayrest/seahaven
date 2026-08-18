@@ -199,7 +199,41 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
         );
     }
 
+    check_lint_denies_warnings()?;
+
     eprintln!("Ban check passed ({} entries, all firing).", counts.len());
+    Ok(())
+}
+
+/// Verify that the workspace lint invocation actually denies warnings.
+///
+/// `disallowed_methods` is warn-by-default, so a `cargo clippy` without
+/// `-D warnings` reports every violation and exits 0. The fixture above proves
+/// the *entries* are live, but it passes its own `-D warnings` -- so on its own
+/// it only tests its own literal. This reads the real invocation instead.
+///
+/// Textual rather than executed, because running the workspace lint from inside
+/// a check that the workspace lint runs would recurse.
+fn check_lint_denies_warnings() -> Result<()> {
+    let root = crate::common::find_workspace_root()?;
+    let this_file = root.join("xtask/src/check.rs");
+    let source = std::fs::read_to_string(&this_file)
+        .with_context(|| format!("reading {}", this_file.display()))?;
+
+    let body = source
+        .split_once("fn check_lint(")
+        .map(|(_, rest)| rest)
+        .and_then(|rest| rest.split_once("\nfn "))
+        .map(|(body, _)| body)
+        .context("could not find check_lint's body in xtask/src/check.rs")?;
+
+    if !(body.contains("\"-D\"") && body.contains("\"warnings\"")) {
+        anyhow::bail!(
+            "check_lint no longer passes `-D warnings`; the filesystem ban would report \
+             violations and still exit 0"
+        );
+    }
+
     Ok(())
 }
 

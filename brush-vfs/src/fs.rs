@@ -661,6 +661,29 @@ impl Vfs {
         Ok(self.locate_follow(path)?.virtual_path)
     }
 
+    /// The host path of the file `path` names, with every symlink resolved.
+    ///
+    /// **The one place a host path leaves this crate.** It exists because
+    /// executing a program needs a name the operating system understands and
+    /// there is no descriptor-based alternative in portable Rust -- `fexecve`
+    /// has no `std` equivalent. It is not for sandboxed code, which has no way
+    /// to use a host path and must never be handed one.
+    ///
+    /// Symlinks are resolved before the join, so the answer is where the file
+    /// actually is rather than a name that might point elsewhere once the
+    /// kernel follows it. Without that, translating a virtual path for `exec`
+    /// would hand the kernel a link the namespace had approved and let it
+    /// resolve the target against the host.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if the path does not resolve in this
+    /// namespace.
+    pub fn host_path(&self, path: &VirtualPath) -> std::io::Result<PathBuf> {
+        let located = self.locate_follow(path)?;
+        Ok(located.mount.canonical_host_path().join(&located.relative))
+    }
+
     /// Reads a symlink's target verbatim, without resolving it.
     ///
     /// # Errors

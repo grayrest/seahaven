@@ -77,6 +77,24 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         is_executable(self.session(), &abs_path)
     }
 
+    /// Translates a path into the host path the operating system should run.
+    ///
+    /// Executing a program is the one operation with no descriptor-based form in
+    /// portable Rust, so it needs a host name. Handing it the path the shell was
+    /// given instead is a confused deputy: under a policy whose virtual layout
+    /// echoes the host's, the namespace approves the *mounted* file and the
+    /// kernel then runs the host's file of the same spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path names nothing in the namespace, which is
+    /// also the answer for a host path no mount contains.
+    pub fn host_path_for_execution(&self, path: impl AsRef<Path>) -> Result<PathBuf, error::Error> {
+        let abs_path = self.absolute_path(path.as_ref());
+        let virtual_path = self.to_virtual_path(&abs_path)?;
+        Ok(self.session().vfs().host_path(&virtual_path)?)
+    }
+
     /// Returns true if the namespace has anything at the given path.
     ///
     /// # Arguments

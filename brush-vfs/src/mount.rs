@@ -89,6 +89,7 @@ pub struct Mount {
     at: VirtualPath,
     dir: cap_std::fs::Dir,
     host_path: PathBuf,
+    canonical_host_path: PathBuf,
     access: Access,
     /// Whether another mount point lies strictly beneath this one.
     ///
@@ -127,6 +128,16 @@ impl Mount {
     #[must_use]
     pub fn host_path(&self) -> &Path {
         &self.host_path
+    }
+
+    /// The mount's host directory with every symlink resolved.
+    ///
+    /// Used only to build a host path for the operating system when there is no
+    /// descriptor-based alternative -- today, executing a program. Canonical
+    /// rather than as-written, because a path joined onto a symlinked mount root
+    /// resolves somewhere the mount table never approved.
+    pub(crate) fn canonical_host_path(&self) -> &Path {
+        &self.canonical_host_path
     }
 
     /// Whether another mount point lies strictly beneath this one.
@@ -293,6 +304,7 @@ impl MountTableBuilder {
                 at,
                 dir,
                 host_path,
+                canonical_host_path: canonical,
                 access,
                 shadows_nested: false,
             });
