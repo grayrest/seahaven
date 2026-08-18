@@ -157,7 +157,37 @@ no `rename`, no `remove_dir_all` and no link creation: `clippy.toml` bans all of
 them as "not expressible in the namespace yet". So the cross-mount
 copy-then-delete fallback has no primitive — and **D26's "links are validated
 at creation" has no creation site to validate**, which makes that check
-unwritten rather than free.
+unwritten rather than free. *(Since resolved: `rename`, `remove_dir_all` and
+`symlink` were added to the namespace in the D2 milestone — see D2's note.)*
+
+**Implemented — first increment (`uu_cat`).** The pipeline is proven end to end
+on the smallest utility, and the rest is repetition of it:
+
+- **The codemod's target is `brush_vfs::ambient`** — free functions shaped like
+  `std::fs`, reading a process-global session (D34). It exists because a util
+  calls `File::open` with no session handle in scope, and D34 forbids threading
+  one through; the process is the confinement unit, so a process-global session
+  is sound. It fails closed with none installed.
+- **The codemod is `cargo xtask codemod`** — a `syn` pass that edits by byte
+  span (minimal diff, D13's health metric). It does the identifier swap D34
+  specified: `File::open(p)` → `ambient::open(p)`, the returned `File` untouched
+  because the facade returns `std` types. This version handles free-function and
+  `File::` associated calls and prunes the now-unused imports; the
+  inherent-method visitor (the majority of a *large* util's sites, per the
+  spike) needs receiver-type inference to tell `path.is_dir()` from a pure
+  `FileType::is_dir()` and is deferred — it *reports* rather than pretends. The
+  `canonicalize` and xattr carve-outs above are reported, not rewritten.
+- **The fork is vendored, not maintained (D13):** pristine upstream committed as
+  a baseline, the codemod diff committed separately so it is auditable. It lives
+  under `forks/` and is **excluded from the workspace** — upstream does not pass
+  brush's pedantic lints, and the ban runs `--workspace`, so a member fork would
+  trip it; the fork's routing is proven by the Landlock test (D41), not the lint
+  (D3), exactly as the crates.io version it replaced was never linted.
+- **Deferred:** the inherent-method visitor, the two carve-outs, and the other
+  ~99 coreutils plus findutils/grep/sed. And **child confinement is D24's**: the
+  bundled child installs the *identity* session, so `uu_cat` is routed but not
+  yet confined to the parent's mounts — the in-process routing test confines it
+  directly to prove the routing is real.
 
 ## D5 — Re-exec now; in-process is a different project
 
@@ -301,6 +331,15 @@ and reconciling per rebase is a named manual step rather than an oversight.
 the upstream ask is not "accept a new abstraction" but "route through the one you
 built, and let its root be injectable". Far easier to land, and every utility
 migrated upstream is one the codemod stops touching.
+
+**Realized for the first fork (`uu_cat`).** The vendor-then-codemod split is
+concrete: `forks/uu_cat` holds pristine upstream in one commit and the
+`cargo xtask codemod` output in the next, so the transformation is a reviewable
+diff on its own. The residual patch set for `uu_cat` is empty — the codemod
+routed every production site — which is the health metric reading zero at the
+smallest scale. The expected-failure infrastructure for upstream suites is not
+yet built; it is the first thing a utility with a *deliberate* divergence (a
+dropped flag) will need, and `uu_cat` has none. See D4's first-increment note.
 
 ## D14 — Confinement now, hermetic mode later
 
