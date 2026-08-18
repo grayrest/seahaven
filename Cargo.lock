@@ -468,6 +468,8 @@ dependencies = [
 name = "brush-coreutils-builtins"
 version = "0.1.0"
 dependencies = [
+ "brush-vfs",
+ "tempfile",
  "uu_arch",
  "uu_b2sum",
  "uu_base32",
@@ -4890,9 +4892,8 @@ dependencies = [
 [[package]]
 name = "uu_cat"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9c045652bd5c5abff3f27585cc51ccb751aadac0231efcea58341e5aa537d16"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "memchr",

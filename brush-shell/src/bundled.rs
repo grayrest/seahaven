@@ -145,11 +145,51 @@ pub fn maybe_dispatch() -> Option<i32> {
         return Some(exit_code(ExecutionExitCode::NotFound));
     };
 
+    // Give the routed utility a session to resolve against. A forked coreutil's
+    // filesystem access now goes through `brush_vfs::ambient` (D4), which fails
+    // closed with no session installed -- so without this the bundled command
+    // could open nothing.
+    //
+    // The session is the identity namespace, which preserves today's behavior:
+    // the child is a fresh process that was handed no policy, and confining it
+    // to the parent's mounts is D24's job (the broker). Under a closed world the
+    // parent still governs *whether* this child is spawned (D2); D4 governs that
+    // once it runs, its filesystem goes through the facade rather than raw
+    // `std::fs`.
+    install_dispatch_session();
+
     let mut argv: Vec<OsString> = Vec::with_capacity(1 + args.len());
     argv.push(name.clone());
     argv.extend(args.iter().cloned());
 
     Some(func(argv))
+}
+
+/// Installs the ambient session a bundled utility resolves its filesystem access
+/// against: the identity namespace, rooted at the process's working directory so
+/// relative paths mean what the util's caller intended.
+///
+/// Identity rather than a confined policy because the child was handed none;
+/// see [`maybe_dispatch`]. If the namespace cannot be built the util runs with
+/// no session and its filesystem calls fail closed, which is the safe direction.
+fn install_dispatch_session() {
+    let Ok(mounts) = brush_vfs::Policy::identity() else {
+        return;
+    };
+    let mut session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
+
+    // Start the session where the process actually is, so a relative path the
+    // parent passed resolves the same way it would have unrouted. Under
+    // identity, host and virtual spellings coincide.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "bootstrapping the child's own namespace before it has one to ask"
+    )]
+    if let Ok(cwd) = std::env::current_dir() {
+        let _ = session.set_cwd(&cwd.to_string_lossy());
+    }
+
+    brush_vfs::ambient::install(session);
 }
 
 fn exit_code(code: ExecutionExitCode) -> i32 {

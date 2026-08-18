@@ -198,7 +198,7 @@ uu_base32 = { version = "0.10.0", optional = true }
 uu_base64 = { version = "0.10.0", optional = true }
 uu_basename = { version = "0.10.0", optional = true }
 uu_basenc = { version = "0.10.0", optional = true }
-uu_cat = { version = "0.10.0", optional = true }
+uu_cat = { path = "../forks/uu_cat", optional = true }
 uu_cksum = { version = "0.10.0", optional = true }
 uu_b2sum = { version = "0.10.0", optional = true }
 uu_md5sum = { version = "0.10.0", optional = true }
@@ -275,3 +275,7 @@ uu_vdir = { version = "0.10.0", optional = true }
 uu_wc = { version = "0.10.0", optional = true }
 uu_whoami = { version = "0.10.0", optional = true }
 uu_yes = { version = "0.10.0", optional = true }
+
+[dev-dependencies]
+brush-vfs = { path = "../brush-vfs" }
+tempfile = "3.27.0"
