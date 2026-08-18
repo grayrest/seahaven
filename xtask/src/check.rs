@@ -271,8 +271,43 @@ fn check_deps(sh: &Shell, verbose: bool) -> Result<()> {
     cmd!(sh, "cargo deny --all-features check all")
         .run()
         .context("Dependency check failed")?;
+
+    check_vfs_has_no_features()?;
+
     eprintln!("Dependency check passed.");
     Ok(())
+}
+
+/// Verify that `brush-vfs` declares no cargo features.
+///
+/// A feature on the crate that decides what a path means is a second answer to
+/// the same question: two builds of the shell would resolve differently, and
+/// only one of them would be the one under test. "No features that alter
+/// resolution" is only checkable as "no features", since nothing stops a
+/// feature added for another reason from reaching resolution later.
+fn check_vfs_has_no_features() -> Result<()> {
+    let root = crate::common::find_workspace_root()?;
+    let manifest = root.join("brush-vfs/Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)
+        .with_context(|| format!("reading {}", manifest.display()))?;
+    let parsed: toml::Value =
+        toml::from_str(&text).with_context(|| format!("parsing {}", manifest.display()))?;
+
+    let declared: Vec<&str> = parsed
+        .get("features")
+        .and_then(toml::Value::as_table)
+        .map(|table| table.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+
+    if declared.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "brush-vfs declares cargo features ({}); path resolution must not have build-time \
+             variants",
+            declared.join(", ")
+        )
+    }
 }
 
 fn check_unused_deps(sh: &Shell, verbose: bool) -> Result<()> {

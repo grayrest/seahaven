@@ -1,0 +1,79 @@
+name: "Fuzz"
+on:
+  schedule:
+    # Nightly, at a quiet hour. A fuzz target that only builds under
+    # `--all-targets` is never executed, which reads as coverage without being
+    # any: this workflow is what makes the vfs grammar's fuzz gate real.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: "Seconds to run each target"
+        required: false
+        default: "900"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    name: "Fuzz ${{ matrix.target }}"
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_vfs_resolve
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # cargo-fuzz needs nightly for -Z build-std and the sanitizer flags.
+      - name: Set up nightly rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: nightly
+
+      - name: Enable cargo cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: cargo-fuzz
+
+      - name: Run ${{ matrix.target }}
+        run: |
+          cargo +nightly fuzz run "${{ matrix.target }}" \
+            -- -max_total_time="${{ inputs.duration_seconds || '900' }}" \
+               -print_final_stats=1
+
+      # The corpus in the repository is a seed, not the whole of what the run
+      # explored; uploading the grown one lets a later run start where this one
+      # stopped rather than rediscovering the same shapes.
+      - name: Upload the grown corpus
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: corpus-${{ matrix.target }}
+          path: fuzz/corpus/${{ matrix.target }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Without this a crash is a red X and a log line that scrolls away. The
+      # artifact is the input needed to reproduce it.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crashes-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+          retention-days: 90
