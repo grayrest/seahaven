@@ -245,6 +245,24 @@ Two walls the batch exposed, each an owner decision before the remaining ~95:
    its root injectable is hand work. So `uucore` is not one `vendor-fork`; it is
    a per-module triage (route / leave / hand-route) that warrants its own plan.
 
+   **That plan is written: `plans/2026-08-18-uucore-fork.md`.** Measuring it
+   sharpened the assessment above in four ways. The triage is *smaller* than
+   feared — under the features `coreutils.all` actually resolves to, `uptime`,
+   `proc-info`, `selinux`, `smack` and `benchmark` are **not compiled**, so the
+   compiled "leave" list is three modules (`fsext`, `mods/locale.rs`,
+   `mods/os.rs`) against seven that route. `safe_traversal` is also smaller: it
+   has exactly **two** ambient entry points (`DirFd::open`,
+   `create_dir_all_safe`), and every `*at` method below them is already confined
+   to the root those produce — D13's spike prediction landing intact. Production
+   carve-outs are **zero**; all 19 sites the codemod leaves unrouted are inside
+   `#[cfg(test)]` or the un-compiled `benchmark` feature. And two obstacles the
+   assessment missed, both silent: uucore's `build.rs` embeds locale files by
+   scanning the sibling *registry* directory for `uu_<util>-<version>`, which
+   `forks/` cannot satisfy, so a naive fork renders raw Fluent keys with a
+   correct exit code; and the codemod currently rewrites `#[cfg(test)]` bodies,
+   which D13's health metric cannot survive — the five existing forks escaped
+   only because none has a filesystem call inside a test module.
+
 ## D5 — Re-exec now; in-process is a different project
 
 `bundled.rs:3` already spawns `current_exe() --invoke-bundled` *because* uutils
