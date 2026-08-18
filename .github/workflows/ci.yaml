@@ -78,26 +78,6 @@ jobs:
             required_tools: "gcc-aarch64-linux-gnu"
             binary_name: "brush"
             extra_build_args: ""
-          # Build for wasm32 target on x86_64/linux host.
-          - host: "ubuntu-24.04"
-            target: "wasm32-unknown-unknown"
-            cross_command: "cross"
-            cross_tool_to_install: "cross"
-            os: "unknown"
-            arch: "wasm32"
-            required_tools: ""
-            binary_name: "brush.wasm"
-            extra_build_args: "--no-default-features --features minimal"
-          # Build for WASI-0.2 target on x86_64/linux host.
-          - host: "ubuntu-24.04"
-            target: "wasm32-wasip2"
-            cross_command: "cross"
-            cross_tool_to_install: "cross"
-            os: "wasi-0.2"
-            arch: "wasm32"
-            required_tools: ""
-            binary_name: "brush.wasm"
-            extra_build_args: "--no-default-features --features minimal"
           # Build for x86_64/windows target on x86_64/linux host.
           - host: "ubuntu-24.04"
             target: "x86_64-pc-windows-gnu"
@@ -271,16 +251,6 @@ jobs:
             coverage: true
             coverage_min_percent: 20
 
-          - host: "ubuntu-24.04"
-            variant: "wasi"
-            artifact_suffix: "-wasi"
-            name_suffix: "(wasm32/wasi-0.2)"
-            homebrew_supported: false
-            coverage: false
-            extra_rust_targets: "wasm32-wasip2"
-            wasi_runtime: "wasmtime"
-            xtask_test_args: "--wasi"
-
     name: "Test ${{ matrix.name_suffix }}"
     runs-on: ${{ matrix.host }}
     defaults:
@@ -315,12 +285,6 @@ jobs:
         uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: cargo-llvm-cov
-
-      - name: Install WASI runtime
-        if: ${{ matrix.wasi_runtime }}
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
-        with:
-          tool: ${{ matrix.wasi_runtime }}
 
       - name: Set up Homebrew
         if: ${{ matrix.homebrew_supported }}
