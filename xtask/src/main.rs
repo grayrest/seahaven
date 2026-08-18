@@ -49,6 +49,8 @@ enum Command {
     Codemod(codemod::CodemodCommand),
     /// Vendor a uutils crate and route it through the vfs (D4).
     VendorFork(vendor::VendorCommand),
+    /// Refresh the utility locale files the forked `uucore` embeds (D4).
+    VendorLocales(vendor::VendorLocalesCommand),
     /// Run CI workflows.
     #[clap(subcommand)]
     Ci(ci::CiCommand),
@@ -69,6 +71,7 @@ fn main() -> Result<()> {
         Command::Check(cmd) => check::run(cmd, verbose),
         Command::Codemod(cmd) => codemod::run(cmd, verbose),
         Command::VendorFork(cmd) => vendor::run(cmd, verbose),
+        Command::VendorLocales(cmd) => vendor::run_locales(cmd, verbose),
         Command::Test(cmd) => test::run(cmd, verbose),
         Command::Ci(cmd) => ci::run(cmd, verbose),
     }

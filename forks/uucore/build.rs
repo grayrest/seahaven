@@ -215,12 +215,39 @@ fn embed_all_utility_locales(
     Ok(())
 }
 
-/// Embed static utility locales for crates.io builds.
+/// Embed utility locales from the catalogs vendored alongside this fork.
+///
+/// FLATLAND DIVERGENCE from upstream — see `plans/2026-08-18-uucore-fork.md` §1.
+/// This is the fork's only hand-written build-system edit; everything else here
+/// is pristine upstream or codemod output (D13).
+///
+/// Upstream scans this crate's *sibling registry directory* for
+/// `uu_<util>-<version>` and reads each one's `locales/`. That works only while
+/// the crate sits in a cargo registry cache. In `forks/uucore` the siblings are
+/// the leaf forks — `uu_cat`, `uu_head`, … — which carry no `-<version>`
+/// suffix, so upstream's `split_once('-')` matches nothing and *no* utility
+/// catalog is embedded.
+///
+/// The failure is silent rather than a build error, which is why it is worth
+/// this comment: `uucore/en-US.ftl` still loads from `manifest_dir`, so the
+/// bundle contains `common-error`, so `create_english_bundle_from_embedded`
+/// returns `Ok` on the partial bundle and localization reports success. Every
+/// utility-specific `translate!` then renders its raw Fluent key with a correct
+/// exit code. Upstream's own
+/// `mods::locale::tests::test_setup_localization_fallback_to_embedded` catches
+/// it, and that test is this fork's localization gate.
+///
+/// So the catalogs are vendored into `locales/utils/<util>/<locale>.ftl` by
+/// `cargo xtask vendor-locales` and read from a fixed path. Besides working from
+/// `forks/`, this makes the embedded strings a committed, reviewable input
+/// rather than a function of which crates happen to be unpacked in the
+/// developer's registry cache — upstream's scan would happily embed catalogs
+/// from a version the workspace no longer depends on.
 ///
 /// # Errors
 ///
-/// Returns an error if the directory containing the crate cannot be read or
-/// if writing to the `embedded_file` fails.
+/// Returns an error if the vendored locale directory cannot be read or if
+/// writing to the `embedded_file` fails.
 fn embed_static_utility_locales(
     embedded_file: &mut File,
     locales_to_embed: &(String, Option<String>),
@@ -229,36 +256,46 @@ fn embed_static_utility_locales(
 
     writeln!(
         embedded_file,
-        "        // Static utility locales for crates.io builds"
+        "        // Utility locales vendored by `cargo xtask vendor-locales`"
     )?;
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    let Some(registry_dir) = Path::new(&manifest_dir).parent() else {
-        return Ok(()); // nothing to scan
-    };
 
-    // First, try to embed uucore locales - critical for common translations like "Usage:"
+    // First, embed uucore's own locales - critical for common translations like "Usage:"
     embed_component_locales(embedded_file, locales_to_embed, "uucore", |locale| {
         Path::new(&manifest_dir).join(format!("locales/{locale}.ftl"))
     })?;
 
+    let vendored = Path::new(&manifest_dir).join("locales/utils");
+    println!("cargo:rerun-if-changed={}", vendored.display());
+    if !vendored.is_dir() {
+        // Not a hard error: a consumer building this fork without having run
+        // `vendor-locales` gets upstream's own degraded behaviour, and the
+        // localization test says so.
+        println!(
+            "cargo:warning=no vendored locales at {}; run `cargo xtask vendor-locales`",
+            vendored.display()
+        );
+        return Ok(());
+    }
+
     // Collect and sort for deterministic builds
-    let mut entries: Vec<_> = std::fs::read_dir(registry_dir)?
+    let mut entries: Vec<_> = std::fs::read_dir(&vendored)?
         .filter_map(Result::ok)
         .collect();
     entries.sort_by_key(std::fs::DirEntry::file_name);
 
     for entry in entries {
-        let file_name = entry.file_name();
-        if let Some(dir_name) = file_name.to_str() &&
-            // Match uu_<util>-<version>
-            let Some((util_part, _)) = dir_name.split_once('-') &&
-                let Some(util_name) = util_part.strip_prefix("uu_")
-        {
-            embed_component_locales(embedded_file, locales_to_embed, util_name, |locale| {
-                entry.path().join(format!("locales/{locale}.ftl"))
-            })?;
+        if !entry.path().is_dir() {
+            continue;
         }
+        let file_name = entry.file_name();
+        let Some(util_name) = file_name.to_str() else {
+            continue;
+        };
+        embed_component_locales(embedded_file, locales_to_embed, util_name, |locale| {
+            entry.path().join(format!("{locale}.ftl"))
+        })?;
     }
 
     Ok(())
