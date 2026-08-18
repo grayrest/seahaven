@@ -314,6 +314,20 @@ than falling under this rule. `set fallback`, which rocjust parses and does not
 yet act on, retries in the parent directory and would intersect to empty the day
 it is wired up.
 
+**Resolved: the grant is the union of every reachable file's tree, computed up
+front.** Imports and modules are written statically in the source, so the loader
+resolves the whole graph before execution and derives one grant covering it --
+read-write for the root justfile's tree, read-only for each imported tree. The
+default ceiling stops being "the justfile's own tree" and becomes "what this
+justfile is made of", which is what it always meant. Adding trees lazily as each
+import resolves was rejected because a grant that grows during execution cannot
+be shown to a user before the run starts; requiring an explicit grant per
+outside import was rejected because rocjust documents the shared-justfile
+pattern as supported.
+
+Discovery -- finding the root justfile in the first place -- is not covered by
+this rule and could not be; see D44.
+
 Whether the intersection is computed on virtual or host paths, and before or
 after canonicalization, is load-bearing and unstated: after canonicalization a
 symlinked subdirectory intersects to empty, and before it grants a host tree the
@@ -423,6 +437,22 @@ is shared state, so splitting instances makes a diamond run twice. Designed now
 even though the executor lands with `[parallel]`, because retrofitting handles
 means re-porting the Roc app.
 
+**Corrected again, and this reverses the entry's premise.** One instance is one
+store, so one deadline and one memory budget cover every job in it (D35), and
+the guest -- which D17 establishes as untrusted -- legitimately holds both its
+own frame handle and its sub-invocation's, so it can act for the broader frame
+and ignore D16's narrowing entirely. Per-frame grants inside one untrusted guest
+are advisory, not enforced.
+
+**So it is one store per sub-invocation, with the shared memo table owned by the
+host.** That makes the narrowing real, and gives each sub-invocation its own
+deadline and memory budget so a runaway job stops itself rather than its
+siblings. The rationale this entry was built on -- "splitting instances makes a
+diamond run twice" -- costs less than it appears: rocjust has *two* memo tables,
+and only the recipe "ran" set crosses invocations. That is a set of name and
+argument pairs, plain data the host can hold; the evaluator's memo caches effect
+values but is per-evaluation and stays in its own store.
+
 **Corrected:** one instance holds handles to sessions with *different* mount
 tables, and the guest supplies the selector — so the handle table is the whole
 boundary for D10's ambient-path model, and every effect re-resolves its mount
@@ -436,6 +466,16 @@ next time anything tars or copies the workspace — containment ends when the ru
 does. The check is free because an escaping link can never resolve anyway: **the
 safe set and the useful set are the same set**. Also: no cross-mount hardlinks,
 and the policy loader rejects mounts whose host directories overlap.
+
+**Resolved: an absolute target is rewritten relative to the link, or refused.**
+The check had no creation site at all -- `brush-vfs` could not create a link --
+so it was unwritten rather than free. Now that it can, the rule is that a link
+must mean the same thing inside the sandbox and on the host afterwards, since
+containment ends when the run does: `ln -s /work/a/b c` inside `/work` stores
+`a/b`. A target in a different mount cannot be expressed relatively and is
+refused. The cost, stated because it is observable: `readlink` reports the
+stored form, so it prints the rewritten target rather than what was written.
+Storing what was written was rejected as reopening the hazard this entry names.
 
 **Corrected — `ro` is not a property of a `Dir` fd.** It is enforced in
 userspace from a field, so anything reaching the filesystem without passing the
@@ -554,6 +594,14 @@ codegen rewrites outputs, so a legitimate run trips it. Default
 deadline. Generous by design — both catch *unbounded* behaviour, not legitimate
 work. Tight defaults with a raise flow were rejected as the fatigue pattern D29
 exists to avoid.
+
+**Resolved: two mechanisms, because neither covers the other.** Epoch
+interruption reaches a guest spinning in its own code, at loop backedges and
+function entries. It does *not* reach a guest blocked in a host call, and
+`wait_any` is one -- so the host puts its own timeout around every call that can
+block. Together they cover both shapes; either alone leaves a hole. The guest
+stays synchronous, which keeps the host API simple, and the residue that leaves
+-- a guest that returns from a call and loops -- is exactly what epochs catch.
 
 **Corrected — the deadline needs a mechanism to reach a guest that never
 yields.** A wasm infinite loop is not preemptible and an RSS quota never sees
@@ -759,3 +807,40 @@ random 128-bit tokens, which are unforgeable by construction but need a CSPRNG
 carved out of D14's injected RNG — otherwise `--hermetic` freezes the token
 source and makes handles predictable exactly where the guarantee is claimed
 loudest.
+
+## D44 — Discovery is a launcher act, bounded by a source-control root
+
+Finding the file to run is not something the sandbox can do, because the sandbox
+does not exist yet: the grant is derived from where the file is, and finding it
+means probing ancestors. D16 has no answer for it and could not have one.
+
+So discovery happens in the launcher, before any policy, alongside the
+launcher's own configuration (D6). Nothing inside the boundary performs the
+walk; the sandbox starts with the answer already in hand. A transient read-only
+policy for the probe was rejected — a second policy is a second thing to reason
+about, and it would exist for one syscall's worth of work.
+
+**The walk is bounded, and the bound is the point.** An unbounded upward search
+for a file that does not exist ends at the filesystem root, and a root that
+happens to contain the sought file grants everything below it. So the default
+walk looks for a **source-control root** — `.git`, `.hg`, `.svn` or `.jj`, as a
+file *or* a directory, because git writes `.git` as a file in worktrees and
+submodules and a directory-only check silently fails in both. The first marker
+found wins, so a nested repository gets its own tree rather than its parent's.
+
+The walk **fails** on reaching `$HOME`, the filesystem root, or a platform
+system tree, and **a marker found at or above one of those does not rescue it**.
+That case is not hypothetical: a dotfiles repository makes `$HOME` a source
+control root, and `$HOME` as a grant is nearly as bad as `/` — which is the
+outcome the bound exists to prevent. Anyone whose project *is* their dotfiles
+repository has to name a ceiling explicitly.
+
+Reaching a stop with no marker found is also a failure rather than a fallback to
+the working directory. The narrow fallback was argued for and rejected: it
+cannot produce a large grant, but "no root, no run" is the rule that never needs
+explaining, and a directory outside version control is exactly where a
+surprising grant would be least noticed.
+
+The strategy is configurable, because this platform is meant to carry more than
+rocjust and not every project is a repository. What is not configurable is that
+*some* bound applies.
