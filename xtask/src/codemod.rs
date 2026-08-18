@@ -269,7 +269,16 @@ fn handle_leaf(prefix: &[String], real: &str, local: &str, b: &mut Bindings) {
     } else if prefix == ["std", "fs"] {
         match real {
             "self" => {
-                b.module_aliases.insert(local.to_string());
+                // `use std::fs::{self}` binds the module under its own last
+                // segment name (`fs`); `self as alias` binds it under `alias`.
+                // Without this, `fs::metadata(p)` in `uu_wc` went unrewritten
+                // because the alias was recorded as "self".
+                let bound = if local == "self" {
+                    prefix.last().cloned().unwrap_or_else(|| local.to_string())
+                } else {
+                    local.to_string()
+                };
+                b.module_aliases.insert(bound);
             }
             "File" => {
                 b.file_names.insert(local.to_string());
@@ -464,38 +473,81 @@ fn prune_imports(
 }
 
 /// Rebuilds a single `use` item with prunable `std::fs` leaves removed, if any.
+///
+/// Only the *pure* form `use std::fs::...` is touched. A grouped
+/// `use std::{fs::File, ffi::OsString}` is left alone, because removing the fs
+/// leaf would mean rebuilding the whole group and risk dropping the siblings —
+/// the bug that deleted `OsString`/`Path` from `uu_wc`. An fs name left unused
+/// inside a group is a harmless unused-import warning, not a broken build.
 fn prune_use_item(
     use_item: &syn::ItemUse,
     prunable: &impl Fn(&str) -> bool,
     source: &str,
 ) -> Option<Edit> {
-    // Only touch `use std::fs::...` items. Collect the surviving leaves.
-    let mut kept: Vec<String> = Vec::new();
-    let mut dropped = false;
-    let mut is_fs_import = false;
-    collect_fs_leaves(
-        &use_item.tree,
-        &mut Vec::new(),
-        prunable,
-        &mut kept,
-        &mut dropped,
-        &mut is_fs_import,
-    );
+    // Match exactly `Path("std") -> Path("fs") -> tail`. Anything else (a group
+    // directly under `std`, an aliased module) is not the pure form.
+    let syn::UseTree::Path(std_p) = &use_item.tree else {
+        return None;
+    };
+    if std_p.ident != "std" {
+        return None;
+    }
+    let syn::UseTree::Path(fs_p) = &*std_p.tree else {
+        return None;
+    };
+    if fs_p.ident != "fs" {
+        return None;
+    }
 
-    if !is_fs_import || !dropped {
+    let (kept, dropped) = match &*fs_p.tree {
+        // `use std::fs::File;` — drop the whole statement if that name is unused.
+        syn::UseTree::Name(n) => {
+            if prunable(&n.ident.to_string()) {
+                (Vec::new(), true)
+            } else {
+                return None;
+            }
+        }
+        // `use std::fs::{a, b, c};` — keep the names still used. Bail if any leaf
+        // is not a plain name (a rename or nested group), rather than risk
+        // reconstructing it wrong.
+        syn::UseTree::Group(g) => {
+            let mut kept = Vec::new();
+            let mut dropped = false;
+            for item in &g.items {
+                let syn::UseTree::Name(n) = item else {
+                    return None;
+                };
+                let name = n.ident.to_string();
+                if prunable(&name) {
+                    dropped = true;
+                } else {
+                    kept.push(name);
+                }
+            }
+            if !dropped {
+                return None;
+            }
+            (kept, dropped)
+        }
+        // Glob or a direct rename: leave alone.
+        _ => return None,
+    };
+
+    if !dropped {
         return None;
     }
 
     let (start, end) = span_byte_range(use_item.span());
-    // Preserve any trailing newline the item owns by trimming to its own text.
-    let replacement = if kept.is_empty() {
+    if kept.is_empty() {
         // Remove the whole statement, including a trailing newline if present.
         return Some(Edit {
             start,
             end: consume_trailing_newline(source, end),
             replacement: String::new(),
         });
-    } else if kept.len() == 1 {
+    }
+    let replacement = if kept.len() == 1 {
         format!("use std::fs::{};", kept[0])
     } else {
         format!("use std::fs::{{{}}};", kept.join(", "))
@@ -505,47 +557,6 @@ fn prune_use_item(
         end,
         replacement,
     })
-}
-
-/// Walks a `use` tree collecting the `std::fs` leaves to keep vs drop.
-fn collect_fs_leaves(
-    tree: &syn::UseTree,
-    prefix: &mut Vec<String>,
-    prunable: &impl Fn(&str) -> bool,
-    kept: &mut Vec<String>,
-    dropped: &mut bool,
-    is_fs_import: &mut bool,
-) {
-    match tree {
-        syn::UseTree::Path(p) => {
-            prefix.push(p.ident.to_string());
-            collect_fs_leaves(&p.tree, prefix, prunable, kept, dropped, is_fs_import);
-            prefix.pop();
-        }
-        syn::UseTree::Group(g) => {
-            for item in &g.items {
-                collect_fs_leaves(item, prefix, prunable, kept, dropped, is_fs_import);
-            }
-        }
-        syn::UseTree::Name(n) => {
-            let name = n.ident.to_string();
-            if prefix.as_slice() == ["std", "fs"] {
-                *is_fs_import = true;
-                if prunable(&name) {
-                    *dropped = true;
-                } else {
-                    kept.push(name);
-                }
-            }
-        }
-        // Renames and globs are left alone: rare in the fork set, and pruning
-        // them safely needs more care than this version takes.
-        syn::UseTree::Rename(_) | syn::UseTree::Glob(_) => {
-            if prefix.as_slice() == ["std", "fs"] {
-                *is_fs_import = true;
-            }
-        }
-    }
 }
 
 /// The byte range a path's tokens occupy, from the first segment to the last.
@@ -716,6 +727,36 @@ mod tests {
             "use std::path::Path;\nfn f(p: &Path) { for _e in p.read_dir().unwrap() {} }\n",
         );
         assert!(out.source.contains("brush_vfs::ambient::read_dir(&(p))"));
+    }
+
+    #[test]
+    fn a_self_import_binds_the_module_under_fs_not_self() {
+        // The uu_wc bug: `use std::fs::{self, File}` binds the module as `fs`,
+        // so `fs::metadata(p)` must still be recognized and routed.
+        let out = routed(
+            "use std::fs::{self, File};\nfn f(p: &str) { let _ = fs::metadata(p); let _ = File::open(p); }\n",
+        );
+        assert!(
+            out.source.contains("brush_vfs::ambient::metadata(p)"),
+            "fs::metadata must route, got: {}",
+            out.source
+        );
+        assert!(out.source.contains("brush_vfs::ambient::open(p)"));
+    }
+
+    #[test]
+    fn a_grouped_std_import_keeps_its_non_fs_siblings() {
+        // The uu_wc bug: `File` is routed away, but the grouped import also
+        // brings in OsString and PathBuf, which must survive.
+        let out = routed(
+            "use std::{fs::File, ffi::OsString, path::PathBuf};\nfn f(p: &OsString) -> Option<(PathBuf, File)> { let _ = File::open(p); None }\n",
+        );
+        assert!(out.source.contains("brush_vfs::ambient::open(p)"));
+        assert!(
+            out.source.contains("use std::{fs::File, ffi::OsString, path::PathBuf};"),
+            "the grouped import must be untouched, got: {}",
+            out.source
+        );
     }
 
     #[test]
