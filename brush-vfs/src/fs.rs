@@ -373,7 +373,19 @@ impl Vfs {
                 // every mount point deeper than one component, which took
                 // `rename` and `symlink` -- the two that call it directly --
                 // out entirely.
-                Err(e) if !is_final && self.mounts.has_mount_below(&candidate) => {
+                // ...but never the virtual root itself. `has_mount_below` is
+                // true for `/` whenever any non-root mount exists, and a `..`
+                // in a symlink target reaches `/` as a candidate. Stepping
+                // through it and re-descending by *mount point* name is not
+                // what the host does, because a mount point is not its host
+                // directory's name: `../work/x` from a mount `/work` on
+                // `<root>/project` reads `<root>/project/x` here and
+                // `<root>/work/x` there.
+                Err(e)
+                    if !is_final
+                        && !candidate.is_root()
+                        && self.mounts.has_mount_below(&candidate) =>
+                {
                     let _ = e;
                     resolved = candidate;
                     cursor = None;
@@ -818,6 +830,28 @@ impl Vfs {
 
         Self::require_writable(&from)?;
         Self::require_writable(&to)?;
+
+        // Moving a symlink moves its stored bytes, and the same bytes mean
+        // something else from a different directory. `ln -s ..` is valid one
+        // level down and hands out the mount's parent at the root, so a link
+        // whose target does not survive the move is refused rather than
+        // silently relocated.
+        if from
+            .mount
+            .dir()
+            .symlink_metadata(&from.relative)
+            .is_ok_and(|m| m.is_symlink())
+        {
+            let stored = read_link_contents(from.mount, &from.relative)?;
+            let stored = stored.to_string_lossy();
+            if !stored_target_stays_in_mount(&to.relative, &stored) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("moving this link would point {stored} out of the mount"),
+                ));
+            }
+        }
+
         from.mount
             .dir()
             .rename(&from.relative, to.mount.dir(), &to.relative)
@@ -884,6 +918,12 @@ impl Vfs {
         // the followed one, so `read_link` reports what was asked for wherever
         // that is expressible rather than a resolved form.
         let stored = relative_from(&link.relative, &lexical.relative);
+        if !stored_target_stays_in_mount(&link.relative, &stored) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("symlink target {landing} leaves the mount when followed"),
+            ));
+        }
         cap_fs_ext::DirExt::symlink(link.mount.dir(), &stored, &link.relative)
     }
 
@@ -894,6 +934,35 @@ impl Vfs {
             Err(read_only(&located.virtual_path))
         }
     }
+}
+
+/// Whether `stored`, followed from the directory holding `link`, stays within
+/// the mount -- as the *host* would follow it, with no mount table involved.
+///
+/// This is the invariant that actually matters for a link, and it is lexical:
+/// the host resolves a stored target against the link's own directory and knows
+/// nothing about virtual paths. Checking containment virtually is not the same
+/// question, which is how `../secret.txt` came to be written once already.
+fn stored_target_stays_in_mount(link_relative: &std::path::Path, stored: &str) -> bool {
+    if stored.starts_with('/') {
+        return false;
+    }
+
+    // How deep the link's own directory sits inside the mount.
+    let mut depth = link_relative.parent().map_or(0, |p| p.components().count());
+
+    for component in stored.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => match depth.checked_sub(1) {
+                Some(shallower) => depth = shallower,
+                None => return false,
+            },
+            _ => depth += 1,
+        }
+    }
+
+    true
 }
 
 /// Expresses `target` relative to the directory holding `link`, both given
@@ -1274,6 +1343,138 @@ mod tests {
             .build()
             .expect("build");
         (root, Vfs::new(mounts))
+    }
+
+    /// A mount whose *point* is spelled differently from its host directory,
+    /// with a decoy on the host at the mount point's name.
+    ///
+    /// The ordinary fixture mounts `/work` on a directory called `work`, so a
+    /// virtual `..`-and-back and a host `..`-and-back land in the same place
+    /// and an entire class of divergence is invisible. Adversarial review found
+    /// three defects with this shape after the ordinary fixture found none.
+    #[cfg(unix)]
+    fn divergent_mount() -> (tempfile::TempDir, Vfs) {
+        let root = tempfile::tempdir().expect("temp dir");
+        let project = root.path().join("project");
+        std::fs::create_dir(&project).expect("mkdir project");
+        std::fs::create_dir(project.join("sub")).expect("mkdir sub");
+        std::fs::write(project.join("hello.txt"), b"hello").expect("write");
+
+        // Outside every mount, named so that a virtual `/work/x` and a host
+        // `../work/x` are different files.
+        std::fs::create_dir(root.path().join("work")).expect("mkdir decoy");
+        std::fs::write(
+            root.path().join("work").join("secret.txt"),
+            b"OUTSIDE EVERY MOUNT",
+        )
+        .expect("write");
+
+        let mounts = MountTable::builder()
+            .mount("/work", &project, Access::ReadWrite)
+            .expect("mount")
+            .build()
+            .expect("build");
+        (root, Vfs::new(mounts))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_cannot_be_relocated_into_meaning_something_else() {
+        // `ln -s ..` is valid one level down -- it names the mount root -- and
+        // hands out the mount's *parent* from the root. Creation validated the
+        // target against the directory the link was created in; moving it
+        // moved the same bytes somewhere they mean something else.
+        let (root, vfs) = divergent_mount();
+        vfs.symlink(&vp("/work/sub/up"), "..")
+            .expect("valid one level down");
+
+        let err = vfs
+            .rename(&vp("/work/sub/up"), &vp("/work/up"))
+            .expect_err("moving it must be refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+
+        assert!(
+            !root.path().join("project").join("up").exists(),
+            "nothing may be left at the destination"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_walk_does_not_step_through_the_virtual_root() {
+        // A `..` in a symlink target reaches `/` as a candidate. Stepping
+        // through it and re-descending by *mount point* name is not what the
+        // host does, because a mount point is not its host directory's name --
+        // so the vfs read one file and the host another through one link.
+        let (root, vfs) = divergent_mount();
+        std::os::unix::fs::symlink(
+            "../work/secret.txt",
+            root.path().join("project").join("via"),
+        )
+        .expect("plant");
+
+        assert!(
+            read(&vfs, "/work/via").is_err(),
+            "the namespace must not follow it"
+        );
+        assert!(vfs.facts(&vp("/work/via"), true).is_none());
+
+        // The host still follows it -- the link was planted, not written here,
+        // and no namespace can un-plant one. What matters is that the vfs does
+        // not read through it, and does not report it as resolving inside.
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("project").join("via")).ok(),
+            Some("OUTSIDE EVERY MOUNT".to_owned())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn no_sequence_of_calls_leaves_a_link_pointing_out_of_the_mount() {
+        // The property, stated as itself rather than as a list of blocked
+        // routes: after any accepted sequence, every link in the mount must
+        // resolve inside it *on the host*.
+        let (root, vfs) = divergent_mount();
+        // Canonicalized, because the comparison below is against canonicalized
+        // link targets and macOS resolves /var to /private/var.
+        let project = root
+            .path()
+            .join("project")
+            .canonicalize()
+            .expect("canonicalize the mount root");
+
+        assert!(vfs.symlink(&vp("/work/ok"), "hello.txt").is_ok());
+        assert!(vfs.symlink(&vp("/work/sub/back"), "../hello.txt").is_ok());
+        let _ = vfs.symlink(&vp("/work/up"), "..");
+        let _ = vfs.symlink(&vp("/work/out"), "../work/secret.txt");
+        let _ = vfs.symlink(&vp("/work/sub/deep"), "../../work/secret.txt");
+        let _ = vfs.rename(&vp("/work/sub/back"), &vp("/work/back"));
+
+        for entry in std::fs::read_dir(&project)
+            .into_iter()
+            .flatten()
+            .chain(std::fs::read_dir(project.join("sub")).into_iter().flatten())
+            .flatten()
+        {
+            let path = entry.path();
+            if !path.is_symlink() {
+                continue;
+            }
+            let resolved = path
+                .parent()
+                .expect("a link has a parent")
+                .join(std::fs::read_link(&path).expect("readlink"));
+            let canonical = resolved
+                .canonicalize()
+                .unwrap_or_else(|_| resolved.components().collect());
+            assert!(
+                canonical.starts_with(&project),
+                "{} resolves to {} on the host, outside {}",
+                path.display(),
+                canonical.display(),
+                project.display()
+            );
+        }
     }
 
     #[cfg(unix)]
