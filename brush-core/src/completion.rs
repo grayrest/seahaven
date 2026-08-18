@@ -328,7 +328,7 @@ impl Spec {
 
             let expansions = pattern
                 .expand(
-                    shell.working_dir(),
+                    shell.session(),
                     Some(&patterns::Pattern::accept_all_expand_filter),
                     &patterns::FilenameExpansionOptions::default(),
                 )?
@@ -1222,7 +1222,7 @@ async fn get_file_completions(
 
     let mut completions: Vec<String> = pattern
         .expand(
-            shell.working_dir(),
+            shell.session(),
             Some(&path_filter),
             &patterns::FilenameExpansionOptions::default(),
         )

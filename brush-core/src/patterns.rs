@@ -1,7 +1,10 @@
 //! Shell patterns
 
 use crate::{error, regex, sys, trace_categories};
-use std::{collections::VecDeque, path::Path};
+use std::{
+    collections::VecDeque,
+    path::{Path, PathBuf},
+};
 
 /// Represents a piece of a shell pattern.
 #[derive(Clone, Debug)]
@@ -111,6 +114,14 @@ impl From<String> for Pattern {
     }
 }
 
+/// Interprets an accumulated path as a virtual one.
+///
+/// Glob expansion walks paths it has built up component by component; they are
+/// virtual because the working directory it started from is.
+fn virtual_path(path: &Path) -> Option<brush_vfs::VirtualPath> {
+    brush_vfs::VirtualPath::new(path.to_string_lossy().as_ref()).ok()
+}
+
 impl Pattern {
     /// Enables (or disables) extended globbing support for this pattern.
     ///
@@ -164,7 +175,7 @@ impl Pattern {
     #[expect(clippy::too_many_lines)]
     pub(crate) fn expand<PF>(
         &self,
-        working_dir: &Path,
+        session: &brush_vfs::Session,
         path_filter: Option<&PF>,
         options: &FilenameExpansionOptions,
     ) -> Result<PatternExpansionResult, error::Error>
@@ -245,7 +256,7 @@ impl Pattern {
             // also uses `/` on Windows (to avoid `PathBuf::push` drive-letter
             // semantics) — if we left `\` here, the strip_prefix below would
             // miss on Windows and leave results as absolute paths.
-            let working_dir_str = working_dir.to_string_lossy();
+            let working_dir_str = std::borrow::Cow::Borrowed(session.cwd().as_str());
             let mut working_dir_str =
                 sys::fs::normalize_path_separators(&working_dir_str).into_owned();
             if !working_dir_str.ends_with('/') {
@@ -253,7 +264,7 @@ impl Pattern {
             }
 
             prefix_to_remove = Some(working_dir_str);
-            vec![working_dir.to_path_buf()]
+            vec![PathBuf::from(session.cwd().as_str())]
         };
 
         for component in components {
@@ -275,7 +286,20 @@ impl Pattern {
                     // bash. In particular this keeps dangling symlinks (which bash
                     // includes) while still rejecting a literal like `file/` whose
                     // trailing slash makes lstat fail with ENOTDIR for a regular file.
-                    p.symlink_metadata().is_ok()
+                    // A trailing slash demands a directory. `lstat` used to
+                    // enforce that for free by failing with ENOTDIR on `file/`;
+                    // the virtual grammar normalizes the slash away, so the
+                    // requirement has to be stated rather than inherited. When
+                    // one is required the probe follows symlinks, since `link/`
+                    // matches if the link points at a directory.
+                    let requires_dir = p.to_string_lossy().ends_with('/');
+
+                    virtual_path(p).is_some_and(|vp| {
+                        session
+                            .vfs()
+                            .facts(&vp, requires_dir)
+                            .is_some_and(|facts| !requires_dir || facts.is_dir)
+                    })
                 });
                 continue;
             }
@@ -294,25 +318,22 @@ impl Pattern {
                 let allow_dot_files = !options.require_dot_in_pattern_to_match_dot_files
                     || subpattern_starts_with_dot;
 
-                let matches_dotfile_policy = |dir_entry: &std::fs::DirEntry| {
-                    !dir_entry.file_name().to_string_lossy().starts_with('.') || allow_dot_files
-                };
+                let matches_dotfile_policy =
+                    |name: &String| !name.starts_with('.') || allow_dot_files;
 
                 let regex = subpattern.to_regex(true, true)?;
-                let matches_regex = |dir_entry: &std::fs::DirEntry| {
-                    regex
-                        .is_match(dir_entry.file_name().to_string_lossy().as_ref())
-                        .unwrap_or(false)
-                };
+                let matches_regex = |name: &String| regex.is_match(name).unwrap_or(false);
 
-                let mut matching_paths_in_dir: Vec<_> = current_path
-                    .read_dir()
-                    .map_or_else(|_| vec![], |dir| dir.into_iter().collect())
+                // Names rather than `DirEntry`s: the namespace hands back what
+                // is in the directory, and the path is rebuilt from the virtual
+                // parent, so nothing here can name a host location.
+                let mut matching_paths_in_dir: Vec<_> = virtual_path(&current_path)
+                    .and_then(|vp| session.vfs().read_dir_names(&vp).ok())
+                    .unwrap_or_default()
                     .into_iter()
-                    .filter_map(|result| result.ok())
                     .filter(matches_regex)
                     .filter(matches_dotfile_policy)
-                    .map(|entry| entry.path())
+                    .map(|name| current_path.join(name))
                     .collect();
 
                 matching_paths_in_dir.sort();
@@ -568,6 +589,20 @@ pub(crate) fn remove_smallest_matching_suffix<'a>(
 mod tests {
     use super::*;
     use anyhow::Result;
+
+    /// A session over the host filesystem whose working directory is `dir`.
+    ///
+    /// Glob expansion is defined against a namespace now, so these tests need
+    /// one. The identity policy keeps them looking at the same filesystem they
+    /// always did.
+    fn session_at(dir: &Path) -> brush_vfs::Session {
+        let mounts = brush_vfs::Policy::identity().expect("host root opens");
+        let mut session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
+        session
+            .set_cwd(dir.to_string_lossy().as_ref())
+            .expect("working directory is reachable");
+        session
+    }
 
     fn pattern_to_exact_regex_str<P>(pattern: P) -> Result<String, error::Error>
     where
@@ -973,7 +1008,7 @@ mod tests {
 
         let pattern = Pattern::from("sub/*.txt").set_extended_globbing(false);
         let result = pattern.expand::<fn(&Path) -> bool>(
-            scratch.path(),
+            &session_at(scratch.path()),
             None,
             &FilenameExpansionOptions::default(),
         )?;
@@ -1014,7 +1049,7 @@ mod tests {
 
         let pattern = Pattern::from(abs_pattern.as_str()).set_extended_globbing(false);
         let result = pattern.expand::<fn(&Path) -> bool>(
-            Path::new("/"),
+            &session_at(Path::new("/")),
             None,
             &FilenameExpansionOptions::default(),
         )?;

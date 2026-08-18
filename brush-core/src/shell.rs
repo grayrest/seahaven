@@ -261,6 +261,15 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
             ..Self::default()
         };
 
+        // The session's working directory must start where the shell's does.
+        // They are two views of one thing until D15 collapses them, and a glob
+        // expanding from `/` while the shell believes it is elsewhere is the
+        // kind of divergence that only shows up as wrong results.
+        {
+            let start = shell.working_dir().to_string_lossy().into_owned();
+            let _ = shell.session_mut().set_cwd(&start);
+        }
+
         // Add in any open files provided.
         shell.open_files.update_from(options.fds.into_iter());
 
