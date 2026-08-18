@@ -5,8 +5,9 @@ utilities (`cat`, `head`, `wc`, `tac`, `nl`) are forked and routed;
 `cargo xtask vendor-fork` automates the leaf case. `uucore` is not a leaf, and
 the attempt to run the same tool at it stopped on `couldn't read build.rs`.
 
-**Status: not started. One decision is open — see "The open decision" — and
-steps 5–7 cannot be written until it is settled.**
+**Status: not started. The one open decision is settled — a directory
+capability is added to `brush-vfs` (option (a)) — and scoping it shrank it
+considerably. See "Resolved: the directory capability".**
 
 **Revised once, after an independent review.** The first draft's measurements
 held up; four of its conclusions did not. It counted upstream's own test code as
@@ -214,37 +215,37 @@ confinement.
 that is itself outside the workspace (`forks/` is `exclude`d). Step 3 checks
 rather than assumes.
 
-## The open decision
+## Resolved: the directory capability
 
-**Steps 5–7 depend on this and cannot be written until it is settled.**
+**Decided: add it (option (a)).** The alternatives were leaving
+`safe_traversal`/`safe_copy`/`fs.rs` unconfined and documenting the hole, or
+re-resolving paths per operation — the latter rejected because it discards the
+`*at` anchoring that is the entire reason `safe_traversal` exists, reintroducing
+the TOCTOU races upstream wrote that module to close.
 
-Routing `DirFd::open`, `create_dest_restrictive` and `open_source` requires
-`brush-vfs` to hand back a **directory descriptor**. It has no such API, and
-`brush-vfs/src/fs.rs:3-7` argues against having one:
+**Scoping it after the decision shrank it, and this is the useful finding:**
+only *one* of the four hand-route targets actually needs a directory descriptor.
+The other three need small path-based additions, and two of the three already
+have most of what they need.
 
-> "The API is path-based and `std`-typed … Callers never hold a directory
-> capability. That is not a stylistic choice … an API demanding a `Dir` would
-> force them to be restructured rather than rewritten."
+| target | what it actually needs | state today |
+|---|---|---|
+| `safe_traversal::{DirFd::open, create_dir_all_safe}` | **a confined directory descriptor** — the new API | does not exist |
+| `safe_copy::{open_source, create_dest_restrictive}` | `O_NOFOLLOW` + a create mode on an ordinary file open | `OpenMode` (`fs.rs:80`) is already a builder struct — grows two fields |
+| `fs.rs::FileInformation::from_path` | `dev`/`ino` from a routed stat | `ambient::{metadata, symlink_metadata}` already return `std::fs::Metadata`; and `FileInformation` **already stores `fs::Metadata` on WASI** (`fs.rs:57`) — use that representation on Unix too |
+| `fs.rs::canonicalize`'s absolute base | the *session* cwd, not the host's | `Session::cwd()` already exists (`session.rs:56`); needs an `ambient::current_dir()` over it |
 
-D3 governs the same question. So this is not "hand-route two functions"; it is a
-design decision with three answers:
+So the reversal of `brush-vfs/src/fs.rs:3-7` is narrow. That text argues callers
+should not be *forced* to hold a `Dir`, because an API demanding one would make
+utilities restructure rather than rewrite — and that reasoning still stands for
+every path-based caller. What changes is that a caller which is *already*
+descriptor-shaped, as `DirFd` is, may ask for one. The path-based facade remains
+the default and the only thing the codemod emits.
 
-**(a) Add a directory-capability API to `brush-vfs`.** Confines
-`safe_traversal`, `safe_copy` and `fs.rs`'s `rustix` calls properly, preserving
-the TOCTOU safety `safe_traversal` exists to provide. Costs a documented reversal
-of `fs.rs:3-7` and a D3 amendment, and makes `cap_std::fs::Dir` — or a wrapper
-over it — escape the crate for the first time.
-
-**(b) Leave them unconfined this milestone and say so.** Smallest, most honest,
-and keeps D3 intact. The milestone then confines `uu_cksum`-shaped utilities
-(pure `uucore::checksum` consumers) and explicitly does **not** confine `cp`,
-`mv`, `du`, `ls` or recursive `chmod`. The unrouted surface gets named in
-`deny.toml` alongside `walkdir`.
-
-**(c) Route them through the path-based facade, re-resolving per operation.**
-Requires no new API and confines everything, but discards the `*at` anchoring
-that is the entire point of `safe_traversal` — reintroducing the TOCTOU races
-upstream wrote that module to close. Recommended against.
+**D3 needs an amendment, not a repeal.** Its claim is that capability handles
+never escape `brush-vfs`. After this they escape to exactly one consumer, under
+a wrapper type that exposes `*at` operations and no way to recover a host path.
+That amendment is step 4 and is a prerequisite for step 7, not a footnote.
 
 ## What this milestone does not prove
 
@@ -257,8 +258,10 @@ upstream wrote that module to close. Recommended against.
 weakest step here.
 
 **Anything about Windows.** `safe_traversal` is Unix-only, `safe_copy`'s
-`rustix` calls are Unix-only, and `fs.rs:92-102`'s Windows `OpenOptions` branch
-is unrouted and stays that way.
+`rustix` calls are Unix-only, the step-5 directory capability is Unix-only with
+them, and `fs.rs:92-102`'s Windows `OpenOptions` branch is unrouted and stays
+that way. So on Windows this milestone confines what the codemod routes and
+nothing that step 7 hand-routes — a real asymmetry, not a deferral.
 
 ## The change
 
@@ -298,21 +301,41 @@ is unrouted and stays that way.
    Prefer the second. Either way this is the first fork edit that is **not**
    codemod output, and it gets a comment naming this plan.
 
-5. **Route the §3 table** — ~24 production sites. *Blocked on the open decision
-   for `fs.rs`, whose disposition changes under (a) vs (b).*
+5. **Amend D3, then grow `brush-vfs` by four things.** The amendment lands
+   *first* — a capability escaping the crate is a decision, and writing the code
+   before the decision is recorded inverts D13's discipline.
+   - **A directory-capability type.** A confined descriptor exposing the `*at`
+     operations `DirFd` needs (`openat`, `fstatat`, `unlinkat`, `mkdirat`,
+     `fchmodat`, `fchownat`, `readdir`) and **no way to recover a host path** —
+     that last property is what keeps D3's claim true in its amended form.
+     Unix-only, matching `safe_traversal`.
+   - **`OpenMode` grows `nofollow` and a create mode** (`fs.rs:80`), for
+     `safe_copy`. `open_source` needs `O_NOFOLLOW`; `create_dest_restrictive`
+     needs it plus `DEST_INITIAL_MODE`'s `0600`.
+   - **`ambient::current_dir()`** over `Session::cwd()`, for `fs.rs`'s
+     `canonicalize` base.
+   - **Confinement tests for each**, in `brush-vfs`'s own suite, before any
+     consumer exists — the crate's existing pattern.
 
-6. **Hand-route per the open decision.** Under (a): `DirFd::open`,
-   `create_dir_all_safe`, `open_source`, `create_dest_restrictive`,
-   `FileInformation::from_path`, and `uucore::fs::canonicalize`'s cwd base.
-   Under (b): none of them, and step 6 becomes a documentation task plus
-   `deny.toml` entries. This is the residual patch set D13 says to measure.
+6. **Route the §3 table** — ~24 production sites, `--skip` for the three
+   compiled "leave" modules and the six un-compiled ones. Residual patch set
+   expected to be `perms.rs:499` only, and zero once step 2's
+   `REWRITTEN_PATH_METHODS` fix lands.
 
-7. **A feature-set guard.** Assert the 76-feature set `coreutils.all` resolves
+7. **Hand-route the four targets** against step 5's API:
+   `safe_traversal::{DirFd::open, create_dir_all_safe}` onto the directory
+   capability; `safe_copy::{open_source, create_dest_restrictive}` onto
+   `OpenMode`; `FileInformation::from_path` onto `ambient::{metadata,
+   symlink_metadata}` via the WASI representation; `fs.rs::canonicalize`'s base
+   onto `ambient::current_dir()`. **This is the residual patch set D13 says to
+   measure** — the only code here that a re-run cannot regenerate.
+
+8. **A feature-set guard.** Assert the 76-feature set `coreutils.all` resolves
    to and fail when it changes, so enabling `uptime` forces a decision rather
    than shipping 29 unrouted sites. *Re-derive after step 2 — the first draft
    froze a table that step 2 invalidates.*
 
-8. **CI wiring.** `xtask/src/{ci,test}.rs` contain **zero** references to
+9. **CI wiring.** `xtask/src/{ci,test}.rs` contain **zero** references to
    `forks/`. Gates 1, 2 and 5 have no home today and must be given one, or they
    are notes.
 
@@ -379,7 +402,21 @@ or could not be run and are replaced.
    and `xattr` remain justified by comments that this milestone falsified, or if
    `nix`, `rustix` and `procfs` — the actual unrouted surface after step 5 — are
    absent from the deny list. Whether they are *bans* or documented `wrappers`
-   entries depends on the open decision.
+   entries depends on how much step 7 confines.
+
+9. **The directory capability cannot leak a host path.** *Fails if:* any public
+   method on the new type returns a `PathBuf`, a host-absolute string, or a raw
+   fd a caller could `fstat`-and-reconstruct from `/proc/self/fd`. This is the
+   single property D3's amendment rests on; without it the amendment is a
+   repeal. Assert it as a test, not a review convention — D3's own text is that
+   a mechanism whose failure mode is silence must be proven on.
+
+10. **A `DirFd` rooted in the namespace cannot walk out of it.** *Fails if:* a
+    `..` component, an absolute symlink, or a symlinked subdirectory reaches a
+    host path outside the mount. `safe_traversal` is the recursive-descent
+    engine behind `chmod -R` and `chown -R`; a confined root that leaks on
+    traversal confines nothing. Mirrors the escape suite `brush-vfs` already has
+    for paths.
 
 ## Risk
 
@@ -390,10 +427,20 @@ or could not be run and are replaced.
 in localization. Gate 4 is the only thing between them and a green suite, which
 is why it moved to first.
 
-**The open decision is load-bearing and unresolved.** Under (b) this milestone
-is small, honest and confines less than its title suggests. Under (a) it grows a
-`brush-vfs` API change and a D3 amendment. Estimating before it is settled would
-be fiction.
+**The directory capability is the largest single piece, and it is new
+security-relevant surface rather than a rewrite.** Everything else in this
+milestone moves existing calls onto an existing facade; step 5 writes a
+primitive that did not exist, in the one place D3 says hand-rolled hardening is
+the thing to avoid. It is scoped down by leaning on `cap-std`'s `Dir` underneath
+rather than re-deriving `*at` resolution — but the wrapper is still the part to
+review hardest, and gates 9 and 10 are the two that most need to be written
+before the code rather than after.
+
+**Step 7 is unregenerable and grew.** The first draft treated hand-routing as
+two functions in one module; it is six entry points across three. Every one of
+them is a place a future upstream import can silently diverge, which is exactly
+what D13's residual-patch-set metric is for — expect it to be the number that
+moves at the next rebase.
 
 **`[patch]` is unverified against a `forks/`-excluded path dep.** If it does not
 reach, the fallback is editing seven manifests — more churn, regenerated by
