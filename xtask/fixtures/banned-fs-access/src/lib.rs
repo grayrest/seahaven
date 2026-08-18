@@ -155,9 +155,77 @@ fn below_std() {
         libc::chroot(p);
     }
 
+    nix::unistd::fchdir(std::io::stdin());
+    nix::unistd::linkat(
+        std::io::stdin(),
+        path(),
+        std::io::stdin(),
+        path(),
+        nix::unistd::LinkatFlags::NoSymlinkFollow,
+    );
+    nix::unistd::mkfifo(path(), nix::sys::stat::Mode::empty());
+    nix::unistd::pathconf(path(), nix::unistd::PathconfVar::NAME_MAX);
+    nix::fcntl::openat(
+        std::io::stdin(),
+        path(),
+        nix::fcntl::OFlag::O_RDONLY,
+        nix::sys::stat::Mode::empty(),
+    );
+    nix::fcntl::renameat(std::io::stdin(), path(), std::io::stdin(), path());
+    nix::fcntl::readlinkat(std::io::stdin(), path());
+    nix::sys::stat::fstatat(
+        std::io::stdin(),
+        path(),
+        nix::fcntl::AtFlags::empty(),
+    );
+    nix::sys::stat::fchmodat(
+        std::io::stdin(),
+        path(),
+        nix::sys::stat::Mode::empty(),
+        nix::sys::stat::FchmodatFlags::FollowSymlink,
+    );
+    nix::sys::stat::mknod(path(), nix::sys::stat::SFlag::S_IFREG, nix::sys::stat::Mode::empty(), 0);
+    nix::sys::statvfs::statvfs(path());
+
+    // SAFETY: never executed; the fixture exists to be linted, not run.
+    unsafe {
+        let p = c"/".as_ptr();
+        libc::fopen(p, p);
+        libc::freopen(p, p, std::ptr::null_mut());
+        libc::tmpfile();
+        libc::remove(p);
+        libc::renameat(0, p, 0, p);
+        libc::linkat(0, p, 0, p, 0);
+        libc::symlinkat(p, 0, p);
+        libc::readlinkat(0, p, std::ptr::null_mut(), 0);
+        libc::faccessat(0, p, 0, 0);
+        libc::fchmodat(0, p, 0, 0);
+        libc::fchownat(0, p, 0, 0, 0);
+        libc::utimensat(0, p, std::ptr::null(), 0);
+        libc::utimes(p, std::ptr::null());
+        libc::mkdirat(0, p, 0);
+        libc::unlinkat(0, p, 0);
+        libc::mkfifo(p, 0);
+        libc::mkstemp(std::ptr::null_mut());
+        libc::mkdtemp(std::ptr::null_mut());
+        libc::fchdir(0);
+        libc::lchown(p, 0, 0);
+        libc::opendir(p);
+        libc::fdopendir(0);
+        libc::readdir(std::ptr::null_mut());
+        libc::pathconf(p, 0);
+        libc::execv(p, std::ptr::null());
+        libc::execve(p, std::ptr::null(), std::ptr::null());
+        libc::execvp(p, std::ptr::null());
+        libc::system(p);
+        libc::popen(p, p);
+    }
+
     std::os::unix::net::UnixStream::connect(path());
     std::os::unix::net::UnixListener::bind(path());
     std::os::unix::net::UnixDatagram::bind(path());
+    let _ = std::os::unix::net::UnixDatagram::unbound().map(|d| d.connect(path()));
+    std::os::unix::net::SocketAddr::from_pathname(path());
 }
 
 /// Scratch space outside every mount, and a host path handed to a child.
@@ -175,6 +243,15 @@ fn scratch_and_children() {
     tempfile::Builder::new().tempfile_in(path());
     tempfile::Builder::new().tempdir();
     tempfile::Builder::new().tempdir_in(path());
+    tempfile::Builder::new().make(|_| Ok(std::fs::File::options()));
+    tempfile::Builder::new().make_in(path(), |_| Ok(std::fs::File::options()));
+    tempfile::NamedTempFile::with_prefix("p");
+    tempfile::NamedTempFile::with_prefix_in("p", path());
+    tempfile::NamedTempFile::with_suffix("s");
+    tempfile::NamedTempFile::with_suffix_in("s", path());
+    tempfile::TempDir::with_prefix("p");
+    tempfile::TempDir::with_prefix_in("p", path());
+    tempfile::spooled_tempfile_in(0, path());
     tempfile::env::temp_dir();
     std::process::Command::new("x").current_dir(path());
 }

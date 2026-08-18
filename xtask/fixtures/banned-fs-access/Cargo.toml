@@ -17,7 +17,7 @@ path = "src/lib.rs"
 # able to name every one of them.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nix = { version = "0.31", features = ["fs", "dir", "user", "time"] }
+nix = { version = "0.31", features = ["fs", "dir", "user", "time", "feature"] }
 
 [dependencies]
 tempfile = "3"

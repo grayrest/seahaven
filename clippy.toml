@@ -113,12 +113,59 @@ disallowed-methods = [
   { path = "libc::truncate", reason = "open through brush_vfs::Vfs" },
   { path = "libc::chmod", reason = "not expressible in the namespace yet" },
   { path = "libc::chroot", reason = "the namespace is the confinement, not chroot" },
+  # The `*at` family and the stdio wrappers, which the first pass missed even
+  # though it banned their nix spellings.
+  { path = "libc::fopen", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "libc::freopen", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "libc::tmpfile", reason = "scratch space is outside the namespace; see D38" },
+  { path = "libc::remove", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "libc::renameat", reason = "use brush_vfs::Vfs::rename" },
+  { path = "libc::linkat", reason = "not expressible in the namespace yet" },
+  { path = "libc::symlinkat", reason = "use brush_vfs::Vfs::symlink, which validates the target" },
+  { path = "libc::readlinkat", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "libc::faccessat", reason = "use brush_vfs::Vfs::access" },
+  { path = "libc::fchmodat", reason = "not expressible in the namespace yet" },
+  { path = "libc::fchownat", reason = "not expressible in the namespace yet" },
+  { path = "libc::utimensat", reason = "not expressible in the namespace yet" },
+  { path = "libc::utimes", reason = "not expressible in the namespace yet" },
+  { path = "libc::mkdirat", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "libc::unlinkat", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "libc::mkfifo", reason = "not expressible in the namespace yet" },
+  { path = "libc::mkstemp", reason = "scratch space is outside the namespace" },
+  { path = "libc::mkdtemp", reason = "scratch space is outside the namespace" },
+  { path = "libc::fchdir", reason = "the namespace's cwd is per-session" },
+  { path = "libc::lchown", reason = "not expressible in the namespace yet" },
+  { path = "libc::opendir", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "libc::fdopendir", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "libc::readdir", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "libc::pathconf", reason = "not expressible in the namespace yet" },
+  # Executing a program is the namespace's business too; see the confused
+  # deputy the plan records.
+  { path = "libc::execv", reason = "use Shell::host_path_for_execution" },
+  { path = "libc::execve", reason = "use Shell::host_path_for_execution" },
+  { path = "libc::execvp", reason = "use Shell::host_path_for_execution" },
+  { path = "libc::system", reason = "the closed world decides what may run; see D2" },
+  { path = "libc::popen", reason = "the closed world decides what may run; see D2" },
+
+  { path = "nix::unistd::fchdir", reason = "the namespace's cwd is per-session" },
+  { path = "nix::unistd::linkat", reason = "not expressible in the namespace yet" },
+  { path = "nix::unistd::mkfifo", reason = "not expressible in the namespace yet" },
+  { path = "nix::unistd::pathconf", reason = "not expressible in the namespace yet" },
+  { path = "nix::fcntl::openat", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "nix::fcntl::renameat", reason = "use brush_vfs::Vfs::rename" },
+  { path = "nix::fcntl::readlinkat", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "nix::sys::stat::fstatat", reason = "use brush_vfs::Vfs::facts" },
+  { path = "nix::sys::stat::fchmodat", reason = "not expressible in the namespace yet" },
+  { path = "nix::sys::stat::mknod", reason = "not expressible in the namespace yet" },
+  { path = "nix::sys::statvfs::statvfs", reason = "the host's filesystem layout is not the namespace's" },
 
   # A unix socket is named by a host path like anything else, and `bind`
   # *creates* a file outside every mount.
   { path = "std::os::unix::net::UnixStream::connect", reason = "not expressible in the namespace yet" },
   { path = "std::os::unix::net::UnixListener::bind", reason = "creates a host file outside every mount" },
   { path = "std::os::unix::net::UnixDatagram::bind", reason = "creates a host file outside every mount" },
+  { path = "std::os::unix::net::UnixDatagram::connect", reason = "not expressible in the namespace yet" },
+  { path = "std::os::unix::net::SocketAddr::from_pathname", reason = "a socket address is a host path" },
 
   # Scratch space outside every mount. Here-documents use `tempfile::tempfile`
   # deliberately (D38) and carry an exemption; nothing else should.
@@ -138,6 +185,15 @@ disallowed-methods = [
   { path = "tempfile::Builder::tempfile_in", reason = "scratch space is outside the namespace" },
   { path = "tempfile::Builder::tempdir", reason = "scratch space is outside the namespace" },
   { path = "tempfile::Builder::tempdir_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::Builder::make", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::Builder::make_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::NamedTempFile::with_prefix", reason = "a named temporary is a host path" },
+  { path = "tempfile::NamedTempFile::with_prefix_in", reason = "a named temporary is a host path" },
+  { path = "tempfile::NamedTempFile::with_suffix", reason = "a named temporary is a host path" },
+  { path = "tempfile::NamedTempFile::with_suffix_in", reason = "a named temporary is a host path" },
+  { path = "tempfile::TempDir::with_prefix", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::TempDir::with_prefix_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::spooled_tempfile_in", reason = "scratch space is outside the namespace" },
   { path = "tempfile::env::temp_dir", reason = "the host's temp directory is not in the namespace" },
 
   # Hands a host path to a child process.

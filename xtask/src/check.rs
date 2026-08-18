@@ -76,16 +76,17 @@ fn check_fmt(sh: &Shell, verbose: bool) -> Result<()> {
 
 fn check_lint(sh: &Shell, verbose: bool) -> Result<()> {
     eprintln!("Running clippy...");
-    let mut args = vec!["clippy", "--workspace", "--all-features", "--all-targets"];
+    let args = lint_args(verbose);
+
+    // Checked here, on the argv about to be used, rather than only from
+    // `check_ban`. A guard that inspects some *other* assembly of the arguments
+    // is defeated by shadowing whatever it inspects; this one cannot be, because
+    // it is the same `args` that reaches `cargo` on the next line.
+    assert_denies_warnings(&args)?;
+
     if verbose {
-        args.push("--verbose");
-        eprintln!(
-            "Running: cargo {} {}",
-            args.join(" "),
-            DENY_WARNINGS.join(" ")
-        );
+        eprintln!("Running: cargo {}", args.join(" "));
     }
-    args.extend_from_slice(&DENY_WARNINGS);
     cmd!(sh, "cargo {args...}")
         .run()
         .context("Clippy check failed")?;
@@ -93,13 +94,24 @@ fn check_lint(sh: &Shell, verbose: bool) -> Result<()> {
     Ok(())
 }
 
-/// The arguments that make the workspace lint deny rather than report.
+/// The exact argv the workspace lint runs, and the only place it is assembled.
 ///
-/// Load-bearing, not belt-and-braces: `disallowed_methods` is warn-by-default,
-/// so without these the filesystem ban reports every violation and exits 0.
-/// Held in a constant so that `check_ban` can assert on the value the lint
-/// actually uses rather than on the text of the function that uses it.
-const DENY_WARNINGS: [&str; 3] = ["--", "-D", "warnings"];
+/// The trailing `-D warnings` is load-bearing: `disallowed_methods` is
+/// warn-by-default, so without it the filesystem ban reports every violation
+/// and exits 0. Earlier guards over this were defeated four ways in review --
+/// a comment naming the flags, a constant shadowed inside `check_lint`, a
+/// second `fn check_lint` that the text search found first, and a splice
+/// wrapped in `if env::var("CI").is_err()`. All four worked because the guard
+/// read source text; [`check_lint_denies_warnings`] reads this function's
+/// return value instead.
+fn lint_args(verbose: bool) -> Vec<&'static str> {
+    let mut args = vec!["clippy", "--workspace", "--all-features", "--all-targets"];
+    if verbose {
+        args.push("--verbose");
+    }
+    args.extend_from_slice(&["--", "-D", "warnings"]);
+    args
+}
 
 /// Path of the crate that must fail to lint, relative to the workspace root.
 const BAN_FIXTURE: &str = "xtask/fixtures/banned-fs-access";
@@ -219,41 +231,44 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
 
 /// Verify that the workspace lint invocation actually denies warnings.
 ///
-/// The first version of this read `check_lint`'s body as text and asked whether
-/// `"-D"` and `"warnings"` appeared anywhere in it. Adversarial review defeated
-/// it by deleting the flags and leaving a comment mentioning them: a textual
-/// guard over prose cannot tell an argument from a sentence about one. So the
-/// flags live in [`DENY_WARNINGS`] and this asserts on the value, which is the
-/// same value `check_lint` splices into its argv.
+/// Inspects the argv [`lint_args`] returns. Reading the value rather than the
+/// source is the point: a textual guard cannot tell an argument from a comment
+/// about one, cannot see a shadowed constant, takes the first of two
+/// identically-named functions, and is satisfied by a splice a condition skips.
 fn check_lint_denies_warnings() -> Result<()> {
-    let expected = ["--", "-D", "warnings"];
-    if DENY_WARNINGS != expected {
-        anyhow::bail!(
-            "DENY_WARNINGS is {DENY_WARNINGS:?}, expected {expected:?}; the filesystem ban \
-             would report violations and still exit 0"
-        );
+    for verbose in [false, true] {
+        assert_denies_warnings(&lint_args(verbose))?;
     }
+    Ok(())
+}
 
-    // And that the lint actually splices it in. One `contains` over the source,
-    // but of an identifier this time rather than of the flag text -- an
-    // identifier cannot be satisfied by a comment that merely names it, because
-    // removing the use is what the check is looking for.
-    let root = crate::common::find_workspace_root()?;
-    let this_file = root.join("xtask/src/check.rs");
-    let source = std::fs::read_to_string(&this_file)
-        .with_context(|| format!("reading {}", this_file.display()))?;
-    let body = source
-        .split_once("fn check_lint(")
-        .map(|(_, rest)| rest)
-        .and_then(|rest| rest.split_once("\nfn "))
-        .map(|(body, _)| body)
-        .context("could not find check_lint's body in xtask/src/check.rs")?;
+/// The predicate itself: this argv must deny warnings and must not take the
+/// denial back.
+fn assert_denies_warnings(args: &[&str]) -> Result<()> {
+    {
+        let Some(separator) = args.iter().position(|a| *a == "--") else {
+            anyhow::bail!("the lint argv has no `--` separator: {args:?}");
+        };
+        let rustc_args = &args[separator + 1..];
 
-    if !body.contains("args.extend_from_slice(&DENY_WARNINGS)") {
-        anyhow::bail!(
-            "check_lint no longer splices DENY_WARNINGS into its argv; the filesystem ban \
-             would report violations and still exit 0"
-        );
+        if !rustc_args.windows(2).any(|w| w == ["-D", "warnings"]) {
+            anyhow::bail!(
+                "the lint argv does not deny warnings: {args:?}; the filesystem ban would \
+                 report violations and still exit 0"
+            );
+        }
+
+        // Nothing after it may take the ban back: a later `-A` overrides an
+        // earlier `-D`, so a trailing allow silently undoes the whole list.
+        if let Some(allow) = rustc_args
+            .iter()
+            .position(|a| *a == "-A" || a.starts_with("--allow"))
+        {
+            anyhow::bail!(
+                "the lint argv allows lints back at position {allow}: {args:?}; a later `-A` \
+                 overrides `-D warnings`"
+            );
+        }
     }
 
     Ok(())
