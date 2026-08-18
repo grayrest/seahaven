@@ -1680,7 +1680,15 @@ pub(crate) async fn setup_redirect(
                             {
                                 // First check to see if the path points to an existing regular
                                 // file.
-                                if !expanded_file_path.is_file() {
+                                // The noclobber gate has to agree with the
+                                // open that follows it; asking the host would
+                                // answer about a different filesystem.
+                                if !shell
+                                    .to_virtual_path(&expanded_file_path)
+                                    .ok()
+                                    .and_then(|p| shell.session().vfs().facts(&p, true))
+                                    .is_some_and(|f| f.is_file)
+                                {
                                     options = options.with_create(true);
                                 } else {
                                     options = options.with_create_new(true);

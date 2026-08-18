@@ -657,7 +657,11 @@ pub(crate) fn execute_external_command(
             }
 
             if spawn_err.kind() == std::io::ErrorKind::NotFound {
-                if !context.shell.working_dir().exists() {
+                if !context
+                    .shell
+                    .to_virtual_path(context.shell.working_dir())
+                    .is_ok_and(|p| context.shell.session().vfs().exists(&p))
+                {
                     Err(
                         error::ErrorKind::WorkingDirMissing(context.shell.working_dir().to_owned())
                             .into(),

@@ -28,7 +28,12 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         params: &ExecutionParameters,
     ) -> Result<bool, error::Error> {
         let path = path.as_ref();
-        if path.exists() {
+        // This gate and the open below must answer about the same filesystem,
+        // or `source` reports a file it then cannot read.
+        if self
+            .to_virtual_path(&self.absolute_path(path))
+            .is_ok_and(|p| self.session().vfs().exists(&p))
+        {
             self.source_script(path, std::iter::empty::<String>(), params)
                 .await?;
             Ok(true)
