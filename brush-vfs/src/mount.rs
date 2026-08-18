@@ -90,6 +90,12 @@ pub struct Mount {
     dir: cap_std::fs::Dir,
     host_path: PathBuf,
     access: Access,
+    /// Whether another mount point lies strictly beneath this one.
+    ///
+    /// Computed once at build time because it decides, per operation, whether
+    /// this mount's host directory may be walked in one step. See
+    /// [`Mount::shadows_a_nested_mount`].
+    shadows_nested: bool,
 }
 
 impl Mount {
@@ -121,6 +127,21 @@ impl Mount {
     #[must_use]
     pub fn host_path(&self) -> &Path {
         &self.host_path
+    }
+
+    /// Whether another mount point lies strictly beneath this one.
+    ///
+    /// When it does, this mount's host directory cannot be walked in one step,
+    /// because a virtual mount boundary is not a host directory boundary. A
+    /// relative symlink inside this mount can cross the boundary without ever
+    /// leaving the host directory, so the host's own resolution follows it into
+    /// the directory the nested mount *shadows* -- reaching content the
+    /// namespace cannot name, and answering to this mount's access mode rather
+    /// than the nested mount's. Only the component-by-component walk re-enters
+    /// the mount table after each symlink hop.
+    #[must_use]
+    pub const fn shadows_a_nested_mount(&self) -> bool {
+        self.shadows_nested
     }
 }
 
@@ -273,11 +294,27 @@ impl MountTableBuilder {
                 dir,
                 host_path,
                 access,
+                shadows_nested: false,
             });
         }
 
         // Longest mount point first, so `resolve` can take the first match.
         mounts.sort_by_key(|m| std::cmp::Reverse(m.at.components().count()));
+
+        // Record which mounts have another mount point beneath them. Done here
+        // rather than asked per operation because the answer never changes and
+        // the question is on the hot path.
+        let nested: Vec<bool> = mounts
+            .iter()
+            .map(|outer| {
+                mounts
+                    .iter()
+                    .any(|inner| inner.at != outer.at && inner.at.starts_with(&outer.at))
+            })
+            .collect();
+        for (mount, shadows_nested) in mounts.iter_mut().zip(nested) {
+            mount.shadows_nested = shadows_nested;
+        }
 
         Ok(MountTable { mounts })
     }

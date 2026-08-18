@@ -466,6 +466,25 @@ impl Vfs {
     /// refused by a read-only mount, and `access(2)` answering no -- and both
     /// pay for a second walk that reaches the same answer. They are error
     /// paths, and the alternative is matching on cap-std's wording.
+    ///
+    /// **All of that holds only while a mount's host directory and its virtual
+    /// subtree are the same thing.** They stop being the same as soon as
+    /// another mount point lies beneath this one: a relative symlink can then
+    /// cross the virtual boundary without leaving the host directory, and
+    /// cap-std, which knows nothing of the mount table, follows it into the
+    /// directory the nested mount shadows. So a mount that shadows a nested one
+    /// never takes the fast path.
+    ///
+    /// One divergence remains and is deliberate. The grammar's *containment*
+    /// rules survive here, because cap-std enforces them independently: a
+    /// symlink target that climbs past the virtual root, or that is absolute,
+    /// is refused either way. Its *portability* rules do not -- a target naming
+    /// a reserved device name, a colon or a trailing dot is refused to a caller
+    /// but followed here, because a symlink target inside a mount is host data
+    /// and this path never inspects it. The reachable set is therefore slightly
+    /// larger than the nameable one, with no authority gained; closing it means
+    /// walking every path component by component, which is the cost this exists
+    /// to avoid.
     fn at<T>(
         &self,
         path: &VirtualPath,
@@ -473,9 +492,11 @@ impl Vfs {
         op: impl Fn(&Located<'_>) -> std::io::Result<T>,
     ) -> std::io::Result<T> {
         let direct = self.locate_exact(path)?;
-        match op(&direct) {
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
-            result => return result,
+        if !direct.mount.shadows_a_nested_mount() {
+            match op(&direct) {
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
+                result => return result,
+            }
         }
 
         let located = self.locate(path, follow_final)?;
@@ -896,6 +917,159 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
+    /// A virtually nested pair of mounts on *disjoint host directories*, which
+    /// the builder permits: it checks that host directories do not overlap, and
+    /// these do not.
+    ///
+    ///   /work        -> <tmp>/outer   rw
+    ///   /work/vendor -> <tmp>/inner   ro
+    ///
+    /// `<tmp>/outer` also holds a real `vendor` directory that the nested mount
+    /// shadows, and a plain relative symlink `link -> vendor`. The symlink never
+    /// leaves the outer mount's host directory, so nothing at the host level
+    /// objects to it -- but virtually it crosses a mount boundary.
+    #[cfg(unix)]
+    fn nested_mounts() -> (tempfile::TempDir, Vfs) {
+        let root = tempfile::tempdir().expect("temp dir");
+        let outer = root.path().join("outer");
+        let inner = root.path().join("inner");
+        std::fs::create_dir(&outer).expect("mkdir outer");
+        std::fs::create_dir(&inner).expect("mkdir inner");
+
+        std::fs::write(inner.join("lib.rs"), b"real").expect("write inner");
+        std::fs::create_dir(outer.join("vendor")).expect("mkdir shadow");
+        std::fs::write(outer.join("vendor").join("lib.rs"), b"shadowed").expect("write shadow");
+        std::fs::write(outer.join("vendor").join("hidden.txt"), b"hidden").expect("write hidden");
+        std::os::unix::fs::symlink("vendor", outer.join("link")).expect("symlink");
+
+        let mounts = MountTable::builder()
+            .mount("/work", &outer, Access::ReadWrite)
+            .expect("outer mount")
+            .mount("/work/vendor", &inner, Access::ReadOnly)
+            .expect("nested mount")
+            .build()
+            .expect("disjoint host dirs must build");
+
+        (root, Vfs::new(mounts))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_across_a_nested_mount_boundary_lands_in_the_nested_mount() {
+        // A virtual mount boundary is not a host directory boundary. Resolving
+        // the whole path in one step would follow `link` into the directory the
+        // nested mount shadows, without ever leaving the outer mount's host
+        // directory -- so nothing at the host level would object.
+        let (_root, vfs) = nested_mounts();
+        assert_eq!(read(&vfs, "/work/vendor/lib.rs").unwrap(), "real");
+        assert_eq!(read(&vfs, "/work/link/lib.rs").unwrap(), "real");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_shadowed_directory_is_not_reachable_through_a_symlink() {
+        // `hidden.txt` exists only in the directory the nested mount shadows,
+        // so no virtual path names it. A path that resolved in the outer
+        // mount's host tree would reach it.
+        let (_root, vfs) = nested_mounts();
+        assert!(read(&vfs, "/work/vendor/hidden.txt").is_err());
+        assert!(read(&vfs, "/work/link/hidden.txt").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_nested_mount_is_read_only_through_a_symlink_too() {
+        // The access mode must come from where the path lands, not from which
+        // mount the caller happened to name.
+        let (_root, vfs) = nested_mounts();
+        assert_eq!(
+            vfs.create(&vp("/work/vendor/new.txt")).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            vfs.create(&vp("/work/link/new.txt")).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert!(!vfs.access(
+            &vp("/work/link/lib.rs"),
+            AccessModes {
+                readable: false,
+                writable: true,
+                executable: false
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_answer_about_a_nested_mount_agrees_with_canonicalize() {
+        // The failure this pins was not that one answer was wrong, but that two
+        // answers about the same path disagreed: `canonicalize` named the
+        // nested mount while `open` read the shadowed tree.
+        let (_root, vfs) = nested_mounts();
+        assert_eq!(
+            vfs.canonicalize(&vp("/work/link/lib.rs")).unwrap(),
+            vp("/work/vendor/lib.rs")
+        );
+        assert_eq!(vfs.read_dir_names(&vp("/work/link")).unwrap(), ["lib.rs"]);
+        assert!(vfs.facts(&vp("/work/link/lib.rs"), true).is_some());
+        assert!(vfs.facts(&vp("/work/link/hidden.txt"), true).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_nested_mount_is_reachable_through_a_symlink_with_nothing_to_shadow() {
+        // The same crossing, with no directory in the outer mount for the
+        // nested one to shadow. Resolving the whole path in one step reports
+        // the file missing, which fails closed and is still wrong.
+        let root = tempfile::tempdir().expect("temp dir");
+        let outer = root.path().join("outer");
+        let inner = root.path().join("inner");
+        std::fs::create_dir(&outer).expect("mkdir outer");
+        std::fs::create_dir(&inner).expect("mkdir inner");
+        std::fs::write(inner.join("lib.rs"), b"real").expect("write inner");
+        std::os::unix::fs::symlink("vendor", outer.join("link")).expect("symlink");
+
+        let mounts = MountTable::builder()
+            .mount("/work", &outer, Access::ReadWrite)
+            .expect("outer mount")
+            .mount("/work/vendor", &inner, Access::ReadOnly)
+            .expect("nested mount")
+            .build()
+            .expect("disjoint host dirs must build");
+        let vfs = Vfs::new(mounts);
+
+        assert_eq!(read(&vfs, "/work/link/lib.rs").unwrap(), "real");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_target_the_grammar_reserves_for_portability_is_followed() {
+        // A documented divergence, pinned so it cannot drift further.
+        //
+        // The grammar's *containment* rules -- no escape past the virtual root,
+        // no absolute target taken literally -- are enforced independently by
+        // cap-std, so they hold on every path (see the two tests above this
+        // one). Its *portability* rules are not: reserved device names, colons
+        // and trailing dots are refused to a caller naming a path, but a
+        // symlink target inside a mount is host data, and resolving a path in
+        // one step follows it.
+        //
+        // No authority is gained -- the target is inside a mount the caller
+        // already has -- but the reachable set is larger than the nameable one.
+        // Closing it means resolving every path component by component, which
+        // is what the fast path exists to avoid.
+        let f = fixture();
+        std::fs::write(work_host(&f).join("con.txt"), b"reserved").expect("write");
+        std::os::unix::fs::symlink("con.txt", work_host(&f).join("res")).expect("symlink");
+
+        assert!(
+            VirtualPath::new("/work/con.txt").is_err(),
+            "the grammar reserves this name"
+        );
+        assert_eq!(read(&f.vfs, "/work/res").unwrap(), "reserved");
+    }
+
     #[cfg(unix)]
     #[test]
     fn an_absolute_symlink_in_the_middle_of_a_path_still_resolves_in_the_root() {
@@ -1050,3 +1224,8 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }
+
+// ===========================================================================
+// TEMPORARY: adversarial review of adeadc0's fast path in `Vfs::at`.
+// Added by a security review; remove or fold in once triaged.
+// ===========================================================================
