@@ -212,6 +212,31 @@ pub fn read_link(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     with(path, |vfs, p| vfs.read_link(p))
 }
 
+/// The symlink-free form of a path, as a **virtual** path (D4). Mirrors
+/// `std::fs::canonicalize` and `Path::canonicalize`.
+///
+/// The host's `canonicalize` would return a host path, which sandboxed code
+/// must never receive and could not use; this returns the canonical path within
+/// the namespace instead — the same answer `cd -P` gives.
+///
+/// # Errors
+/// As [`open`].
+pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    with(path, |vfs, p| {
+        Ok(PathBuf::from(vfs.canonicalize(p)?.as_str()))
+    })
+}
+
+/// Whether a path exists, distinguishing "does not exist" from an error.
+/// Mirrors `Path::try_exists` and `std::fs::exists`.
+///
+/// # Errors
+/// Returns an error only for a reason other than absence (an ungrammatical
+/// path, or no session). A missing file is `Ok(false)`.
+pub fn try_exists(path: impl AsRef<Path>) -> io::Result<bool> {
+    with(path, |vfs, p| Ok(vfs.exists(p)))
+}
+
 /// Creates a symlink at `link` pointing at `target`, validating that the target
 /// stays within the mount (D26). Mirrors the unix `std::os::unix::fs::symlink`
 /// argument order (target first).
@@ -483,6 +508,22 @@ mod tests {
                 assert_eq!(entry.path(), PathBuf::from("/work/a.txt"));
             }
         }
+        uninstall();
+    }
+
+    #[test]
+    fn canonicalize_returns_a_virtual_path_not_a_host_one() {
+        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().unwrap();
+        install_over(tmp.path());
+        create_dir_all("/work/a/b").unwrap();
+
+        // The answer is inside the namespace, never the host directory the mount
+        // is backed by.
+        let real = canonicalize("/work/a/../a/b").unwrap();
+        assert_eq!(real, PathBuf::from("/work/a/b"));
+        assert!(try_exists("/work/a/b").unwrap());
+        assert!(!try_exists("/work/missing").unwrap());
         uninstall();
     }
 

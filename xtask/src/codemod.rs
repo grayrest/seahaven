@@ -92,34 +92,52 @@ const FACADE_FREE_FNS: &[&str] = &[
     "write",
     "read_dir",
     "read_link",
+    "canonicalize",
     "create_dir_all",
     "remove_file",
     "remove_dir",
     "remove_dir_all",
     "rename",
     "exists",
+    "try_exists",
 ];
 
-/// Inherent `Path`/`PathBuf` methods that read the filesystem and are named
-/// *distinctively* enough that a bare method name is a reliable signal without
-/// type inference. Encountering one is reported: routing it needs the method
-/// visitor, which handles receiver borrowing and is deliberately not in this
-/// version.
+/// Inherent `Path`/`PathBuf` methods the visitor rewrites to a facade call.
 ///
-/// Deliberately excluded: `metadata` (also on `File` and `DirEntry`, where it
-/// needs no routing) and `is_dir` / `is_file` / `is_symlink` (also on
-/// `FileType`, which is pure). Flagging those without knowing the receiver's
-/// type reports pure calls as unrouted — `uu_cat`'s `filetype.is_dir()` is
-/// exactly that false positive. The type-aware method visitor, when it lands,
-/// distinguishes them; until then the ban and the Landlock test are the
-/// backstop for any genuinely unrouted `path.is_dir()`.
-const PATH_FS_METHODS: &[&str] = &[
-    "symlink_metadata",
+/// Each is named *distinctively* — the name appears only on `Path`, not on
+/// `File`, `FileType` or `DirEntry` — so a bare method name is a reliable
+/// signal without type inference, and each is one the facade provides. The
+/// facade's `impl AsRef<Path>` bound is a second guard: if a receiver somehow is
+/// not path-like, `ambient::exists(&recv)` fails to *compile* rather than
+/// mis-routing, so a wrong rewrite is caught at build time.
+///
+/// All take no arguments, which is what makes the receiver-only rewrite
+/// `recv.m()` -> `ambient::m(&(recv))` uniform.
+const REWRITTEN_PATH_METHODS: &[&str] = &[
     "exists",
     "try_exists",
     "read_link",
     "read_dir",
     "canonicalize",
+];
+
+/// Filesystem functions the facade does not provide, reported when seen as a
+/// free call or a distinctive method so the residual work is visible.
+///
+/// `symlink_metadata` has no `std::fs::Metadata`-returning form under cap-std (a
+/// real design gap); the rest are capabilities D4 has not built. Deliberately
+/// absent are `metadata` / `is_dir` / `is_file` / `is_symlink`, which also exist
+/// on non-`Path` types (`File`, `FileType`) where they need no routing —
+/// flagging them without type inference reports pure calls as unrouted, which is
+/// `uu_cat`'s `filetype.is_dir()` false positive. The ban and Landlock test are
+/// the backstop for any genuinely unrouted `path.metadata()`.
+const CARVE_OUT_FNS: &[&str] = &[
+    "symlink_metadata",
+    "set_permissions",
+    "hard_link",
+    "soft_link",
+    "copy",
+    "create_dir",
 ];
 
 /// The facade path a rewrite points at.
@@ -162,6 +180,7 @@ fn rewrite(source: &str) -> Result<Outcome> {
 
     let mut collector = EditCollector {
         bindings: &bindings,
+        source,
         edits: Vec::new(),
         rewrites: Vec::new(),
         unhandled: Vec::new(),
@@ -265,6 +284,8 @@ fn handle_leaf(prefix: &[String], real: &str, local: &str, b: &mut Bindings) {
 /// Collects the call-site rewrites.
 struct EditCollector<'a> {
     bindings: &'a Bindings,
+    /// The original source, so a method rewrite can splice the receiver's text.
+    source: &'a str,
     edits: Vec<Edit>,
     rewrites: Vec<String>,
     unhandled: Vec<String>,
@@ -282,10 +303,19 @@ impl<'ast> Visit<'ast> for EditCollector<'_> {
 
     fn visit_expr_method_call(&mut self, mc: &'ast syn::ExprMethodCall) {
         let method = mc.method.to_string();
-        if PATH_FS_METHODS.contains(&method.as_str()) {
+        if mc.args.is_empty() && REWRITTEN_PATH_METHODS.contains(&method.as_str()) {
+            // This edit spans the whole call and copies the receiver verbatim,
+            // so descending would emit edits inside a range about to be
+            // replaced. Any rewritable call within such a receiver is rare and
+            // left to the ban as backstop rather than risk overlapping edits.
+            self.rewrite_method(mc, &method);
+            return;
+        }
+        if CARVE_OUT_FNS.contains(&method.as_str()) {
             let line = mc.method.span().start().line;
-            self.unhandled
-                .push(format!("line {line}: inherent method `.{method}()` (needs method visitor)"));
+            self.unhandled.push(format!(
+                "line {line}: method `.{method}()` is a carve-out (D34), facade has no equivalent"
+            ));
         }
         syn::visit::visit_expr_method_call(self, mc);
     }
@@ -337,7 +367,7 @@ impl EditCollector<'_> {
                 *self.consumed.entry(b).or_default() += 1;
             }
             self.rewrites.push(format!("{real}() -> {FACADE}::{real}()"));
-        } else if PATH_FS_METHODS.contains(&real.as_str()) || real == "symlink_metadata" {
+        } else if CARVE_OUT_FNS.contains(&real.as_str()) {
             // A known fs function the facade does not provide (carve-out).
             let line = span.map_or(0, |s| s.start().line);
             self.unhandled
@@ -353,6 +383,32 @@ impl EditCollector<'_> {
             end: range.1,
             replacement: replacement.to_string(),
         });
+    }
+
+    /// Rewrites a no-argument `recv.method()` into `ambient::method(&(recv))`.
+    ///
+    /// The receiver is wrapped in `&(...)` so the borrow matches the `&self` the
+    /// inherent method took, and the parentheses keep a complex receiver (a
+    /// chain, a field access) grouped. `&(recv)` satisfies the facade's
+    /// `impl AsRef<Path>` for any path-like receiver — including one already a
+    /// reference, via the blanket `AsRef` on `&T`.
+    fn rewrite_method(&mut self, mc: &syn::ExprMethodCall, method: &str) {
+        let (whole_start, whole_end) = span_byte_range(mc.span());
+        let (recv_start, recv_end) = span_byte_range(mc.receiver.span());
+        // Spans land on char boundaries, so this range is valid; `get` avoids a
+        // panicking index and skips the rewrite rather than corrupt on the
+        // impossible case.
+        let Some(recv_src) = self.source.get(recv_start..recv_end) else {
+            return;
+        };
+        let replacement = format!("{FACADE}::{method}(&({recv_src}))");
+        self.edits.push(Edit {
+            start: whole_start,
+            end: whole_end,
+            replacement,
+        });
+        self.rewrites
+            .push(format!(".{method}() -> {FACADE}::{method}(&(..))"));
     }
 }
 
@@ -622,15 +678,52 @@ mod tests {
 
     #[test]
     fn a_carve_out_free_fn_is_reported_not_rewritten() {
-        // canonicalize has virtual semantics the facade does not yet provide.
-        let out = routed("fn f(p: &str) { let _ = std::fs::canonicalize(p); }\n");
-        assert!(!out.source.contains("ambient::canonicalize"));
-        assert!(out.unhandled.iter().any(|u| u.contains("canonicalize")));
+        // copy is a capability the facade does not provide.
+        let out = routed("fn f(p: &str, q: &str) { let _ = std::fs::copy(p, q); }\n");
+        assert!(!out.source.contains("ambient::copy"));
+        assert!(out.unhandled.iter().any(|u| u.contains("copy")));
     }
 
     #[test]
-    fn an_inherent_path_method_is_reported() {
+    fn canonicalize_is_now_routed_not_a_carve_out() {
+        // It moved into the facade as a virtual-path canonicalizer (D4).
+        let out = routed("fn f(p: &str) { let _ = std::fs::canonicalize(p); }\n");
+        assert!(out.source.contains("brush_vfs::ambient::canonicalize(p)"));
+    }
+
+    #[test]
+    fn a_distinctive_path_method_is_rewritten_with_a_borrowed_receiver() {
         let out = routed("use std::path::Path;\nfn f(p: &Path) -> bool { p.exists() }\n");
-        assert!(out.unhandled.iter().any(|u| u.contains("exists")));
+        assert!(out.source.contains("brush_vfs::ambient::exists(&(p))"));
+        assert!(out.unhandled.is_empty());
+    }
+
+    #[test]
+    fn a_method_on_a_complex_receiver_stays_grouped() {
+        let out = routed(
+            "use std::path::Path;\nfn f(p: &Path) -> std::io::Result<std::path::PathBuf> { p.join(\"x\").canonicalize() }\n",
+        );
+        assert!(
+            out.source.contains("brush_vfs::ambient::canonicalize(&(p.join(\"x\")))"),
+            "got: {}",
+            out.source
+        );
+    }
+
+    #[test]
+    fn read_dir_as_a_method_is_routed() {
+        let out = routed(
+            "use std::path::Path;\nfn f(p: &Path) { for _e in p.read_dir().unwrap() {} }\n",
+        );
+        assert!(out.source.contains("brush_vfs::ambient::read_dir(&(p))"));
+    }
+
+    #[test]
+    fn a_carve_out_method_is_reported_not_rewritten() {
+        let out = routed(
+            "use std::path::Path;\nfn f(p: &Path) { let _ = p.symlink_metadata(); }\n",
+        );
+        assert!(!out.source.contains("ambient::symlink_metadata"));
+        assert!(out.unhandled.iter().any(|u| u.contains("symlink_metadata")));
     }
 }
