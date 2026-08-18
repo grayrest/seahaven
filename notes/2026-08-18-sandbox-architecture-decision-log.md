@@ -260,6 +260,17 @@ already applies to its 379 known failures. Editing an upstream case to assert
 our behaviour was rejected: the next rebase reverts it silently and nothing
 records why it differed.
 
+**The compat harness's precedent does not transfer intact.** Its marker is a
+field on a case brush owns, co-located with the case, needing no identifier.
+Upstream coreutils cases are `#[test]` functions in a tree this decision forbids
+editing, so the marker has to live in an external list keyed by a test path that
+upstream renames and splits freely. That makes the mirror rule mandatory rather
+than optional: **an entry whose case no longer exists is itself an error**, or a
+rename converts "expected failure" into silence — the exact outcome the rule
+exists to prevent. Deriving the keys from the codemod's own `syn` pass over the
+test tree is the way to keep the list honest; failing that, gating on the count
+and reconciling per rebase is a named manual step rather than an oversight.
+
 **Revised after the spike:** `uucore` **already ships the abstraction point** —
 `safe_traversal.rs`, 1,464 lines of `DirFd` over
 `openat`/`fstatat`/`unlinkat`/`mkdirat`/`fchmodat`, described upstream as
@@ -334,15 +345,28 @@ be shown to a user before the run starts; requiring an explicit grant per
 outside import was rejected because rocjust documents the shared-justfile
 pattern as supported.
 
-**The union is not expressible as a mount table, and the read-only half is
-wrong for `mod`.** `MountTable::build` refuses overlapping host directories by
-contract, and D16's union overlaps by construction: `mod foo` resolves to a
-*subdirectory* of the root tree, and `import '../shared.just'` to a tree that
-*contains* it. Either way the table refuses to build. So the grant is a set of
-per-path access rules resolved by longest matching prefix, not a set of mounts —
-the root tree's read-write rule dominating an enclosing read-only import tree.
-And read-only is wrong for a submodule at all: its recipes run beside its own
-file, so the standard module layout is read-only exactly where it writes.
+**Corrected: most of the union *is* expressible as a mount table.** An earlier
+version of this said the table refuses to build because `MountTable::build`
+rejects overlap. It rejects overlapping *host directories*; nested *virtual*
+mount points with differing access build fine and are tested — `/work` on one
+host directory read-write with `/work/vendor` on another read-only, resolved by
+longest match. So a `mod` in a subdirectory of the root tree needs no second
+mount at all: it is already inside the root's, and its access should be
+read-write anyway, since a submodule's recipes run beside its own file.
+
+What is genuinely inexpressible is the *enclosing* case: `import '../shared.just'`
+names a tree containing the root's, and mounting both would overlap on the host.
+That one needs either per-path access rules or a read-only mount of the common
+ancestor with the root's tree nested read-write inside it.
+
+If per-path rules are used, the rule must prefix-match the **landing** path and
+re-match at every symlink hop, not the requested path. `..` is not the hazard --
+it is resolved lexically before any host path exists -- but a symlink is: brush-vfs
+already decides writability at the resolved location precisely because "a symlink
+from a writable mount into a read-only one must be governed by where it lands".
+Prefix rules also re-open the reason the overlap refusal exists at all, which is
+hard links: one mount with two rules means `ln /work/import-ro/secret /work/proj/x`
+gives a read-write name to a read-only inode.
 
 **Nothing can resolve the graph before the sandbox exists.** Import and module
 resolution is performed by *guest* code, by probing four candidate filenames per
@@ -500,10 +524,13 @@ A **sub-invocation** gets a fresh store with a fresh memo and a fresh `ran` set,
 which is exactly the subprocess semantics D30 is emulating. The host then holds
 nothing, and "host-owned memo table" is withdrawn.
 
-**Corrected:** one instance holds handles to sessions with *different* mount
-tables, and the guest supplies the selector — so the handle table is the whole
-boundary for D10's ambient-path model, and every effect re-resolves its mount
-table from the handle. The handle design itself is D43.
+Every effect re-resolves its mount table from the session handle, which is what
+makes the handle table the boundary for D10's ambient-path model. An earlier
+revision of this entry said the opposite of the paragraph above it — that one
+instance holds sessions with *different* mount tables — and was left standing
+when the store decision changed. Within a store there is one grant and therefore
+one mount table; sessions differ in working directory, environment and open
+descriptors. The handle design is D43.
 
 ## D26 — Links are validated at creation
 
@@ -540,7 +567,18 @@ already implements this rewrite as the opt-in `--relative` flag, so making it
 mandatory renders `ln -s` and `ln -sr` indistinguishable and fails the upstream
 `test_ln` cases that separate them -- see D13 for how such a failure is tracked.
 `/dev` is synthetic under D20 and `/bin` is synthesized under D22, so neither is
-a mount and `ln -sf /dev/null x`, a common idiom, is refused. And a link
+a mount and `ln -sf /dev/null x`, a common idiom, is refused.
+
+**And the implementation to reuse contains a fail-open that the mandatory form
+must not inherit.** `uu_ln`'s `--relative` falls back to storing the *absolute*
+target when canonicalization fails. As an opt-in convenience that is reasonable;
+as the mandatory containment rule it silently restores the hazard on any error,
+so the mandatory form refuses instead. The rewrite is also a canonicalization,
+which collapses intermediate symlinks in the target: `ln -s /work/current/bin/x`
+with `current -> v2` is frozen to `v2`, and a "current version" indirection is
+the main reason absolute links get written. That is silent rather than a
+refusal, and it puts `canonicalize` on an attacker-controlled path at every
+`ln -s`, which D35's byte cap has to cover. And a link
 pointing outside the subtree being copied but inside the mount can be retargeted
 by a copy to a different depth -- narrower than it first appears, since relative
 links are what *survive* a tree being moved and absolute ones are not, but real.
@@ -832,16 +870,31 @@ exactly the hardening cap-std was chosen to avoid re-deriving. This is the one
 place the design knowingly takes that on, and it is why D41's kernel-enforced
 check matters more here than anywhere else.
 
-## D43 — Withdrawn: the store boundary is the frame boundary
+## D43 — Per-frame handle tables, reinstated after a wrong withdrawal
 
-This entry designed frames because D25 put sub-invocations in one Wasmtime
-instance, where a guest could forge a sibling session handle and recover
-authority its frame had given up. D25 no longer does that, and the premise went
-with it. Within one invocation D16 derives a single grant covering the whole
-file graph, so every session in a store shares one mount table and differs only
-in working directory and environment — a forged handle recovers nothing. Across
-sub-invocations the store *is* the boundary, and Wasmtime handles cannot cross
-stores at all.
+**This entry was withdrawn and the withdrawal was wrong.** The argument was:
+D25 now gives each sub-invocation its own store, so within one store D16 derives
+a single grant, every session shares one mount table, and a forged handle
+recovers nothing.
+
+Two things break it. **A submodule is not a sub-invocation.** `mod` nests inside
+the invoking process, so it lives in the invoker's store — and D16 rejected
+equality for exactly this case, because a justfile in a vendored subdirectory is
+*more* attacker-controlled than the root one, not less. One grant per store
+hands a vendored `mod` the root tree read-write. Per-frame tables were the only
+named place a narrower table could live inside a store, so withdrawing them
+removed the mechanism and left the requirement.
+
+And **"differs only in working directory and environment" is not what a session
+is.** D15 makes it `(mounts, cwd, env, stdio, clock/RNG, locale)`, `/dev/fd/N`
+resolves against the session's descriptor table, and a shell carries persistent
+descriptors beyond stdio. A descriptor is authority that outlives the check that
+minted it, so "recovers nothing" is a claim about mount tables applied to a
+bundle that is not only a mount table. The filesystem half of the argument does
+hold under one grant; the descriptor half does not.
+
+The store boundary does subsume the frame boundary *across* sub-invocations —
+Wasmtime handles cannot cross stores — but that was never the hard case.
 
 Three properties from it survive and now live where they belong: generational
 indices within a store's tables, for use-after-free; one table per kind, so a
@@ -851,9 +904,11 @@ must reap, or a job spawned in a frame that exits before `wait_any` sees it
 leaves a live process holding that frame's mount handles —
 `kill_external_commands_on_drop` is mandatory for sandboxed sessions.
 
-What does not survive is the host-minted frame handle as every host function's
-first argument. `Caller<'_, T>` already identifies the store, and the store
-already identifies the frame.
+**`Caller<'_, T>` does not replace the frame handle.** It identifies the store
+the call came from, which is the *parent's* store when the parent's guest calls
+`complete` for a sub-invocation that ran elsewhere. With two `just` calls in
+flight the guest still has to say which one finished, so the host-minted frame
+handle stays.
 
 ## D44 — Discovery is a launcher act, bounded by a source-control root
 
