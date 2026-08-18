@@ -96,10 +96,43 @@ impl<'de> serde::Deserialize<'de> for OpenFile {
     }
 }
 
+/// The process's one handle on the null device, opened on first use and held
+/// for the process's lifetime.
+///
+/// Held rather than reopened because a confined shell may not be able to open
+/// it later: the null device is not part of any mount, and under the OS-level
+/// enforcement this foundation is built for, a fresh `open` of it would be
+/// refused by the kernel. Sharing one handle is safe where sharing a file
+/// handle usually is not -- the null device has no offset to race over, and
+/// reads from it are always at end of file.
+static NULL_FILE: std::sync::OnceLock<Result<Arc<std::fs::File>, String>> =
+    std::sync::OnceLock::new();
+
+/// Opens the process's null-device handle if it has not been opened yet, and
+/// returns it.
+///
+/// Called once during shell construction so that the handle is acquired while
+/// the shell is still able to acquire it. The error is kept as a string
+/// because it is returned to every later caller, and `error::Error` is not
+/// `Clone`.
+pub(crate) fn preopen_null() -> &'static Result<Arc<std::fs::File>, String> {
+    NULL_FILE.get_or_init(|| {
+        sys::fs::open_null_file()
+            .map(Arc::new)
+            .map_err(|e| e.to_string())
+    })
+}
+
 /// Returns an open file that will discard all I/O.
+///
+/// # Errors
+///
+/// Returns an error if the platform has no null device.
 pub fn null() -> Result<OpenFile, error::Error> {
-    let file = sys::fs::open_null_file()?;
-    Ok(file.into())
+    match preopen_null() {
+        Ok(file) => Ok(OpenFile::File(Arc::clone(file))),
+        Err(message) => Err(error::ErrorKind::from(std::io::Error::other(message.clone())).into()),
+    }
 }
 
 impl Clone for OpenFile {

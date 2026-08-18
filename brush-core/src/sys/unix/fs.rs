@@ -220,9 +220,12 @@ pub fn open_null_file() -> Result<std::fs::File, error::Error> {
     Ok(f)
 }
 
-/// Gives the platform an opportunity to handle a special file path (e.g. `/dev/null`).
-pub const fn try_open_special_file(_path: &Path) -> Option<Result<std::fs::File, std::io::Error>> {
-    None
+/// Returns true if the path names the platform's null device.
+///
+/// Purely lexical, and deliberately exact: a repository containing a real
+/// `dev/null` file must not be mistaken for the device.
+pub fn is_null_device_path(path: &Path) -> bool {
+    path == Path::new("/dev/null")
 }
 
 /// Returns the path to the system-wide shell profile script.

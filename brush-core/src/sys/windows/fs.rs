@@ -146,22 +146,22 @@ pub fn open_null_file() -> Result<std::fs::File, error::Error> {
     Ok(f)
 }
 
-/// Gives the platform an opportunity to handle a special file path (e.g. `/dev/null`).
-pub fn try_open_special_file(path: &Path) -> Option<Result<std::fs::File, std::io::Error>> {
-    // Match the whole path, not a trailing component run.
-    //
-    // The previous check was `path.ends_with("dev/null") && path.is_absolute()`,
-    // which was wrong in both directions. `Path::ends_with` compares trailing
-    // *components*, so a real file at `C:\repo\dev\null` was silently opened as
-    // `NUL`. And `is_absolute` requires a drive prefix on Windows, so it never
-    // fired for the bare `/dev/null` this function exists to intercept -- which
-    // is checked here, ahead of path resolution, precisely because it is not a
-    // valid native path.
-    let path = path.to_str()?;
-    let path = path.replace('\\', "/");
-
-    path.eq_ignore_ascii_case("/dev/null")
-        .then(|| open_null_file().map_err(std::io::Error::other))
+/// Returns true if the path names the platform's null device.
+///
+/// Matches the whole path, not a trailing component run.
+///
+/// The check here was once `path.ends_with("dev/null") && path.is_absolute()`,
+/// which was wrong in both directions. `Path::ends_with` compares trailing
+/// *components*, so a real file at `C:\repo\dev\null` was silently opened as
+/// `NUL`. And `is_absolute` requires a drive prefix on Windows, so it never
+/// fired for the bare `/dev/null` this exists to intercept -- which is why the
+/// caller asks ahead of path resolution, `/dev/null` not being a valid native
+/// path for resolution to work on.
+pub fn is_null_device_path(path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+    path.replace('\\', "/").eq_ignore_ascii_case("/dev/null")
 }
 
 /// Returns the default paths where executables are typically found on Windows.

@@ -163,3 +163,33 @@ cases:
     args: ["--mount", "/work:.", "-c", "compgen -c ls; echo done"]
     expected_exit_code: 0
     expected_stdout: "done\n"
+
+  - name: "The null device answers a confined shell"
+    # No mount contains it, and none should have to: the handle is taken at
+    # startup and held, so discarding output keeps working under any policy.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "echo discarded > /dev/null; read -r line < /dev/null; echo \"[$line]\""
+    expected_exit_code: 0
+    expected_stdout: "[]\n"
+
+  - name: "The descriptor table is reachable through /dev/fd"
+    args:
+      - "--mount"
+      - "/work:.:ro"
+      - "-c"
+      - "exec 9< /work/seed.txt; read -r line < /dev/fd/9; echo \"$line\""
+    expected_exit_code: 0
+    expected_stdout: "seeded\n"
+    test_files:
+      - path: "seed.txt"
+        contents: "seeded\n"
+
+  - name: "An unopened /dev/fd entry is not found"
+    # It used to fall through to the filesystem on a miss, which under the
+    # identity policy handed back the *host* process's descriptor table.
+    args: ["--mount", "/work:.", "-c", "read -r line < /dev/fd/7"]
+    expected_exit_code: 1
+    ignore_stderr: true

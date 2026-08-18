@@ -240,25 +240,36 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         path: impl AsRef<Path>,
         params: &ExecutionParameters,
     ) -> Result<openfiles::OpenFile, std::io::Error> {
-        // Platform special files first, before path resolution. That ordering
-        // was previously a hazard -- the Windows check compared trailing path
-        // *components*, so a repo containing `dev/null` matched -- but the check
-        // now compares the whole path, so running it early is safe and is in
+        // The null device answers before path resolution. That ordering was
+        // once a hazard -- the Windows check compared trailing path
+        // *components*, so a repo containing `dev/null` matched -- but it
+        // compares the whole path now, so running it early is safe and is in
         // fact required: `absolute_path` mangles `/dev/null` on Windows, where
         // it is not an absolute path, before the check would ever see it.
-        if let Some(result) = crate::sys::fs::try_open_special_file(path.as_ref()) {
-            return result.map(openfiles::OpenFile::from);
+        //
+        // It answers from a handle opened at startup rather than from the
+        // namespace, so that discarding output stays possible for a shell that
+        // has no mount containing the device -- which is every restrictive
+        // policy.
+        if crate::sys::fs::is_null_device_path(path.as_ref()) {
+            return openfiles::null().map_err(std::io::Error::other);
         }
 
         let path_to_open = self.absolute_path(path.as_ref());
 
         // Synthetic fd paths address the shell's own descriptor table rather
         // than the filesystem, so they are answered before the namespace is
-        // consulted at all.
-        if let Some(fd_num) = shell_fd_path_to_fd(&path_to_open)
-            && let Some(open_file) = params.try_fd(self, fd_num)
-        {
-            return Ok(open_file);
+        // consulted at all -- and a miss is the end of the answer. Falling
+        // through to the filesystem would hand back the *host's* descriptor
+        // table via /dev/fd, which is exactly the authority the namespace
+        // exists to withhold.
+        if let Some(fd_num) = shell_fd_path_to_fd(&path_to_open) {
+            return params.try_fd(self, fd_num).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("no such file or directory: {}", path_to_open.display()),
+                )
+            });
         }
 
         let virtual_path = self.to_virtual_path(&path_to_open)?;

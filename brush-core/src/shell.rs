@@ -235,6 +235,10 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     ///
     /// * `options` - The options to use when creating the shell.
     pub(crate) fn new(options: CreateOptions<SE>) -> Result<Self, error::Error> {
+        // Take the null device's handle now, while the process is still
+        // unconfined enough to take it. See `openfiles::null`.
+        let _ = openfiles::preopen_null();
+
         // Compute runtime options before moving fields out of `options`.
         let runtime_options = RuntimeOptions::defaults_from(&options);
 
