@@ -169,6 +169,16 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<std::fs::Metadata> {
     with(path, |vfs, p| vfs.metadata(p))
 }
 
+/// Metadata for a path *without* following a final symlink. Mirrors
+/// `std::fs::symlink_metadata` and `Path::symlink_metadata`.
+///
+/// # Errors
+/// As [`open`]. On non-Unix this follows the final link (a documented Windows
+/// limitation); see [`Vfs::symlink_metadata`](crate::fs::Vfs::symlink_metadata).
+pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<std::fs::Metadata> {
+    with(path, |vfs, p| vfs.symlink_metadata(p))
+}
+
 /// Whether a path exists in the namespace, following symlinks. Mirrors
 /// `Path::exists` and `std::fs::exists`. Fail-closed: `false` with no session.
 #[must_use]

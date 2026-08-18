@@ -613,6 +613,57 @@ impl Vfs {
         })
     }
 
+    /// Metadata for `path`, **not** following a final symlink. The vfs's
+    /// `symlink_metadata`.
+    ///
+    /// cap-std has no `std::fs::Metadata`-returning form: its own `Metadata`
+    /// cannot be turned back into `std`'s, which has no public constructor. So
+    /// on Unix this opens the link *as itself* -- `O_PATH`/`O_SYMLINK` with
+    /// `O_NOFOLLOW`, relative to the link's parent directory opened through
+    /// cap-std so the traversal stays confined and `RESOLVE_BENEATH` still
+    /// governs it -- and `fstat`s that descriptor. A non-symlink final component
+    /// is opened normally, so the answer matches `metadata` there, as
+    /// `symlink_metadata` requires.
+    ///
+    /// On non-Unix it falls back to [`metadata`](Self::metadata), which
+    /// *follows* the final link. That is wrong for a symlink and is a documented
+    /// Windows limitation, pending the deferred Windows symlink work.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if the path is unmounted or the query fails.
+    pub fn symlink_metadata(&self, path: &VirtualPath) -> std::io::Result<std::fs::Metadata> {
+        #[cfg(not(unix))]
+        {
+            return self.metadata(path);
+        }
+
+        #[cfg(unix)]
+        {
+            let located = self.locate(path, false)?;
+
+            // The mount point itself is a directory, never a symlink.
+            if located.relative.as_os_str().is_empty() {
+                return located.mount.dir().try_clone()?.into_std_file().metadata();
+            }
+
+            let name = located.relative.file_name().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "path has no final component",
+                )
+            })?;
+            // The parent is opened through cap-std, so intermediate components
+            // are resolved with the same confinement as every other access; only
+            // the single final component is opened by name below.
+            let parent = match located.relative.parent() {
+                Some(p) if !p.as_os_str().is_empty() => located.mount.dir().open_dir(p)?,
+                _ => located.mount.dir().try_clone()?,
+            };
+            symlink_metadata_at(&parent, name)
+        }
+    }
+
     /// Whether `path` exists, following symlinks.
     #[must_use]
     pub fn exists(&self, path: &VirtualPath) -> bool {
@@ -1007,6 +1058,52 @@ fn read_link_contents(mount: &Mount, relative: &std::path::Path) -> std::io::Res
     cap_primitives::fs::read_link_contents(&dir, relative)
 }
 
+/// `fstat`s a single directory entry `name` without following it if it is a
+/// symlink, returning `std::fs::Metadata`.
+///
+/// Opens the entry relative to `parent`'s descriptor so no host path is used and
+/// the operation cannot race a rename of an intermediate directory. `O_PATH`
+/// (Linux/BSD) or `O_SYMLINK` (macOS) is what lets a symlink be opened as itself
+/// rather than followed; a non-symlink is opened normally, so its metadata is
+/// the same one `metadata` would return.
+#[cfg(unix)]
+fn symlink_metadata_at(
+    parent: &cap_std::fs::Dir,
+    name: &std::ffi::OsStr,
+) -> std::io::Result<std::fs::Metadata> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let cname = std::ffi::CString::new(name.as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "directory entry name contains an interior NUL",
+        )
+    })?;
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let flags = libc::O_SYMLINK | libc::O_CLOEXEC;
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "brush-vfs is the facade; this is the confined primitive it exists to provide, \
+                  opening a single named entry relative to a cap-std-resolved parent descriptor"
+    )]
+    // SAFETY: `parent` is a live directory descriptor for the duration of the
+    // call, and `cname` is a valid NUL-terminated C string. `openat` returns a
+    // fresh owned descriptor or -1.
+    let fd = unsafe { libc::openat(parent.as_raw_fd(), cname.as_ptr(), flags) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` is a fresh, valid, owned descriptor returned by `openat`;
+    // wrapping it in a `File` transfers ownership so it is closed on drop.
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    file.metadata()
+}
+
 #[cfg(test)]
 #[allow(
     clippy::disallowed_methods,
@@ -1129,6 +1226,44 @@ mod tests {
         let f = fixture();
         std::os::unix::fs::symlink("hello.txt", work_host(&f).join("link.txt")).unwrap();
         assert_eq!(read(&f.vfs, "/work/link.txt").unwrap(), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_metadata_sees_the_link_while_metadata_sees_the_target() {
+        let f = fixture();
+        std::os::unix::fs::symlink("hello.txt", work_host(&f).join("link.txt")).unwrap();
+
+        // Following (metadata) lands on the 5-byte target file.
+        let followed = f.vfs.metadata(&vp("/work/link.txt")).unwrap();
+        assert!(followed.is_file());
+        assert!(!followed.is_symlink());
+        assert_eq!(followed.len(), 5);
+
+        // Not following (symlink_metadata) sees the link itself.
+        let link = f.vfs.symlink_metadata(&vp("/work/link.txt")).unwrap();
+        assert!(link.is_symlink());
+        assert!(!link.is_file());
+
+        // For a non-symlink the two agree.
+        let plain = f.vfs.symlink_metadata(&vp("/work/hello.txt")).unwrap();
+        assert!(plain.is_file());
+        assert!(!plain.is_symlink());
+        assert_eq!(plain.len(), 5);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_metadata_stays_confined() {
+        let f = fixture();
+        // A link pointing outside the namespace: symlink_metadata reports on the
+        // link itself (it does not follow), and an unmounted path is not found.
+        std::os::unix::fs::symlink("/etc/passwd", work_host(&f).join("escape.txt")).unwrap();
+        assert!(f.vfs.symlink_metadata(&vp("/work/escape.txt")).unwrap().is_symlink());
+        assert_eq!(
+            f.vfs.symlink_metadata(&vp("/etc/passwd")).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
     }
 
     #[cfg(unix)]

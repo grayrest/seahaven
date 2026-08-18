@@ -712,6 +712,7 @@ dependencies = [
  "cap-fs-ext",
  "cap-primitives",
  "cap-std",
+ "libc",
  "tempfile",
  "thiserror 2.0.20",
  "unicode-normalization",

@@ -18,8 +18,8 @@
 //! (`p.metadata()`, `p.exists()`) — the majority of a large utility's sites per
 //! the spike — are *reported*, not yet rewritten: a utility that has them is
 //! not fully routed, and the report says so rather than the tool pretending
-//! otherwise. `canonicalize` and `symlink_metadata` are owner-decision
-//! carve-outs (D34) the facade does not yet provide, so they are reported too.
+//! otherwise. The remaining carve-outs the facade does not provide (`copy`,
+//! hard links, permissions, non-recursive `create_dir`) are reported too.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -87,6 +87,7 @@ pub fn run(cmd: &CodemodCommand, _verbose: bool) -> Result<()> {
 /// rather than pointed at a function that does not exist.
 const FACADE_FREE_FNS: &[&str] = &[
     "metadata",
+    "symlink_metadata",
     "read",
     "read_to_string",
     "write",
@@ -119,20 +120,20 @@ const REWRITTEN_PATH_METHODS: &[&str] = &[
     "read_link",
     "read_dir",
     "canonicalize",
+    "symlink_metadata",
 ];
 
 /// Filesystem functions the facade does not provide, reported when seen as a
 /// free call or a distinctive method so the residual work is visible.
 ///
-/// `symlink_metadata` has no `std::fs::Metadata`-returning form under cap-std (a
-/// real design gap); the rest are capabilities D4 has not built. Deliberately
-/// absent are `metadata` / `is_dir` / `is_file` / `is_symlink`, which also exist
-/// on non-`Path` types (`File`, `FileType`) where they need no routing —
-/// flagging them without type inference reports pure calls as unrouted, which is
-/// `uu_cat`'s `filetype.is_dir()` false positive. The ban and Landlock test are
-/// the backstop for any genuinely unrouted `path.metadata()`.
+/// These are capabilities D4 has not built (copy, hard links, permission and
+/// non-recursive-dir-create). Deliberately absent are `metadata` / `is_dir` /
+/// `is_file` / `is_symlink`, which also exist on non-`Path` types (`File`,
+/// `FileType`) where they need no routing — flagging them without type inference
+/// reports pure calls as unrouted, which is `uu_cat`'s `filetype.is_dir()` false
+/// positive. The ban and Landlock test are the backstop for any genuinely
+/// unrouted `path.metadata()`.
 const CARVE_OUT_FNS: &[&str] = &[
-    "symlink_metadata",
     "set_permissions",
     "hard_link",
     "soft_link",
@@ -760,11 +761,23 @@ mod tests {
     }
 
     #[test]
-    fn a_carve_out_method_is_reported_not_rewritten() {
-        let out = routed(
+    fn symlink_metadata_is_routed_as_a_free_call_and_a_method() {
+        // Once the facade grew a descriptor-based symlink_metadata, it stopped
+        // being a carve-out.
+        let free = routed("fn f(p: &str) { let _ = std::fs::symlink_metadata(p); }\n");
+        assert!(free.source.contains("brush_vfs::ambient::symlink_metadata(p)"));
+
+        let method = routed(
             "use std::path::Path;\nfn f(p: &Path) { let _ = p.symlink_metadata(); }\n",
         );
-        assert!(!out.source.contains("ambient::symlink_metadata"));
-        assert!(out.unhandled.iter().any(|u| u.contains("symlink_metadata")));
+        assert!(method.source.contains("brush_vfs::ambient::symlink_metadata(&(p))"));
+        assert!(method.unhandled.is_empty());
+    }
+
+    #[test]
+    fn a_carve_out_free_call_is_still_reported() {
+        let out = routed("fn f(p: &str) { let _ = std::fs::hard_link(p, p); }\n");
+        assert!(!out.source.contains("ambient::hard_link"));
+        assert!(out.unhandled.iter().any(|u| u.contains("hard_link")));
     }
 }

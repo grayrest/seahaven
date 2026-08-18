@@ -23,5 +23,12 @@ cap-std = "4.0.2"
 thiserror = "2.0.19"
 unicode-normalization = "0.1.25"
 
+# `symlink_metadata` opens a symlink as itself (O_PATH/O_SYMLINK, O_NOFOLLOW)
+# relative to a cap-std-confined parent fd, since cap-std exposes no
+# `std::fs::Metadata`-returning form. Unix only; Windows symlink handling is a
+# later concern.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.184"
+
 [dev-dependencies]
 tempfile = "3.27.0"
