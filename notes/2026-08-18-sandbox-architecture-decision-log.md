@@ -224,6 +224,27 @@ Two walls the batch exposed, each an owner decision before the remaining ~95:
    `File`/`FileType`, they need receiver-type inference the syntactic codemod
    does not have.
 
+   **Wall 2 resolved (`symlink_metadata`).** `Vfs::symlink_metadata` opens the
+   link as itself — `O_PATH`/`O_NOFOLLOW` (Linux/BSD) or `O_SYMLINK` (macOS)
+   relative to a cap-std-confined parent descriptor — and `fstat`s it, yielding a
+   genuine `std::fs::Metadata`. Signature preservation holds; the codemod routes
+   it. The ambiguous-*method* case (`p.metadata()`) remains, needing type
+   inference. Windows follows the final link, a documented gap.
+
+   **Wall 1 assessed (`uucore`), and it is milestone-sized, not a codemod run.**
+   `uucore` is ~34k lines and its filesystem access is *two* kinds that need
+   opposite treatment. **Namespace access** — `checksum`, `buf_copy`,
+   `safe_copy`, `fs` operate on the user's files and must route. **System
+   introspection** — `fsext` reads `/etc/mtab`, `uptime` reads `/proc/uptime`,
+   `smack`/`proc_info`/`selinux` read `/proc` and `/sys` — names host paths that
+   are *not* in any namespace; routing them through the vfs would make `df`,
+   `uptime` and friends fail, so they must be left on ambient `std::fs` (and
+   exempted from the ban, since the fork is unlinted anyway). And
+   `safe_traversal::DirFd` — the abstraction D13's spike wanted to route — uses
+   `nix` `openat`/`fstatat`, invisible to the `std::fs`-shaped codemod; making
+   its root injectable is hand work. So `uucore` is not one `vendor-fork`; it is
+   a per-module triage (route / leave / hand-route) that warrants its own plan.
+
 ## D5 — Re-exec now; in-process is a different project
 
 `bundled.rs:3` already spawns `current_exe() --invoke-bundled` *because* uutils
