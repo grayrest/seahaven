@@ -43,6 +43,28 @@ whose name is `current_exe()`'s host path, reaching `Command::new` through the
 ordinary external path (`commands.rs:415-419`). D2 is a **predicate** — own exe
 *and* `argv[1] == --invoke-bundled` — not a deletion. Exec is never removed.
 
+**Implemented** as `ExternalExecution` (`brush-core/src/execpolicy.rs`), checked
+in `compose_std_command` — the single point both the external path and the
+`exec` builtin compose a `std::process::Command`, so neither routes around it.
+The predicate is the two parts the correction named: the trusted launcher's host
+path *and* the dispatch flag in `argv[1]`. The path alone would let `exec
+<launcher> -c '...'` start a fresh shell that begins under the identity policy;
+the shell-level suite (`brush-shell/tests/closed_world_tests.rs`) pins that this
+is refused. The launcher is run by its known host path rather than resolved
+through the namespace, which under a restrictive mount does not contain it, and
+the executable-lookup guard carries the same exemption so the shim is not turned
+away early as "not found". Selected by `--closed-world`, a separate axis from
+`--mount`; the default stays `Open` under identity so the compat suite is
+unaffected (the predicate is a no-op there).
+
+**What it does not do is confine the child.** A bundled `ls` runs in a freshly
+spawned process that inherits ambient authority, and — because nothing
+re-installs the namespace across the spawn — an *absolute* virtual path handed to
+it (`ls /work`) is misread against the child's identity namespace, while a
+relative one (`cat note.txt`, resolved against the parent-translated cwd) works.
+Carrying the session to the child is D24's job; D2 decides only whether the
+spawn happens at all.
+
 ## D3 — `cap-std` capability handles, with a lint ban over them
 
 Rejected: path-validation helpers (convention, not enforcement; TOCTOU-racy) and
