@@ -12,6 +12,8 @@
 
 #![deny(missing_docs)]
 
+pub mod mount;
 pub mod path;
 
+pub use mount::{Access, Mount, MountError, MountTable};
 pub use path::{PathError, VirtualPath};

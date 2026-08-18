@@ -17,5 +17,9 @@ bench = false
 workspace = true
 
 [dependencies]
+cap-std = "4.0.2"
 thiserror = "2.0.19"
 unicode-normalization = "0.1.25"
+
+[dev-dependencies]
+tempfile = "3.27.0"
