@@ -37,13 +37,39 @@ pub struct CodemodCommand {
     /// Report what would change without writing anything.
     #[clap(long)]
     pub check: bool,
+
+    /// Leave a module alone: a path suffix, e.g. `features/fsext.rs`.
+    ///
+    /// For modules whose filesystem access is *host introspection* rather than
+    /// namespace access -- `uucore`'s `fsext` reads `/etc/mtab`, `mods/os.rs`
+    /// reads `/proc/sys/kernel/osrelease` -- where routing through the vfs would
+    /// break the utility rather than confine it. Repeatable.
+    #[clap(long = "skip", value_name = "PATH_SUFFIX")]
+    pub skips: Vec<String>,
 }
 
 /// Runs the codemod command.
 pub fn run(cmd: &CodemodCommand, _verbose: bool) -> Result<()> {
-    let files = rust_files(&cmd.path)?;
-    if files.is_empty() {
+    let all = rust_files(&cmd.path)?;
+    if all.is_empty() {
         anyhow::bail!("no .rs files under {}", cmd.path.display());
+    }
+
+    let (files, skipped): (Vec<_>, Vec<_>) = all
+        .into_iter()
+        .partition(|f| !is_skipped(f, &cmd.skips));
+    for file in &skipped {
+        eprintln!("{}: skipped (--skip)", file.display());
+    }
+    // A `--skip` that matches nothing is almost always a typo'd path, and
+    // silently routing a module the operator meant to exempt is the failure
+    // this flag exists to prevent.
+    for pattern in &cmd.skips {
+        anyhow::ensure!(
+            skipped.iter().any(|f| path_has_suffix(f, pattern)),
+            "--skip {pattern:?} matched no file under {}",
+            cmd.path.display()
+        );
     }
 
     let mut total_rewrites = 0usize;
@@ -188,6 +214,7 @@ fn rewrite(source: &str) -> Result<Outcome> {
         // How many times each imported name was consumed by a rewrite, so the
         // import can be pruned only when nothing else still uses it.
         consumed: BTreeMap::new(),
+        non_path: Vec::new(),
     };
     collector.visit_file(&ast);
 
@@ -300,9 +327,39 @@ struct EditCollector<'a> {
     rewrites: Vec<String>,
     unhandled: Vec<String>,
     consumed: BTreeMap<String, usize>,
+    /// Per-function sets of parameter names whose declared type is definitely
+    /// not path-like, so a distinctive method on one is reported rather than
+    /// rewritten. A stack, because functions nest.
+    non_path: Vec<BTreeSet<String>>,
 }
 
 impl<'ast> Visit<'ast> for EditCollector<'_> {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        if item_attrs(item).is_some_and(is_test_gated) {
+            return;
+        }
+        syn::visit::visit_item(self, item);
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        if impl_item_attrs(item).is_some_and(is_test_gated) {
+            return;
+        }
+        syn::visit::visit_impl_item(self, item);
+    }
+
+    fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+        self.non_path.push(non_path_params(&f.sig));
+        syn::visit::visit_item_fn(self, f);
+        self.non_path.pop();
+    }
+
+    fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+        self.non_path.push(non_path_params(&f.sig));
+        syn::visit::visit_impl_item_fn(self, f);
+        self.non_path.pop();
+    }
+
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*call.func {
             self.try_rewrite_call(&p.path);
@@ -313,6 +370,21 @@ impl<'ast> Visit<'ast> for EditCollector<'_> {
 
     fn visit_expr_method_call(&mut self, mc: &'ast syn::ExprMethodCall) {
         let method = mc.method.to_string();
+        if mc.args.is_empty()
+            && REWRITTEN_PATH_METHODS.contains(&method.as_str())
+            && self.receiver_is_known_non_path(&mc.receiver)
+        {
+            // `DirFd::read_dir` in `uucore`'s `perms.rs` is the motivating case:
+            // it shares a name with `Path::read_dir` but is an `openat`-anchored
+            // descriptor method that is already confined, and rewriting it to
+            // `ambient::read_dir(&(dir_fd))` only fails the `AsRef<Path>` bound.
+            let line = mc.method.span().start().line;
+            self.unhandled.push(format!(
+                "line {line}: `.{method}()` left alone -- receiver has a declared non-path type"
+            ));
+            syn::visit::visit_expr_method_call(self, mc);
+            return;
+        }
         if mc.args.is_empty() && REWRITTEN_PATH_METHODS.contains(&method.as_str()) {
             // This edit spans the whole call and copies the receiver verbatim,
             // so descending would emit edits inside a range about to be
@@ -332,6 +404,19 @@ impl<'ast> Visit<'ast> for EditCollector<'_> {
 }
 
 impl EditCollector<'_> {
+    /// Whether a method receiver is a bare parameter with a declared non-path
+    /// type, and so must not be rewritten to a path-taking facade call.
+    fn receiver_is_known_non_path(&self, receiver: &syn::Expr) -> bool {
+        let syn::Expr::Path(p) = receiver else {
+            return false;
+        };
+        let Some(ident) = p.path.get_ident() else {
+            return false;
+        };
+        let name = ident.to_string();
+        self.non_path.iter().any(|scope| scope.contains(&name))
+    }
+
     /// Rewrites a call whose callee path names a routed `std::fs` operation.
     fn try_rewrite_call(&mut self, path: &syn::Path) {
         let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
@@ -632,6 +717,149 @@ fn rust_files(path: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+/// Whether `file` matches any `--skip` pattern.
+fn is_skipped(file: &Path, skips: &[String]) -> bool {
+    skips.iter().any(|s| path_has_suffix(file, s))
+}
+
+/// Whether `file`'s path ends with `suffix`, matched on whole components.
+///
+/// Component-wise rather than textual so `--skip fs.rs` cannot also match
+/// `safe_fs.rs`, and separators are normalized so a pattern written with `/`
+/// works on Windows.
+fn path_has_suffix(file: &Path, suffix: &str) -> bool {
+    let want: Vec<&str> = suffix
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .collect();
+    if want.is_empty() {
+        return false;
+    }
+    let have: Vec<String> = file
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    have.len() >= want.len()
+        && have[have.len() - want.len()..]
+            .iter()
+            .zip(&want)
+            .all(|(a, b)| a == b)
+}
+
+/// Whether an attribute list gates its item to test builds.
+///
+/// Upstream's own tests must not be routed: the facade fails closed with no
+/// session installed, so a routed `#[cfg(test)]` body turns D13's health metric
+/// -- "do upstream's tests still pass" -- into a guaranteed failure that reads
+/// like a divergence. The five leaf forks escaped this only because none has a
+/// filesystem call inside a test module.
+///
+/// The predicate is deliberately textual and deliberately biased. A `cfg`
+/// containing `not` is never treated as a test gate, so `#[cfg(not(test))]` --
+/// which marks *production* code -- is still routed. The cost is that
+/// `#[cfg(all(test, not(windows)))]` is not recognized and its body gets routed;
+/// that direction fails loudly in the upstream suite, whereas mistaking
+/// production for test would silently leave a hole.
+fn is_test_gated(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if attr.path().is_ident("test") {
+            return true;
+        }
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let syn::Meta::List(list) = &attr.meta else {
+            return false;
+        };
+        let tokens = list.tokens.to_string();
+        !tokens.contains("not") && tokens.split(|c: char| !c.is_alphanumeric() && c != '_').any(|t| t == "test")
+    })
+}
+
+/// Type names a receiver may have and still be routed as a path.
+///
+/// Everything else *named* is treated as definitely-not-a-path — but only when
+/// the name is not one of the enclosing function's generic parameters, since a
+/// bare `P` is very often `P: AsRef<Path>` and must keep its existing rewrite.
+const PATH_LIKE_TYPES: &[&str] = &[
+    "Path", "PathBuf", "OsStr", "OsString", "str", "String", "Cow",
+];
+
+/// The parameter names of `sig` whose declared type is definitely not path-like.
+///
+/// Partial type inference on purpose: it reads only what the signature states.
+/// A parameter whose type names one of the function's own generics, or is
+/// `impl Trait`, or is anything other than a plain named path type, is left
+/// *unknown* and keeps the existing receiver-blind rewrite. The set is
+/// therefore small and every member is certain, which is the direction that
+/// matters — a false "non-path" silently stops routing a real path call.
+fn non_path_params(sig: &syn::Signature) -> BTreeSet<String> {
+    let generics: BTreeSet<String> = sig
+        .generics
+        .params
+        .iter()
+        .filter_map(|p| match p {
+            syn::GenericParam::Type(t) => Some(t.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    let mut out = BTreeSet::new();
+    for arg in &sig.inputs {
+        let syn::FnArg::Typed(pt) = arg else { continue };
+        let syn::Pat::Ident(pat) = &*pt.pat else {
+            continue;
+        };
+        if let Some(base) = named_base_type(&pt.ty)
+            && !generics.contains(&base)
+            && !PATH_LIKE_TYPES.contains(&base.as_str())
+        {
+            out.insert(pat.ident.to_string());
+        }
+    }
+    out
+}
+
+/// The bare name of a type after peeling references, or `None` when the type is
+/// not a plain named path (`impl Trait`, a tuple, a slice, a bare generic).
+fn named_base_type(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Reference(r) => named_base_type(&r.elem),
+        syn::Type::Paren(p) => named_base_type(&p.elem),
+        syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    }
+}
+
+/// An item's attributes, for the variants that can carry a `cfg`.
+fn item_attrs(item: &syn::Item) -> Option<&[syn::Attribute]> {
+    Some(match item {
+        syn::Item::Mod(i) => &i.attrs,
+        syn::Item::Fn(i) => &i.attrs,
+        syn::Item::Impl(i) => &i.attrs,
+        syn::Item::Use(i) => &i.attrs,
+        syn::Item::Struct(i) => &i.attrs,
+        syn::Item::Enum(i) => &i.attrs,
+        syn::Item::Const(i) => &i.attrs,
+        syn::Item::Static(i) => &i.attrs,
+        syn::Item::Trait(i) => &i.attrs,
+        syn::Item::Type(i) => &i.attrs,
+        syn::Item::Macro(i) => &i.attrs,
+        _ => return None,
+    })
+}
+
+/// An impl member's attributes, so `#[cfg(test)] fn` inside an `impl` is seen.
+fn impl_item_attrs(item: &syn::ImplItem) -> Option<&[syn::Attribute]> {
+    Some(match item {
+        syn::ImplItem::Fn(i) => &i.attrs,
+        syn::ImplItem::Const(i) => &i.attrs,
+        syn::ImplItem::Type(i) => &i.attrs,
+        syn::ImplItem::Macro(i) => &i.attrs,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,6 +914,71 @@ mod tests {
         );
         assert!(out.unhandled.is_empty(), "is_dir on a FileType must not be flagged");
         assert!(!out.changed);
+    }
+
+    #[test]
+    fn a_test_module_is_left_alone_while_production_is_routed() {
+        // D13's health metric is "do upstream's tests still pass". The facade
+        // fails closed with no session, so routing a test body guarantees the
+        // metric reads failure. Exactly one of these two calls may be rewritten.
+        let out = routed(
+            "use std::fs::File;\n\
+             fn prod(p: &str) { let _ = File::open(p); }\n\
+             #[cfg(test)]\n\
+             mod tests {\n\
+             use std::fs::File;\n\
+             #[test]\n\
+             fn t() { let _ = File::open(\"fixture\"); }\n\
+             }\n",
+        );
+        assert_eq!(
+            out.source.matches("brush_vfs::ambient::open").count(),
+            1,
+            "production routed, test left alone"
+        );
+        assert!(
+            out.source.contains("File::open(\"fixture\")"),
+            "the test body keeps its own File::open"
+        );
+    }
+
+    #[test]
+    fn a_not_test_cfg_is_production_and_still_routes() {
+        // `#[cfg(not(test))]` marks production code. Treating it as a test gate
+        // would silently stop routing it -- the failure direction that matters.
+        let out = routed(
+            "#[cfg(not(test))]\nfn prod(p: &str) { let _ = std::fs::read(p); }\n",
+        );
+        assert!(out.source.contains("brush_vfs::ambient::read(p)"));
+    }
+
+    #[test]
+    fn a_declared_non_path_receiver_is_reported_not_rewritten() {
+        // uucore's perms.rs:499 `dir_fd.read_dir()`: a DirFd is an openat-anchored
+        // descriptor that shares a method name with Path and is already confined.
+        let out = routed("fn f(dir_fd: &DirFd) { let _ = dir_fd.read_dir(); }\n");
+        assert!(
+            !out.source.contains("ambient::read_dir"),
+            "a DirFd receiver must not be routed as a path"
+        );
+        assert!(out.unhandled.iter().any(|u| u.contains("non-path")));
+    }
+
+    #[test]
+    fn a_generic_receiver_keeps_its_rewrite() {
+        // `P` is almost always `P: AsRef<Path>`; leaving it unknown preserves the
+        // existing receiver-blind behaviour rather than silently under-routing.
+        let out = routed("fn f<P: AsRef<Path>>(p: P) { let _ = p.exists(); }\n");
+        assert!(out.source.contains("brush_vfs::ambient::exists(&(p))"));
+    }
+
+    #[test]
+    fn skip_matches_whole_components_only() {
+        assert!(path_has_suffix(Path::new("a/features/fsext.rs"), "features/fsext.rs"));
+        assert!(path_has_suffix(Path::new("a/mods/os.rs"), "mods/os.rs"));
+        // A suffix must not match a partial component: `fs.rs` is not `safe_fs.rs`.
+        assert!(!path_has_suffix(Path::new("a/safe_fs.rs"), "fs.rs"));
+        assert!(!path_has_suffix(Path::new("a/b.rs"), "z/b.rs"));
     }
 
     #[test]
