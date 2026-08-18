@@ -83,11 +83,23 @@ impl Session {
             .resolve(path)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
 
-        if !self.vfs.metadata(&target)?.is_dir() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotADirectory,
-                format!("not a directory: {target}"),
-            ));
+        // A probe rather than an open: a directory cannot be opened as a file,
+        // and an unmounted path must report NotFound rather than surfacing
+        // whatever the underlying open happened to fail with.
+        match self.vfs.facts(&target, true) {
+            Some(facts) if facts.is_dir => {}
+            Some(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    format!("not a directory: {target}"),
+                ));
+            }
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("no such file or directory: {target}"),
+                ));
+            }
         }
 
         self.cwd = target;

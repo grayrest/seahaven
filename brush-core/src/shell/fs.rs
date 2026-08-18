@@ -2,8 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use normalize_path::NormalizePath as _;
-
 use crate::{
     ExecutionParameters, ShellFd,
     env::{EnvironmentLookup, EnvironmentScope},
@@ -20,20 +18,27 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// * `target_dir` - The path to set as the working directory.
     pub fn set_working_dir(&mut self, target_dir: impl AsRef<Path>) -> Result<(), error::Error> {
         let abs_path = self.absolute_path(target_dir.as_ref());
+        let virtual_path = self.to_virtual_path(&abs_path)?;
 
-        match std::fs::metadata(&abs_path) {
-            Ok(m) => {
-                if !m.is_dir() {
-                    return Err(error::ErrorKind::NotADirectory(abs_path).into());
-                }
-            }
-            Err(e) => {
-                return Err(e.into());
+        // Ask the namespace, not the host: under a restrictive policy the host
+        // has no directory by this name, and under identity the two agree.
+        match self.session().vfs().facts(&virtual_path, true) {
+            Some(facts) if facts.is_dir => {}
+            Some(_) => return Err(error::ErrorKind::NotADirectory(abs_path).into()),
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("no such file or directory: {virtual_path}"),
+                )
+                .into());
             }
         }
 
-        // Normalize the path (but don't canonicalize it).
-        let cleaned_path = abs_path.normalize();
+        // The session's working directory is the authoritative one; the shell's
+        // `PathBuf` mirrors it so that code still expecting a path keeps working
+        // while the rest of D15 lands.
+        self.session_mut().set_cwd(virtual_path.as_str())?;
+        let cleaned_path = PathBuf::from(virtual_path.as_str());
 
         let pwd = cleaned_path.to_string_lossy().to_string();
 
@@ -55,6 +60,38 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         )?;
 
         Ok(())
+    }
+
+    /// Resolves a path to its symlink-free form within the namespace.
+    ///
+    /// The namespace's answer to `canonicalize`. The host's would consult a
+    /// filesystem the shell may not be able to see and would return a host path
+    /// where a virtual one is required.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not resolve within the namespace.
+    pub fn canonicalize_in_namespace(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<PathBuf, error::Error> {
+        let vfs = self.session().vfs();
+
+        // Resolve the working directory physically *before* applying the
+        // operand. `cd -P ..` must climb from where the shell really is, not
+        // from the symlinked name it took to get there -- applying `..` to the
+        // logical path is `cd -L`, which is the default and a different answer.
+        let logical_cwd = self.session().cwd();
+        let base = vfs
+            .canonicalize(logical_cwd)
+            .unwrap_or_else(|_| logical_cwd.clone());
+
+        let target = base
+            .resolve(path.as_ref().to_string_lossy().as_ref())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
+
+        let resolved = vfs.canonicalize(&target)?;
+        Ok(PathBuf::from(resolved.as_str()))
     }
 
     /// Tilde-shortens the given string, replacing the user's home directory with a tilde.

@@ -29,7 +29,7 @@ cases:
       - "--mount"
       - "/work:."
       - "-c"
-      - "mkdir -p /work/sub; echo deep > /work/f.txt; cat < /work/sub/../f.txt"
+      - "echo deep > /work/f.txt; cat < /work/sub/../f.txt"
     expected_exit_code: 0
     expected_stdout: "deep\n"
 
@@ -108,3 +108,22 @@ cases:
       - "echo x > /work/f.txt; [[ /work/f.txt -ef /work/f.txt ]] && echo same; [[ /work/f.txt -ef /etc/passwd ]] && echo leak; echo done"
     expected_exit_code: 0
     expected_stdout: "same\ndone\n"
+
+  - name: "cd navigates within the namespace"
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "cd /work && pwd; cd . && pwd; cd /work && pwd"
+    expected_exit_code: 0
+    expected_stdout: "/work\n/work\n/work\n"
+
+  - name: "cd cannot leave the namespace"
+    args: ["--mount", "/work:.", "-c", "cd /etc"]
+    expected_exit_code: 1
+    ignore_stderr: true
+
+  - name: "cd cannot climb above the virtual root"
+    args: ["--mount", "/work:.", "-c", "cd /work/../.."]
+    expected_exit_code: 1
+    ignore_stderr: true

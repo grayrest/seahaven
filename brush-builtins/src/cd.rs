@@ -78,7 +78,11 @@ impl builtins::Command for CdCommand {
                 return error::unimp("cd -e");
             }
 
-            target_dir = context.shell.absolute_path(target_dir).canonicalize()?;
+            // `cd -P` resolves symlinks. Doing that with the host's
+            // `canonicalize` would ask a filesystem the shell may not be able
+            // to see, and would hand back a host path where the namespace
+            // expects a virtual one.
+            target_dir = context.shell.canonicalize_in_namespace(&target_dir)?;
         }
 
         context.shell.set_working_dir(&target_dir)?;

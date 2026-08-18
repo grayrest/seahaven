@@ -443,16 +443,28 @@ impl Vfs {
     /// Returns [`std::io::Error`] if the path is unmounted or the query fails.
     pub fn metadata(&self, path: &VirtualPath) -> std::io::Result<std::fs::Metadata> {
         let located = self.locate_follow(path)?;
-        // Going through an opened descriptor keeps the returned type `std`'s,
-        // so callers keep their platform extension traits.
-        located
-            .mount
-            .dir()
-            .open_with(
-                &located.relative,
-                cap_std::fs::OpenOptions::new().read(true),
-            )
-            .and_then(|f| f.into_std().metadata())
+
+        // Every branch goes through a descriptor so the result is `std`'s type
+        // and callers keep their platform extension traits. A directory cannot
+        // be opened as a file, and the mount point has no relative path to open
+        // at all -- both were silently broken until `cd /work` failed.
+        let file = if located.relative.as_os_str().is_empty() {
+            located.mount.dir().try_clone()?.into_std_file()
+        } else if located.mount.dir().metadata(&located.relative)?.is_dir() {
+            located
+                .mount
+                .dir()
+                .open_dir(&located.relative)?
+                .into_std_file()
+        } else {
+            located
+                .mount
+                .dir()
+                .open_with(&located.relative, &OpenMode::read().to_cap_std())?
+                .into_std()
+        };
+
+        file.metadata()
     }
 
     /// Whether `path` exists, following symlinks.
@@ -532,6 +544,16 @@ impl Vfs {
     #[must_use]
     pub fn is_symlink(&self, path: &VirtualPath) -> bool {
         self.facts(path, false).is_some_and(|f| f.is_symlink)
+    }
+
+    /// The path with every symlink resolved, still expressed virtually.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if the path does not resolve in this
+    /// namespace.
+    pub fn canonicalize(&self, path: &VirtualPath) -> std::io::Result<VirtualPath> {
+        Ok(self.locate_follow(path)?.virtual_path)
     }
 
     /// Reads a symlink's target verbatim, without resolving it.

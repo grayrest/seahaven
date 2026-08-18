@@ -215,6 +215,11 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
         &self.session
     }
 
+    /// Mutable access to the session, for changing its working directory.
+    pub const fn session_mut(&mut self) -> &mut brush_vfs::Session {
+        &mut self.session
+    }
+
     /// Replaces the sandbox namespace.
     ///
     /// The working directory is reset to the virtual root, because a cwd from
