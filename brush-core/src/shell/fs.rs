@@ -6,7 +6,7 @@ use crate::{
     ExecutionParameters, ShellFd,
     env::{EnvironmentLookup, EnvironmentScope},
     error, openfiles, pathsearch,
-    sys::{fs::PathExt as _, users},
+    sys::users,
     variables,
 };
 
@@ -60,6 +60,28 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         )?;
 
         Ok(())
+    }
+
+    /// Whether the path names an executable the shell can actually reach.
+    ///
+    /// PATH entries are host-shaped strings inherited from the environment, so
+    /// most of them name nothing under a restrictive policy -- which is the
+    /// correct answer rather than a failure. Executability itself comes from
+    /// `access(2)` through the namespace rather than from mode bits, which give
+    /// the wrong answer for root and under ACLs.
+    #[must_use]
+    pub fn is_executable_in_namespace(&self, path: impl AsRef<Path>) -> bool {
+        let abs_path = self.absolute_path(path.as_ref());
+        self.to_virtual_path(&abs_path).is_ok_and(|p| {
+            self.session().vfs().access(
+                &p,
+                brush_vfs::AccessModes {
+                    readable: false,
+                    writable: false,
+                    executable: true,
+                },
+            )
+        })
     }
 
     /// Resolves a path to its symlink-free form within the namespace.
@@ -163,7 +185,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         let path = self.env_str("PATH").unwrap_or_default();
         for one_dir in crate::sys::fs::split_paths(path.as_ref()) {
             let candidate_path = one_dir.join(candidate_name.as_ref());
-            if candidate_path.executable() {
+            if self.is_executable_in_namespace(&candidate_path) {
                 return Some(candidate_path);
             }
         }

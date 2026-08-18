@@ -3,7 +3,7 @@ use std::{fmt::Display, io::Write, path::Path};
 
 use brush_core::{
     ExecutionResult, builtins, commands, pathsearch,
-    sys::{self, fs::PathExt},
+    sys::{self},
 };
 
 /// Directly invokes an external command, without going through typical search order.
@@ -97,7 +97,7 @@ impl CommandCommand {
         // Look in path.
         if sys::fs::contains_path_separator(command_name) {
             let candidate_path = shell.absolute_path(Path::new(command_name));
-            if candidate_path.executable() {
+            if shell.is_executable_in_namespace(&candidate_path) {
                 Some(FoundCommand::External(
                     candidate_path.to_string_lossy().to_string(),
                 ))

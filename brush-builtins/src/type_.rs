@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
-use brush_core::sys::{self, fs::PathExt};
+use brush_core::sys::{self};
 use brush_core::{ExecutionResult, Shell, builtins, parser::ast};
 
 /// Inspect the type of a named shell item.
@@ -185,7 +185,7 @@ impl TypeCommand {
 
         // Look in path.
         if sys::fs::contains_path_separator(name) {
-            if shell.absolute_path(Path::new(name)).executable() {
+            if shell.is_executable_in_namespace(Path::new(name)) {
                 types.push(ResolvedType::File {
                     path: PathBuf::from(name),
                     hashed: false,

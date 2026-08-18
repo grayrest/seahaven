@@ -30,7 +30,9 @@ impl builtins::Command for PwdCommand {
                 .do_not_resolve_symlinks_when_changing_dir;
 
         if should_canonicalize {
-            cwd = cwd.canonicalize()?.into();
+            // `pwd -P` resolves symlinks. The namespace's answer, not the
+            // host's -- the host may not even have a directory by this name.
+            cwd = context.shell.canonicalize_in_namespace(&cwd)?.into();
         }
 
         writeln!(context.stdout(), "{}", cwd.to_string_lossy())?;
