@@ -14,6 +14,12 @@ members = [
     "fuzz",
     "xtask",
 ]
+# The coreutils forks are dependencies, not members: upstream code does not pass
+# brush's pedantic lints, and the filesystem ban (which runs `--workspace`) must
+# not see them -- their routing is proven by the Landlock test (D41), not the
+# lint (D3). This mirrors how the crates.io versions they replace were never
+# linted either.
+exclude = ["forks"]
 default-members = ["brush-shell"]
 
 [workspace.package]
