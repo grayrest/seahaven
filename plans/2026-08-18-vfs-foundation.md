@@ -51,17 +51,30 @@ reaches `commands.rs:421` with no predicate at all, and `hash -p` writes an
 unchecked host path into the location cache that later lookups return without
 revalidating.
 
-The fix belongs to the execution milestone, and it is not "add a check": the
-resolved candidate has to be turned into a host path *by the mount table*, or
-better into an already-open descriptor. Recorded here because the intermediate
+**Fixed, which widens this milestone past what was planned.** The intermediate
 state is a trap — a reader who sees executable lookup going through the
-namespace will reasonably assume execution does too.
+namespace will reasonably assume execution does too — and leaving it in place
+for a later milestone would have meant shipping a namespace whose answers
+authorize something else. `Vfs::host_path` turns a virtual path into the host
+path the kernel should run, resolving symlinks first so that translating for
+`exec` cannot hand the kernel a link the namespace approved and let it resolve
+against the host. The name a command was found under is unchanged, so
+`command -v` still prints what bash prints; only the string handed to
+`Command::new` moved.
+
+So external execution *is* confined now, which this plan said it would not be:
+a program not in the namespace cannot be run, and a program in it runs the
+mounted file. What remains unconfined is what a running child then does — it is
+an ordinary process with ordinary ambient authority, and nothing here changes
+that. The closed world (D2), which decides *which* programs may run at all, is
+still a later milestone.
 
 | Proven | Not proven |
 |---|---|
 | ~80 production fs sites compile against a vfs facade | that `ro` is enforced — it is a userspace field, not a property of a `Dir` fd (open decision 1) |
 | **On Linux, that nothing escaped the mount roots during a compat subset** — the kernel says so, not a lint (gate 8) | the same on macOS and Windows, where no equivalent primitive exists |
-| The identity policy does not regress the compat suite on 2 of 4 lanes | that dependencies do not bypass the vfs (open decision 2) |
+| The identity policy does not regress the compat suite on 2 of 4 lanes | that dependencies do not bypass the vfs — the bundled coreutils do |
+| A program not in the namespace cannot be executed, and one in it runs the *mounted* file | anything about what a child process does once running |
 | A restrictive-policy subset behaves as specified (gate 2) | that the shipped closed-world configuration works — external execution is still on |
 | `brush-vfs` unit resolution, including `RESOLVE_IN_ROOT` | |
 
