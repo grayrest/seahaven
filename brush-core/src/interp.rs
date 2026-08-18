@@ -1969,21 +1969,30 @@ fn setup_process_substitution(
 }
 
 fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Error> {
-    let (reader, mut writer) = std::io::pipe()?;
+    use std::io::Seek as _;
 
-    let bytes = contents.as_bytes();
+    // Materialize into a temporary file rather than writing into a pipe.
+    //
+    // A pipe cannot hold an arbitrary payload here: nothing is reading the read
+    // end yet -- the caller installs it in the descriptor table only after we
+    // return -- so a write past the pipe's capacity blocks forever. That
+    // capacity is platform-dependent (16 KiB on macOS, 64 KiB on Linux), which
+    // is why this previously hung on macOS while failing on Linux, where the
+    // buffer was grown to fit instead.
+    //
+    // A file matches what bash does, and carries two properties a pipe does not.
+    // Every byte is present before the descriptor is handed over, which
+    // `read -t 0 <<< "..."` observes and which no asynchronous writer can
+    // promise. And the payload survives `exec` replacing the process image,
+    // where a pipe's write end -- opened `O_CLOEXEC` -- would close and truncate
+    // the reader's view at whatever happened to be buffered.
+    //
+    // `tempfile::tempfile()` yields an unnamed file: unlinked immediately on
+    // Unix, `FILE_FLAG_DELETE_ON_CLOSE` on Windows. Nothing is reachable by
+    // name, and the storage is released once the last descriptor closes.
+    let mut file = tempfile::tempfile()?;
+    file.write_all(contents.as_bytes())?;
+    file.seek(std::io::SeekFrom::Start(0))?;
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    {
-        use std::os::fd::AsFd as _;
-
-        let len = i32::try_from(bytes.len())
-            .map_err(|_err| error::Error::from(error::ErrorKind::TooMuchData))?;
-        nix::fcntl::fcntl(reader.as_fd(), nix::fcntl::FcntlArg::F_SETPIPE_SZ(len))?;
-    }
-
-    writer.write_all(bytes)?;
-    drop(writer);
-
-    Ok(reader.into())
+    Ok(file.into())
 }

@@ -281,3 +281,48 @@ cases:
       EOF
       )
       echo $var
+
+  - name: "Here doc larger than the pipe buffer"
+    # Pipe capacity is 16 KiB on macOS and 64 KiB on Linux, so a body past that
+    # cannot be written into an unread pipe without blocking. Sized past 1 MiB
+    # deliberately: Linux could previously grow the pipe with F_SETPIPE_SZ up to
+    # pipe-max-size (1 MiB by default), so a smaller body passes there and the
+    # primary CI lane would guard nothing.
+    stdin: |
+      body=$(yes 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' | head -16384)
+      out=$(cat <<EOF
+      $body
+      EOF
+      )
+      echo "${#out}"
+
+  - name: "Here string larger than the pipe buffer"
+    stdin: |
+      body=$(yes 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' | head -2048)
+      out=$(cat <<<"$body")
+      echo "${#out}"
+
+  - name: "Here doc survives exec replacing the process image"
+    # A pipe's write end is O_CLOEXEC, so anything still unwritten when the
+    # process image is replaced is lost and the reader sees a short, silent EOF.
+    incompatible_configs: ["sh"]
+    # stderr is ignored: `exec` with an injected fd panics a tokio I/O worker
+    # ("Bad file descriptor") on every invocation, including a 6-byte here-doc
+    # on unpatched code. That is a separate pre-existing bug; this case asserts
+    # only that the payload arrives intact.
+    ignore_stderr: true
+    stdin: |
+      body=$(yes 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' | head -8192)
+      exec 3<<EOF
+      $body
+      EOF
+      exec /bin/sh -c "wc -c <&3"
+
+  - name: "read -t 0 sees a here string larger than PIPE_BUF"
+    # Here-document contents must be readable the instant the descriptor is
+    # installed; `read -t 0` reports availability with no wait. An asynchronous
+    # writer cannot promise that, and the failure is load-dependent, so pin it
+    # above any plausible inline-write bound.
+    stdin: |
+      body=$(yes 'x' | head -601 | tr -d '\n')
+      read -t 0 <<< "$body"; echo "available: $?"
