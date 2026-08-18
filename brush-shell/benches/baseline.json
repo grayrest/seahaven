@@ -2,10 +2,10 @@
   "note": "Absolute ceilings, in microseconds, for the benchmarks the vfs foundation put at risk. Absolute rather than a diff against main: once a change merges, main *is* the change, so a diff-based ratchet lets a regression through once and then treats it as the new floor. Ceilings carry 6x headroom over a measured run, which absorbs the gap between a developer machine and a shared CI runner; they are meant to catch a change of kind -- a syscall per PATH entry, a directory relisted per glob candidate -- not a few percent of noise. Reseed with --update-baseline when the numbers move for a reason. Coverage: the benchmarks are #[cfg(unix)] and the CI lane is ubuntu-only, so the macOS and Windows cost of routing through the namespace is accepted unmeasured.",
   "headroom": 6.0,
   "benchmarks": {
-    "instantiate_shell": 1201.8,
-    "clone_shell_object": 48.81,
-    "glob_expansion": 2222.8,
-    "find_first_executable_in_path": 12351.31,
-    "find_first_executable_in_path_miss": 38555.55
+    "instantiate_shell": 518.31,
+    "clone_shell_object": 48.93,
+    "glob_expansion": 1640.26,
+    "find_first_executable_in_path": 6678.95,
+    "find_first_executable_in_path_miss": 12111.24
   }
 }

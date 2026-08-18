@@ -44,9 +44,28 @@ const MAX_SYMLINK_HOPS: usize = 40;
 /// unstable.
 const SYMLINK_LOOP_MESSAGE: &str = "too many levels of symbolic links";
 
-/// Whether an error from this module reports a symlink loop.
+/// `ELOOP`, which the kernel reports when it gives up following links itself.
+///
+/// Spelled numerically per platform rather than via `libc`, which this crate
+/// does not depend on, and matched by number rather than by `ErrorKind`,
+/// because `ErrorKind::FilesystemLoop` is still unstable.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const ELOOP: i32 = 40;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+const ELOOP: i32 = 62;
+
+/// Whether an error reports a symlink loop.
+///
+/// Two sources produce one: the walk's own hop counter, which sees a cycle that
+/// crosses a mount or an absolute target, and the kernel, which sees the
+/// ordinary same-directory kind before the walk is ever reached.
 #[must_use]
 pub fn is_symlink_loop(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    if error.raw_os_error() == Some(ELOOP) {
+        return true;
+    }
+
     error.kind() == std::io::ErrorKind::Other && error.to_string().contains(SYMLINK_LOOP_MESSAGE)
 }
 
@@ -302,11 +321,6 @@ impl Vfs {
         &self.mounts
     }
 
-    /// Locates a path without following a symlink in its final component.
-    fn locate_nofollow(&self, path: &VirtualPath) -> std::io::Result<Located<'_>> {
-        self.locate(path, false)
-    }
-
     /// Locates a path, following symlinks throughout.
     fn locate_follow(&self, path: &VirtualPath) -> std::io::Result<Located<'_>> {
         self.locate(path, true)
@@ -317,10 +331,23 @@ impl Vfs {
     /// Resolution is virtual-path-level rather than descriptor-level because a
     /// symlink may cross a mount boundary: following one has to re-enter the
     /// mount table, not merely descend from wherever the walk had reached.
+    ///
+    /// The walk carries a handle on the directory it has reached so far, so
+    /// that each component costs one probe against that handle. Without it,
+    /// every component is probed by its whole path from the mount root and
+    /// cap-std re-walks the prefix each time: quadratic in the depth of the
+    /// path, which cost 70-230 microseconds per PATH entry on a real `$PATH`.
+    /// The handle is dropped whenever the walk stops being a plain descent --
+    /// on a symlink restart, on crossing into another mount, or if the
+    /// directory cannot be opened -- and the walk falls back to the whole path,
+    /// so dropping it costs speed and never correctness.
     fn locate(&self, path: &VirtualPath, follow_final: bool) -> std::io::Result<Located<'_>> {
         let mut resolved = VirtualPath::root();
         let mut pending: Vec<String> = path.components().rev().map(str::to_owned).collect();
         let mut hops = 0usize;
+
+        // The directory `resolved` names, and the mount it was opened from.
+        let mut cursor: Option<(&Mount, cap_std::fs::Dir)> = None;
 
         while let Some(component) = pending.pop() {
             let candidate = resolved.resolve(&component).map_err(|e| {
@@ -330,15 +357,24 @@ impl Vfs {
             let is_final = pending.is_empty();
             let located = self.locate_exact(&candidate)?;
 
+            // Usable only while the walk stays inside one mount: descending one
+            // component from the cursor would otherwise land in the parent
+            // mount's directory rather than the nested mount's.
+            let descent = cursor
+                .as_ref()
+                .filter(|(mount, _)| std::ptr::eq(*mount, located.mount))
+                .map(|(_, dir)| dir);
+
             // `symlink_metadata` rather than `metadata`: the question is whether
             // this component *is* a link, not what it points at.
-            let is_symlink = located
-                .mount
-                .dir()
-                .symlink_metadata(&located.relative)
-                .is_ok_and(|m| m.is_symlink());
+            let is_symlink = match descent {
+                Some(dir) => dir.symlink_metadata(&component),
+                None => located.mount.dir().symlink_metadata(&located.relative),
+            }
+            .is_ok_and(|m| m.is_symlink());
 
             if is_symlink && (!is_final || follow_final) {
+                cursor = None;
                 hops += 1;
                 if hops > MAX_SYMLINK_HOPS {
                     // `ErrorKind::FilesystemLoop` is still unstable, so the
@@ -377,6 +413,23 @@ impl Vfs {
             }
 
             resolved = candidate;
+
+            // Advance the cursor for the next component. A failure here is not
+            // an error: the component may not be a directory at all, in which
+            // case the next probe reports it by its whole path exactly as it
+            // would have without the cursor.
+            cursor = if is_final {
+                None
+            } else {
+                let opened = match cursor
+                    .as_ref()
+                    .filter(|(mount, _)| std::ptr::eq(*mount, located.mount))
+                {
+                    Some((_, dir)) => dir.open_dir(&component),
+                    None => located.mount.dir().open_dir(&located.relative),
+                };
+                opened.ok().map(|dir| (located.mount, dir))
+            };
         }
 
         self.locate_exact(&resolved)
@@ -396,6 +449,39 @@ impl Vfs {
         })
     }
 
+    /// Runs `op` at the location `path` names.
+    ///
+    /// The whole path goes to cap-std first, in one walk. Its resolution
+    /// follows relative symlinks and refuses anything that leaves the mount, so
+    /// a success means the path held nothing this namespace would have resolved
+    /// differently -- in particular no absolute symlink target, which is the
+    /// only case D42 treats specially. It also means the location reached is
+    /// inside the mount it started from, since mounts never share a host
+    /// directory, so the mount's own access rules still govern.
+    ///
+    /// cap-std reports leaving the root as `PermissionDenied`, distinct from
+    /// the `NotFound` of a path that simply is not there, so the careful
+    /// component-by-component walk is only paid for when there is something to
+    /// reinterpret. Two other things also report `PermissionDenied` -- a write
+    /// refused by a read-only mount, and `access(2)` answering no -- and both
+    /// pay for a second walk that reaches the same answer. They are error
+    /// paths, and the alternative is matching on cap-std's wording.
+    fn at<T>(
+        &self,
+        path: &VirtualPath,
+        follow_final: bool,
+        op: impl Fn(&Located<'_>) -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        let direct = self.locate_exact(path)?;
+        match op(&direct) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
+            result => return result,
+        }
+
+        let located = self.locate(path, follow_final)?;
+        op(&located)
+    }
+
     /// Opens a file with the given options.
     ///
     /// # Errors
@@ -404,18 +490,19 @@ impl Vfs {
     /// read-only and the options request writing, or if the underlying open
     /// fails.
     pub fn open_with(&self, path: &VirtualPath, mode: OpenMode) -> std::io::Result<std::fs::File> {
-        let located = self.locate_follow(path)?;
-        // The write check is on the resolved location, not the requested one: a
-        // symlink from a writable mount into a read-only one must be governed by
-        // where it lands.
-        if !located.mount.access().is_writable() && mode.is_write() {
-            return Err(read_only(&located.virtual_path));
-        }
-        Ok(located
-            .mount
-            .dir()
-            .open_with(&located.relative, &mode.to_cap_std())?
-            .into_std())
+        self.at(path, true, |located| {
+            // The write check is on the resolved location, not the requested
+            // one: a symlink from a writable mount into a read-only one must be
+            // governed by where it lands.
+            if !located.mount.access().is_writable() && mode.is_write() {
+                return Err(read_only(&located.virtual_path));
+            }
+            Ok(located
+                .mount
+                .dir()
+                .open_with(&located.relative, &mode.to_cap_std())?
+                .into_std())
+        })
     }
 
     /// Opens a file for reading.
@@ -442,29 +529,30 @@ impl Vfs {
     ///
     /// Returns [`std::io::Error`] if the path is unmounted or the query fails.
     pub fn metadata(&self, path: &VirtualPath) -> std::io::Result<std::fs::Metadata> {
-        let located = self.locate_follow(path)?;
+        self.at(path, true, |located| {
+            // Every branch goes through a descriptor so the result is `std`'s
+            // type and callers keep their platform extension traits. A
+            // directory cannot be opened as a file, and the mount point has no
+            // relative path to open at all -- both were silently broken until
+            // `cd /work` failed.
+            let file = if located.relative.as_os_str().is_empty() {
+                located.mount.dir().try_clone()?.into_std_file()
+            } else if located.mount.dir().metadata(&located.relative)?.is_dir() {
+                located
+                    .mount
+                    .dir()
+                    .open_dir(&located.relative)?
+                    .into_std_file()
+            } else {
+                located
+                    .mount
+                    .dir()
+                    .open_with(&located.relative, &OpenMode::read().to_cap_std())?
+                    .into_std()
+            };
 
-        // Every branch goes through a descriptor so the result is `std`'s type
-        // and callers keep their platform extension traits. A directory cannot
-        // be opened as a file, and the mount point has no relative path to open
-        // at all -- both were silently broken until `cd /work` failed.
-        let file = if located.relative.as_os_str().is_empty() {
-            located.mount.dir().try_clone()?.into_std_file()
-        } else if located.mount.dir().metadata(&located.relative)?.is_dir() {
-            located
-                .mount
-                .dir()
-                .open_dir(&located.relative)?
-                .into_std_file()
-        } else {
-            located
-                .mount
-                .dir()
-                .open_with(&located.relative, &OpenMode::read().to_cap_std())?
-                .into_std()
-        };
-
-        file.metadata()
+            file.metadata()
+        })
     }
 
     /// Whether `path` exists, following symlinks.
@@ -481,29 +569,24 @@ impl Vfs {
     /// host permits, since the mount is the narrower authority.
     #[must_use]
     pub fn access(&self, path: &VirtualPath, modes: AccessModes) -> bool {
-        let Ok(located) = self.locate_follow(path) else {
-            return false;
-        };
+        self.at(path, true, |located| {
+            if modes.writable && !located.mount.access().is_writable() {
+                return Err(read_only(&located.virtual_path));
+            }
 
-        if modes.writable && !located.mount.access().is_writable() {
-            return false;
-        }
+            let dir = located
+                .mount
+                .dir()
+                .try_clone()
+                .map(cap_std::fs::Dir::into_std_file)?;
 
-        let Ok(dir) = located
-            .mount
-            .dir()
-            .try_clone()
-            .map(cap_std::fs::Dir::into_std_file)
-        else {
-            return false;
-        };
-
-        cap_primitives::fs::access(
-            &dir,
-            &located.relative,
-            cap_primitives::fs::AccessType::Access(modes),
-            cap_primitives::fs::FollowSymlinks::Yes,
-        )
+            cap_primitives::fs::access(
+                &dir,
+                &located.relative,
+                cap_primitives::fs::AccessType::Access(modes),
+                cap_primitives::fs::FollowSymlinks::Yes,
+            )
+        })
         .is_ok()
     }
 
@@ -516,28 +599,21 @@ impl Vfs {
     /// unmounted path is missing as far as the sandbox is concerned.
     #[must_use]
     pub fn facts(&self, path: &VirtualPath, follow: bool) -> Option<FileFacts> {
-        let located = if follow {
-            self.locate_follow(path).ok()?
-        } else {
-            self.locate_nofollow(path).ok()?
-        };
+        self.at(path, follow, |located| {
+            // An empty relative path is the mount point itself, which the `Dir`
+            // handle already names -- `metadata("")` would simply fail, which is
+            // why `[[ -d /work ]]` was false for a mounted directory.
+            let metadata = if located.relative.as_os_str().is_empty() {
+                located.mount.dir().dir_metadata()?
+            } else if follow {
+                located.mount.dir().metadata(&located.relative)?
+            } else {
+                located.mount.dir().symlink_metadata(&located.relative)?
+            };
 
-        // An empty relative path is the mount point itself, which the `Dir`
-        // handle already names -- `metadata("")` would simply fail, which is why
-        // `[[ -d /work ]]` was false for a mounted directory.
-        let metadata = if located.relative.as_os_str().is_empty() {
-            located.mount.dir().dir_metadata().ok()?
-        } else if follow {
-            located.mount.dir().metadata(&located.relative).ok()?
-        } else {
-            located
-                .mount
-                .dir()
-                .symlink_metadata(&located.relative)
-                .ok()?
-        };
-
-        Some(FileFacts::from_metadata(&metadata))
+            Ok(FileFacts::from_metadata(&metadata))
+        })
+        .ok()
     }
 
     /// Whether `path` is a symlink, without following it.
@@ -562,8 +638,9 @@ impl Vfs {
     ///
     /// Returns [`std::io::Error`] if the path is unmounted or is not a symlink.
     pub fn read_link(&self, path: &VirtualPath) -> std::io::Result<PathBuf> {
-        let located = self.locate_nofollow(path)?;
-        read_link_contents(located.mount, &located.relative)
+        self.at(path, false, |located| {
+            read_link_contents(located.mount, &located.relative)
+        })
     }
 
     /// Lists a directory's entry names.
@@ -577,19 +654,20 @@ impl Vfs {
     /// Returns [`std::io::Error`] if the path is unmounted or is not a
     /// directory.
     pub fn read_dir_names(&self, path: &VirtualPath) -> std::io::Result<Vec<String>> {
-        let located = self.locate_follow(path)?;
-        let dir = if located.relative.as_os_str().is_empty() {
-            located.mount.dir().try_clone()?
-        } else {
-            located.mount.dir().open_dir(&located.relative)?
-        };
+        self.at(path, true, |located| {
+            let dir = if located.relative.as_os_str().is_empty() {
+                located.mount.dir().try_clone()?
+            } else {
+                located.mount.dir().open_dir(&located.relative)?
+            };
 
-        let mut names = Vec::new();
-        for entry in dir.entries()? {
-            let entry = entry?;
-            names.push(entry.file_name().to_string_lossy().into_owned());
-        }
-        Ok(names)
+            let mut names = Vec::new();
+            for entry in dir.entries()? {
+                let entry = entry?;
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+            Ok(names)
+        })
     }
 
     /// Creates a directory, and any missing parents.
@@ -599,9 +677,10 @@ impl Vfs {
     /// Returns [`std::io::Error`] if the path is unmounted, the mount is
     /// read-only, or creation fails.
     pub fn create_dir_all(&self, path: &VirtualPath) -> std::io::Result<()> {
-        let located = self.locate_nofollow(path)?;
-        Self::require_writable(&located)?;
-        located.mount.dir().create_dir_all(&located.relative)
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            located.mount.dir().create_dir_all(&located.relative)
+        })
     }
 
     /// Removes a file.
@@ -611,9 +690,10 @@ impl Vfs {
     /// Returns [`std::io::Error`] if the path is unmounted, the mount is
     /// read-only, or removal fails.
     pub fn remove_file(&self, path: &VirtualPath) -> std::io::Result<()> {
-        let located = self.locate_nofollow(path)?;
-        Self::require_writable(&located)?;
-        located.mount.dir().remove_file(&located.relative)
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            located.mount.dir().remove_file(&located.relative)
+        })
     }
 
     /// Removes an empty directory.
@@ -622,9 +702,10 @@ impl Vfs {
     ///
     /// As [`Vfs::remove_file`].
     pub fn remove_dir(&self, path: &VirtualPath) -> std::io::Result<()> {
-        let located = self.locate_nofollow(path)?;
-        Self::require_writable(&located)?;
-        located.mount.dir().remove_dir(&located.relative)
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            located.mount.dir().remove_dir(&located.relative)
+        })
     }
 
     fn require_writable(located: &Located<'_>) -> std::io::Result<()> {
@@ -813,6 +894,50 @@ mod tests {
         std::os::unix::fs::symlink("/ro/readme.txt", work_host(&f).join("ro-link.txt")).unwrap();
         let err = f.vfs.create(&vp("/work/ro-link.txt")).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_absolute_symlink_in_the_middle_of_a_path_still_resolves_in_the_root() {
+        // The whole path goes to cap-std first, and cap-std refuses an absolute
+        // symlink target wherever it appears. This is the case that has to fall
+        // back to the careful walk, and it must fall back for an *interior*
+        // component, not only a final one.
+        let f = fixture();
+        std::os::unix::fs::symlink("/ro", work_host(&f).join("elsewhere")).unwrap();
+
+        assert_eq!(
+            read(&f.vfs, "/work/elsewhere/readme.txt").unwrap(),
+            "readme"
+        );
+
+        // And landing in a read-only mount by that route is still read-only.
+        let err = f.vfs.create(&vp("/work/elsewhere/new.txt")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+
+        // The predicates agree with the open.
+        assert!(
+            f.vfs
+                .facts(&vp("/work/elsewhere/readme.txt"), true)
+                .is_some()
+        );
+        assert_eq!(
+            f.vfs
+                .canonicalize(&vp("/work/elsewhere/readme.txt"))
+                .unwrap(),
+            vp("/ro/readme.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_interior_symlink_pointing_out_of_the_namespace_is_refused() {
+        // A relative target that climbs past the virtual root must be refused
+        // whether it is reached by the fast path or the careful walk.
+        let f = fixture();
+        std::os::unix::fs::symlink("../../../../etc", work_host(&f).join("out")).unwrap();
+        assert!(read(&f.vfs, "/work/out/passwd").is_err());
+        assert!(f.vfs.facts(&vp("/work/out/passwd"), true).is_none());
     }
 
     #[cfg(unix)]
