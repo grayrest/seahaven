@@ -71,7 +71,7 @@ still a later milestone.
 
 | Proven | Not proven |
 |---|---|
-| ~80 production fs sites compile against a vfs facade | that `ro` is enforced — it is a userspace field, not a property of a `Dir` fd (open decision 1) |
+| ~80 production fs sites compile against a vfs facade | that `ro` is enforced — it is a userspace field, not a property of a `Dir` fd, and D6 accepts that rather than fixing it |
 | **On Linux, that nothing escaped the mount roots during a compat subset** — the kernel says so, not a lint (gate 8) | the same on macOS and Windows, where no equivalent primitive exists |
 | The identity policy does not regress the compat suite on 2 of 4 lanes | that dependencies do not bypass the vfs — the bundled coreutils do |
 | A program not in the namespace cannot be executed, and one in it runs the *mounted* file | anything about what a child process does once running |
@@ -141,8 +141,8 @@ always native in the host under this architecture — the Roc *guest* is wasm
 Done: `.github/workflows/ci.yaml` loses the `wasm32-unknown-unknown` and
 `wasm32-wasip2` build-matrix entries, the `wasm32/wasi-0.2` test lane, and the
 now-dead WASI-runtime install step (36 lines). `brush-core/src/sys/wasm/`
-remains in the tree and compiles for anyone who wants it; it is simply no longer
-gated on.
+remained in the tree at the time of writing; it has since been deleted, along
+with the `PathExt` trait that gave it a fail-open nothing compiled (D37).
 
 ## Resolved: absolute symlinks resolve against the virtual root
 
@@ -295,7 +295,7 @@ the effort estimate.**
 ## What stays behind, deliberately
 
 The forks and the codemod; the closed world; wasm, the broker, `spawn`/`wait_any`,
-the approval store, quotas, link validation, and the locale/tty session facts;
+the approval store, quotas, and the locale/tty session facts;
 the default-deny builtin allowlist. Each depends on this foundation.
 
 ## Gates
@@ -325,9 +325,8 @@ Each gate names its falsifier. A gate without one is a note.
    target adding meaningful `cfg` coverage (~10 blocks). "Every target in the
    matrix" was dropped: it means clippy on 9 cross jobs, roughly doubling the CI
    bill for ~18 blocks, and it named `sys/wasm`, which D37 left with no target at
-   all. **Decide separately whether to delete `sys/wasm`** — note
-   `sys/wasm/fs.rs:6-16` returns `true` unconditionally from
-   `readable`/`writable`/`executable`, a fail-open nothing currently sees.
+   all. *Resolved since: `sys/wasm` and the `PathExt` trait behind its fail-open
+   were deleted outright — see D37 and "Where it landed".*
 
 4. **Two escape suites.** A `brush-vfs` unit suite proving resolution, *and* a
    shell-level suite in `tests/cases/brush` (`TestMode::Expectation` — **not**
@@ -442,10 +441,11 @@ every open, predicate, traversal and executable lookup in `brush-core`,
 `clippy.toml` ban with `cargo xtask check ban` as its positive control; and the
 Landlock completeness test.
 
-Gates 1–5, 8 and 9 exist and can fail. Gates 6 and 7 were built rather than
-dropped: `.github/workflows/fuzz.yaml` runs `fuzz_vfs_resolve` nightly against
-a committed corpus, and `compare-benchmark-results.py --baseline` enforces
-absolute ceilings committed in `brush-shell/benches/baseline.json`.
+All nine gates exist and can fail — gates 6 and 7 were built rather than
+dropped: `.github/workflows/fuzz.yaml` runs `fuzz_vfs_resolve` nightly against a
+committed corpus, and `compare-benchmark-results.py --baseline` enforces
+absolute ceilings in `brush-shell/benches/baseline.json`. Four of them could
+*not* fail when first written; see "Built after the fact".
 
 ### Built differently
 
@@ -478,7 +478,38 @@ through the bundled uutils coreutils, and `xattr` through `uucore`, which
 entry rather than the feature being exempted, so the list is an inventory of
 what is knowingly unrouted and a *new* coreutil reaching for one still fails.
 
+### Built after the fact
+
+Four things the plan did not ask for, added because review showed the milestone
+was incoherent without them.
+
+**External execution was confined**, which "What this milestone does not prove"
+said it would not be. Routing the *lookup* through the namespace and not the
+*exec* left a confused deputy — the namespace's answer authorizing a different
+action — and that is worse than routing neither. `Vfs::host_path` translates a
+virtual path into the host path the kernel should run. See the top of this
+document.
+
+**The namespace grew `rename`, `remove_dir_all` and `symlink`.** The ban list
+described all three as "not expressible in the namespace yet" when they were
+merely unwritten, and one of them made a decision unimplementable: D26 says
+links are validated at creation, and there was no creation site. Cross-mount
+rename reports `CrossesDevices`, so `mv` uses the fallback it already has.
+
+**`Session::set_mounts` lands the shell somewhere it can name.** Installing a
+policy that does not contain the launcher's working directory left the shell
+holding a host path it could neither resolve against nor hand to a child.
+
+**Four gates were repaired after being found vacuous**, which is worth recording
+because each had a commit message saying it worked: the budget's exit code was
+swallowed by `tee` under a shell without pipefail; every fuzz corpus seed
+decoded to garbage; the fuzz target's headline assertion was `assert!(true)`;
+and the Landlock gate reported skipping as passing. The ban's own guard was
+defeated five separate ways across three rounds before it stopped reading source
+text and started inspecting the argv it runs.
+
 ### Not built
 
-The owner decisions listed at the top of the decision log, including whether to
-delete `sys/wasm`. Everything under "What stays behind, deliberately".
+Everything under "What stays behind, deliberately". The six owner decisions the
+decision log once listed as open are all resolved — the log's "Nothing is open"
+section names where each landed.
