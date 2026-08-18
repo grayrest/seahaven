@@ -15,7 +15,9 @@
 pub mod fs;
 pub mod mount;
 pub mod path;
+pub mod session;
 
 pub use fs::Vfs;
 pub use mount::{Access, Mount, MountError, MountTable};
 pub use path::{PathError, VirtualPath};
+pub use session::{Policy, Session};
