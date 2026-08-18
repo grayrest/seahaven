@@ -41,6 +41,8 @@ pub enum CheckCommand {
     UnusedDeps,
     /// Check GitHub workflow files for security issues.
     Workflows,
+    /// Check that exactly one `uucore` -- the fork -- is in the graph (D4).
+    UucorePatch,
 }
 
 /// Run a check command.
@@ -59,6 +61,7 @@ pub fn run(cmd: &CheckCommand, verbose: bool) -> Result<()> {
         CheckCommand::Spelling => check_spelling(&sh, verbose),
         CheckCommand::Workflows => check_workflows(&sh, verbose),
         CheckCommand::Links => check_links(&sh, verbose),
+        CheckCommand::UucorePatch => check_uucore_patch(&sh, verbose),
     }
 }
 
@@ -134,6 +137,95 @@ const BAN_FIXTURE: &str = "xtask/fixtures/banned-fs-access";
 ///   than merging with it, so there must be exactly one in the tree.
 /// - `disallowed_methods` is a warn-by-default lint, so a CI invocation
 ///   without `-D warnings` reports it and exits 0 regardless.
+/// Checks that the `uucore` fork reached the whole dependency graph (D4).
+///
+/// Two failure modes, both silent at compile time, which is why this is a check
+/// rather than a convention.
+///
+/// A *partial* repoint leaves `uucore 0.10.0 (registry)` and
+/// `uucore 0.10.0 (path)` in the graph together. Cargo permits that -- different
+/// sources are different packages -- and the `uumain` seam does not catch it,
+/// since it passes only `OsString` and `i32`. What breaks is process-global
+/// state that silently splits in two: the localizer thread-local
+/// `uucore::locale` sets, so a utility reading the other copy renders raw Fluent
+/// keys; and `uucore::error::EXIT_CODE`, which the routing tests set across the
+/// crate boundary and would then read back wrong.
+///
+/// A *dead* patch is the mirror image: cargo reports an unused `[patch]` as a
+/// warning on stderr and still exits 0, so a stale path or a version bump that
+/// no longer matches leaves every utility on the registry copy with nothing in
+/// the exit status to say so.
+fn check_uucore_patch(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Checking the uucore patch...");
+    let root = crate::common::find_workspace_root()?;
+
+    if verbose {
+        eprintln!("Running: cargo metadata");
+    }
+    // `cargo metadata` resolves the graph the way a build would, and prints the
+    // unused-patch warning on stderr if the patch missed.
+    let output = std::process::Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1"])
+        .current_dir(&root)
+        .output()
+        .context("running cargo metadata")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("was not used in the crate graph") || stderr.contains("unused patch") {
+        anyhow::bail!(
+            "cargo reports the [patch] was not used -- every consumer is still on the \
+             registry uucore, and cargo exits 0 while saying so:\n{stderr}"
+        );
+    }
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
+    let packages = metadata["packages"]
+        .as_array()
+        .context("cargo metadata has no packages array")?;
+
+    let uucores: Vec<&serde_json::Value> = packages
+        .iter()
+        .filter(|p| p["name"].as_str() == Some("uucore"))
+        .collect();
+    anyhow::ensure!(
+        uucores.len() == 1,
+        "expected exactly one uucore in the graph, found {}: {}",
+        uucores.len(),
+        uucores
+            .iter()
+            .map(|p| format!(
+                "{} from {}",
+                p["version"].as_str().unwrap_or("?"),
+                p["source"].as_str().unwrap_or("a path")
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    // A path dependency has a null `source`; the registry copy names one.
+    anyhow::ensure!(
+        uucores[0]["source"].is_null(),
+        "the single uucore in the graph is the registry copy, not the fork; \
+         the [patch.crates-io] entry in the root manifest is not taking effect"
+    );
+
+    let manifest = uucores[0]["manifest_path"].as_str().unwrap_or_default();
+    anyhow::ensure!(
+        manifest.contains("forks/uucore"),
+        "uucore resolves to {manifest}, which is not the fork"
+    );
+
+    let _ = sh;
+    eprintln!("uucore patch check passed (one uucore, from forks/uucore).");
+    Ok(())
+}
+
 fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
     eprintln!("Checking the filesystem ban...");
     let root = crate::common::find_workspace_root()?;

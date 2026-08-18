@@ -22,6 +22,20 @@ members = [
 exclude = ["forks"]
 default-members = ["brush-shell"]
 
+# `uucore` is the filesystem boundary for most bundled utilities -- `cksum`
+# routes to zero sites of its own because every byte it reads goes through
+# `uucore::checksum` -- so the fork has to reach every consumer, not just the
+# ones we forked. There are seven direct consumers (the five leaf forks,
+# brush-coreutils-builtins, and brush-builtins) plus the 77 still-unforked
+# crates.io `uu_*` crates, and a partial repoint is worse than none: cargo
+# treats `uucore 0.10.0 (registry)` and `uucore 0.10.0 (path)` as different
+# packages and links both. That is not a type error at the `uumain` seam, which
+# passes only `OsString` and `i32` -- it silently splits two process globals,
+# the localizer thread-local and `uucore::error::EXIT_CODE`. A patch repoints
+# the whole graph at once; `cargo xtask check uucore-patch` proves it did.
+[patch.crates-io]
+uucore = { path = "forks/uucore" }
+
 [workspace.package]
 authors = ["reuben olinsky"]
 categories = ["command-line-utilities", "development-tools"]

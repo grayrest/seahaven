@@ -5913,13 +5913,12 @@ dependencies = [
 [[package]]
 name = "uucore"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e97dd0fd8bb2ed12affba9f956c3b94b8ad3f9432746717475420e916ae0b8d4"
 dependencies = [
  "base64-simd",
  "bigdecimal",
  "blake2b_simd",
  "blake3",
+ "brush-vfs",
  "bstr",
  "clap",
  "crc-fast",
