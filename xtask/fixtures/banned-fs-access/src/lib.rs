@@ -80,6 +80,57 @@ fn path_methods() {
     p.try_exists();
 }
 
+/// Paths built from the process's own ambient position.
+fn ambient_paths() {
+    std::path::absolute(path());
+}
+
+/// The unix extension surface, and the crates beneath std. Gated because the
+/// paths do not exist elsewhere -- `cargo xtask check ban` applies the same
+/// gate when deciding which entries must fire.
+#[cfg(unix)]
+fn below_std() {
+    std::os::unix::fs::symlink(path(), path());
+    std::os::unix::fs::chown(path(), None, None);
+    std::os::unix::fs::lchown(path(), None, None);
+    std::os::unix::fs::chroot(path());
+
+    nix::unistd::access(path(), nix::unistd::AccessFlags::F_OK);
+    nix::unistd::chdir(path());
+    nix::unistd::getcwd();
+    nix::unistd::unlink(path());
+    nix::unistd::symlinkat(path(), std::io::stdin(), path());
+    nix::sys::stat::stat(path());
+    nix::sys::stat::lstat(path());
+    nix::fcntl::readlink(path());
+    nix::dir::Dir::open(
+        path(),
+        nix::fcntl::OFlag::O_RDONLY,
+        nix::sys::stat::Mode::empty(),
+    );
+
+    // SAFETY: never executed; the fixture exists to be linted, not run.
+    unsafe {
+        libc::open(c"/".as_ptr(), 0);
+    }
+    // SAFETY: as above.
+    unsafe {
+        libc::chdir(c"/".as_ptr());
+    }
+    // SAFETY: as above.
+    unsafe {
+        libc::unlink(c"/".as_ptr());
+    }
+}
+
+/// Scratch space outside every mount, and a host path handed to a child.
+fn scratch_and_children() {
+    tempfile::tempfile();
+    tempfile::tempdir();
+    tempfile::NamedTempFile::new();
+    std::process::Command::new("x").current_dir(path());
+}
+
 /// Process-wide ambient state that names a place on the host.
 fn ambient_state() {
     std::env::current_dir();

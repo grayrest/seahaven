@@ -1997,6 +1997,10 @@ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Erro
     // `tempfile::tempfile()` yields an unnamed file: unlinked immediately on
     // Unix, `FILE_FLAG_DELETE_ON_CLOSE` on Windows. Nothing is reachable by
     // name, and the storage is released once the last descriptor closes.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the shell's scratch space is deliberately outside the namespace; see D38"
+    )]
     let mut file = tempfile::tempfile()?;
     file.write_all(contents.as_bytes())?;
     file.seek(std::io::SeekFrom::Start(0))?;

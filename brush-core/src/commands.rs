@@ -187,6 +187,15 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     cmd.args(args);
 
     // Use the shell's current working dir.
+    // A host path handed to a child process, and one of the places external
+    // execution still bypasses the namespace entirely: the child resolves it
+    // against the host, not against any mount. Exempt rather than fixed because
+    // the whole external-execution path is a later milestone -- see D2 and the
+    // plan's "What this milestone does not prove".
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "external execution does not go through the namespace yet"
+    )]
     cmd.current_dir(context.shell.working_dir());
 
     // Start with a clear environment.

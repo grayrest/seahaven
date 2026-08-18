@@ -457,7 +457,13 @@ jobs:
           uname -r
           cat /sys/kernel/security/lsm 2>/dev/null || echo "no lsm list"
 
+      # BRUSH_LANDLOCK_REQUIRED turns every reason for not running into a
+      # failure. Without it the test reports success when it skips, so a kernel
+      # downgrade, a dropped feature flag or a misspelled cfg would leave the
+      # job green while testing nothing.
       - name: Run the completeness test
+        env:
+          BRUSH_LANDLOCK_REQUIRED: "1"
         run: |
           cargo test -p brush-shell --features landlock-tests \
             --test brush-landlock-tests -- --nocapture
@@ -586,7 +592,12 @@ jobs:
 
       # Advisory above, enforced here. The report against main is for a person
       # to read; this is the gate, and it fails.
+      # `shell: bash` for the pipefail it brings. A step with no `shell:` key
+      # runs under `bash -e {0}`, where the exit status of a pipeline is the
+      # exit status of its *last* command -- so `budget.py | tee` reports tee's
+      # success and the gate cannot fail.
       - name: Check the performance budget
+        shell: bash
         run: |
           ./pr/scripts/compare-benchmark-results.py \
             -t pr/benchmarks.txt \

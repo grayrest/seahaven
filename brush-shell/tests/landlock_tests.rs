@@ -21,9 +21,21 @@
     reason = "test fixtures are built on the host, which is the one place that is the point"
 )]
 
+/// Set by CI on a lane that is expected to run the test for real. When it is
+/// set, every reason for not running becomes a failure -- otherwise a kernel
+/// downgrade, a dropped feature flag or a misspelled cfg turns the gate into a
+/// no-op that still reports success.
+const REQUIRED_ENV: &str = "BRUSH_LANDLOCK_REQUIRED";
+
 #[cfg(not(all(unix, feature = "landlock-tests")))]
-fn main() {
-    eprintln!("skipped: the Landlock completeness test requires --features landlock-tests");
+fn main() -> std::process::ExitCode {
+    let reason = "the Landlock completeness test requires --features landlock-tests";
+    if std::env::var_os(REQUIRED_ENV).is_some() {
+        eprintln!("FAILED: {REQUIRED_ENV} is set but {reason}");
+        return std::process::ExitCode::FAILURE;
+    }
+    eprintln!("skipped: {reason}");
+    std::process::ExitCode::SUCCESS
 }
 
 #[cfg(all(unix, feature = "landlock-tests"))]
@@ -53,6 +65,11 @@ mod ruleset {
     /// why the caller's runtime is single-threaded and built beforehand.
     #[cfg(target_os = "linux")]
     pub fn restrict(mount_root: &Path) -> Result<(), Skip> {
+        // `TMPDIR` was pointed at a sibling of the mount root before this ran,
+        // so the two regions below are disjoint and both are narrow. Allowing
+        // the process's ordinary temporary directory instead would subsume the
+        // mount root, which is created there, and reduce the ruleset to
+        // "anywhere in /tmp".
         use landlock::{
             Access as _, AccessFs, CompatLevel, Compatible as _, RulesetAttr as _,
             RulesetCreatedAttr as _, RulesetStatus, path_beneath_rules,
@@ -60,12 +77,11 @@ mod ruleset {
 
         let all = AccessFs::from_all(REQUIRED_ABI);
 
-        // The shell's scratch space, which is *not* in the namespace: a
-        // here-doc larger than the pipe buffer materializes through a host
-        // temporary file (D38), and that is a deliberate exemption rather than
-        // an oversight. Allowing it is what lets the here-doc case mean
-        // anything; without it that case would fail for a reason with nothing
-        // to do with routing.
+        // The shell's scratch space, which is *not* in the namespace: every
+        // here-document materializes through a host temporary file (D38), and
+        // that is a deliberate exemption rather than an oversight. Allowing it
+        // is what lets the here-doc case mean anything; without it that case
+        // would fail for a reason with nothing to do with routing.
         let scratch = std::env::temp_dir();
 
         let describe = |e: landlock::RulesetError| {
@@ -193,6 +209,34 @@ mod harness {
             }
         };
 
+        // Two directories, deliberately siblings rather than one inside the
+        // other.
+        //
+        // The shell needs a scratch space that is *not* in the namespace: every
+        // here-document materializes through `tempfile::tempfile()` (D38), which
+        // resolves against `TMPDIR`. If that scratch were the process's ordinary
+        // temporary directory, the ruleset would have to allow all of it -- and
+        // since the mount root is itself created there, allowing it would
+        // subsume the mount root and the ruleset would reduce to "anywhere in
+        // /tmp". An unrouted access to any other temporary file would then pass.
+        //
+        // So `TMPDIR` is pointed at a directory of our own first, and the two
+        // allowed regions are narrow and disjoint.
+        let mount_root = scratch.path().join("mount");
+        let shell_scratch = scratch.path().join("scratch");
+        for dir in [&mount_root, &shell_scratch] {
+            if let Err(e) = std::fs::create_dir(dir) {
+                eprintln!("failed to create {}: {e}", dir.display());
+                return ExitCode::FAILURE;
+            }
+        }
+
+        // SAFETY: single-threaded; no runtime has been built yet and no other
+        // thread exists to observe the environment concurrently.
+        unsafe {
+            std::env::set_var("TMPDIR", &shell_scratch);
+        }
+
         // Everything that must touch the host happens here, before the
         // ruleset is applied: opening the mount's directory handle, taking the
         // null device's descriptor, reading the process's working directory.
@@ -207,7 +251,7 @@ mod harness {
             }
         };
 
-        let shell = match runtime.block_on(build_shell(scratch.path())) {
+        let shell = match runtime.block_on(build_shell(&mount_root)) {
             Ok(shell) => shell,
             Err(e) => {
                 eprintln!("failed to build the shell: {e}");
@@ -215,15 +259,24 @@ mod harness {
             }
         };
 
-        match restrict(scratch.path()) {
+        match restrict(&mount_root) {
             Ok(()) => {}
             Err(Skip(reason)) => {
+                // Gate 8 requires that a kernel regression below ABI 3 fails
+                // rather than quietly stops testing anything. `PartiallyEnforced`
+                // and `NotEnforced` arrive here too, and both mean the ruleset
+                // is not the one the cases were written against.
+                let required = super::REQUIRED_ENV;
+                if std::env::var_os(required).is_some() {
+                    eprintln!("FAILED: {required} is set but {reason}");
+                    return ExitCode::FAILURE;
+                }
                 eprintln!("skipped: {reason}");
                 return ExitCode::SUCCESS;
             }
         }
 
-        runtime.block_on(run_cases(shell, scratch.path()))
+        runtime.block_on(run_cases(shell, &mount_root))
     }
 
     /// Builds a shell confined to `mount_root`, mounted at `/work`.

@@ -57,6 +57,41 @@ disallowed-methods = [
   { path = "std::path::Path::symlink_metadata", reason = "use brush_vfs::Vfs::facts with follow=false" },
   { path = "std::path::Path::try_exists", reason = "use brush_vfs::Vfs::exists" },
 
+  # Paths built from the process's own ambient position. `std::path::absolute`
+  # is `getcwd(2)` plus a join, which is precisely what `absolute_path` does and
+  # what the namespace exists to replace.
+  { path = "std::path::absolute", reason = "use Session::resolve" },
+
+  # The unix extension surface. `std::fs` is not the only door.
+  { path = "std::os::unix::fs::symlink", reason = "links are validated at creation; see D26" },
+  { path = "std::os::unix::fs::chown", reason = "not expressible in the namespace yet" },
+  { path = "std::os::unix::fs::lchown", reason = "not expressible in the namespace yet" },
+  { path = "std::os::unix::fs::chroot", reason = "the namespace is the confinement, not chroot" },
+
+  # Below std. The ban is on ambient authority, not on one crate's spelling of
+  # it, and both of these are non-dev dependencies on unix.
+  { path = "nix::unistd::access", reason = "use brush_vfs::Vfs::access" },
+  { path = "nix::unistd::chdir", reason = "the namespace's cwd is per-session" },
+  { path = "nix::unistd::getcwd", reason = "use Session::cwd" },
+  { path = "nix::unistd::unlink", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "nix::unistd::symlinkat", reason = "links are validated at creation; see D26" },
+  { path = "nix::sys::stat::stat", reason = "use brush_vfs::Vfs::facts" },
+  { path = "nix::sys::stat::lstat", reason = "use brush_vfs::Vfs::facts with follow=false" },
+  { path = "nix::fcntl::readlink", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "nix::dir::Dir::open", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "libc::open", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "libc::chdir", reason = "the namespace's cwd is per-session" },
+  { path = "libc::unlink", reason = "use brush_vfs::Vfs::remove_file" },
+
+  # Scratch space outside every mount. Here-documents use `tempfile::tempfile`
+  # deliberately (D38) and carry an exemption; nothing else should.
+  { path = "tempfile::tempfile", reason = "scratch space is outside the namespace; see D38" },
+  { path = "tempfile::tempdir", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::NamedTempFile::new", reason = "a named temporary is a host path" },
+
+  # Hands a host path to a child process.
+  { path = "std::process::Command::current_dir", reason = "the child's cwd comes from the session" },
+
   # Process-wide ambient state that names a place on the host.
   { path = "std::env::current_dir", reason = "use Session::cwd" },
   { path = "std::env::set_current_dir", reason = "the namespace's cwd is per-session" },

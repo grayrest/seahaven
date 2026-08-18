@@ -48,8 +48,24 @@ fn check(base: &str, input: &str) {
             let again = VirtualPath::new(s).expect("accepted path must re-parse");
             assert_eq!(again, resolved, "not idempotent: {s:?}");
 
-            // Every accepted path lies beneath the root, by component.
-            assert!(resolved.starts_with(&VirtualPath::root()));
+            // Resolution may drop components but must never invent one, so the
+            // result cannot be longer than what went in.
+            //
+            // This replaces `assert!(resolved.starts_with(&VirtualPath::root()))`,
+            // which cannot fail -- every virtual path starts with the root by
+            // construction -- and `starts_with(&base)`, which is false for the
+            // ordinary case of a `..` that stays inside: `/work/sub` plus
+            // `../file.txt` is `/work/file.txt`, beneath the root but not
+            // beneath the base.
+            //
+            // The escape property itself is carried by `resolve` returning
+            // `Err`, which is why the interesting corpus seeds are the ones
+            // that never reach this block.
+            assert!(
+                resolved.components().count()
+                    <= base.components().count() + input.split('/').count(),
+                "resolution invented components: {base} + {input:?} -> {s:?}"
+            );
         }
     }
 }

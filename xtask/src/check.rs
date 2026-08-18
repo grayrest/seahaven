@@ -160,6 +160,7 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
 
     let mut counts: std::collections::BTreeMap<&str, usize> = expected
         .iter()
+        .filter(|path| resolves_on_this_platform(path))
         .map(|path| (path.as_str(), 0usize))
         .collect();
     let mut unexpected = Vec::new();
@@ -198,8 +199,27 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
         );
     }
 
-    eprintln!("Ban check passed ({} entries, all firing).", expected.len());
+    eprintln!("Ban check passed ({} entries, all firing).", counts.len());
     Ok(())
+}
+
+/// Whether a banned path can resolve on the platform running the check.
+///
+/// An entry that cannot resolve produces no diagnostic, which is normally the
+/// failure this check exists to catch -- but a `nix::` path on Windows is
+/// absent by design rather than by mistake. The alternative, one ban list per
+/// platform, would put the Unix surface out of a Windows reader's sight.
+fn resolves_on_this_platform(path: &str) -> bool {
+    const UNIX_ONLY: [&str; 3] = ["std::os::unix::", "nix::", "libc::"];
+    const WINDOWS_ONLY: [&str; 1] = ["std::os::windows::"];
+
+    if UNIX_ONLY.iter().any(|prefix| path.starts_with(prefix)) {
+        return cfg!(unix);
+    }
+    if WINDOWS_ONLY.iter().any(|prefix| path.starts_with(prefix)) {
+        return cfg!(windows);
+    }
+    true
 }
 
 /// Returns every `clippy.toml` in the tree, ignoring build output.

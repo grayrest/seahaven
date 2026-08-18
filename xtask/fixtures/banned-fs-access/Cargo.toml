@@ -11,3 +11,13 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+# Present so the platform-specific ban entries resolve here. An entry naming a
+# path clippy cannot resolve is ignored in silence, so the fixture has to be
+# able to name every one of them.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+nix = { version = "0.31", features = ["fs", "dir"] }
+
+[dependencies]
+tempfile = "3"
