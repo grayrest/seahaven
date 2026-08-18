@@ -363,7 +363,24 @@ impl Vfs {
             })?;
 
             let is_final = pending.is_empty();
-            let located = self.locate_exact(&candidate)?;
+
+            let located = match self.locate_exact(&candidate) {
+                Ok(located) => located,
+                // A prefix with a mount beneath it is part of the namespace's
+                // own shape rather than any host's: `/a` exists because
+                // `/a/b/work` is mounted, and nothing backs it. It cannot be a
+                // symlink, so step through it. Without this the walk fails for
+                // every mount point deeper than one component, which took
+                // `rename` and `symlink` -- the two that call it directly --
+                // out entirely.
+                Err(e) if !is_final && self.mounts.has_mount_below(&candidate) => {
+                    let _ = e;
+                    resolved = candidate;
+                    cursor = None;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
 
             // Usable only while the walk stays inside one mount: descending one
             // component from the cursor would otherwise land in the parent
@@ -825,29 +842,48 @@ impl Vfs {
         let link = self.locate(path, false)?;
         Self::require_writable(&link)?;
 
-        let stored = if target.starts_with('/') {
-            let resolved = VirtualPath::new(target).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
-            })?;
-            let landing = self.locate_exact(&resolved)?;
-            if !std::ptr::eq(landing.mount, link.mount) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("symlink target {resolved} is in another mount"),
-                ));
-            }
-            relative_from(&link.relative, &landing.relative)
-        } else {
-            // A relative target is already host-meaningful. It still has to stay
-            // inside the namespace once followed, which is the same check the
-            // walk would apply, made here so the link is never written at all.
-            let parent = link.virtual_path.parent().unwrap_or_else(VirtualPath::root);
-            parent.resolve(target).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
-            })?;
-            target.to_owned()
-        };
+        // Resolve the target the same way whichever way it was spelled. The
+        // first version of this checked a relative target with
+        // `parent.resolve(target)` alone and stored it verbatim, on the
+        // reasoning that a relative target is "already host-meaningful". It is
+        // not. `resolve` asks only whether a path stays inside the *virtual
+        // root*, and the virtual root sits above every mount point that is not
+        // `/` -- so `../secret.txt` from a link in `/work` named a valid,
+        // merely unmounted virtual path, passed, and on the host climbed out of
+        // the mount directory. `ln -s .. up` handed out the mount's parent.
+        let parent = link.virtual_path.parent().unwrap_or_else(VirtualPath::root);
+        let landing = parent
+            .resolve(target)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
 
+        // The target must name a place in this namespace -- being merely inside
+        // the virtual root is not enough -- and that place must be in the same
+        // mount as the link, because a virtual `..` out of a mount is a host
+        // `..` into an unrelated directory.
+        let lexical = self.locate_exact(&landing)?;
+        if !std::ptr::eq(lexical.mount, link.mount) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("symlink target {landing} is in another mount"),
+            ));
+        }
+
+        // And following it must stay here too, so that a new link cannot be
+        // chained onto an escaping one already on disk. A target that does not
+        // exist yet is fine: the walk does not require the final component to
+        // be there.
+        let followed = self.locate(&landing, true)?;
+        if !std::ptr::eq(followed.mount, link.mount) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("symlink target {landing} leads out of the mount"),
+            ));
+        }
+
+        // Stored relative to the link, from the *lexical* landing rather than
+        // the followed one, so `read_link` reports what was asked for wherever
+        // that is expressible rather than a resolved form.
+        let stored = relative_from(&link.relative, &lexical.relative);
         cap_fs_ext::DirExt::symlink(link.mount.dir(), &stored, &link.relative)
     }
 
@@ -860,13 +896,6 @@ impl Vfs {
     }
 }
 
-/// Reads a symlink's target exactly as stored.
-///
-/// `cap_std::fs::Dir::read_link` refuses a target that is absolute — it has no
-/// root to interpret one against, so it reports "a path led outside of the
-/// filesystem" even for a link this namespace can resolve perfectly well. The
-/// underlying primitive still validates the path *to* the link against the
-/// mount root; only the returned contents are raw, which is what D42 needs.
 /// Expresses `target` relative to the directory holding `link`, both given
 /// relative to one mount's root.
 fn relative_from(link: &std::path::Path, target: &std::path::Path) -> String {
@@ -895,6 +924,15 @@ fn relative_from(link: &std::path::Path, target: &std::path::Path) -> String {
     }
 }
 
+/// Reads a symlink's target exactly as stored.
+///
+/// `cap_std::fs::Dir::read_link` refuses a target that is absolute — it has no
+/// root to interpret one against, so it reports "a path led outside of the
+/// filesystem" even for a link this namespace can resolve perfectly well. The
+/// underlying primitive still validates the path *to* the link against the
+/// mount root; only the returned contents are raw, which is what D42 needs.
+/// Expresses `target` relative to the directory holding `link`, both given
+/// relative to one mount's root.
 fn read_link_contents(mount: &Mount, relative: &std::path::Path) -> std::io::Result<PathBuf> {
     let dir = mount.dir().try_clone()?.into_std_file();
     cap_primitives::fs::read_link_contents(&dir, relative)
@@ -1220,6 +1258,131 @@ mod tests {
         assert_eq!(read(&f.vfs, "/work/res").unwrap(), "reserved");
     }
 
+    /// A mount whose point is deeper than one component, on a host directory
+    /// with a sibling outside it.
+    #[cfg(unix)]
+    fn deep_mount() -> (tempfile::TempDir, Vfs) {
+        let root = tempfile::tempdir().expect("temp dir");
+        let inside = root.path().join("inside");
+        std::fs::create_dir(&inside).expect("mkdir");
+        std::fs::write(inside.join("hello.txt"), b"hello").expect("write");
+        std::fs::write(root.path().join("outside.txt"), b"outside").expect("write");
+
+        let mounts = MountTable::builder()
+            .mount("/a/b/work", &inside, Access::ReadWrite)
+            .expect("mount")
+            .build()
+            .expect("build");
+        (root, Vfs::new(mounts))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mount_point_deeper_than_one_component_still_walks() {
+        // The walk probes each prefix, and `/a` is backed by nothing: it exists
+        // only because `/a/b/work` is mounted. Requiring it to resolve took
+        // `rename` and `symlink` out entirely, since they walk with no fast
+        // path in front of them.
+        let (_root, vfs) = deep_mount();
+        assert!(
+            vfs.rename(&vp("/a/b/work/hello.txt"), &vp("/a/b/work/moved.txt"))
+                .is_ok()
+        );
+        assert!(vfs.symlink(&vp("/a/b/work/link"), "moved.txt").is_ok());
+        assert_eq!(
+            vfs.canonicalize(&vp("/a/b/work/link")).unwrap(),
+            vp("/a/b/work/moved.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_symlink_target_cannot_escape_the_mount_on_the_host() {
+        // The escape this whole check exists to prevent, and the one the first
+        // version wrote to disk. `resolve` asks only whether a path stays inside
+        // the *virtual root*, which sits above every mount point that is not
+        // `/`, so `../outside.txt` was a valid virtual path that merely named
+        // nothing -- and on the host it climbed out of the mount directory.
+        let (root, vfs) = deep_mount();
+        let err = vfs
+            .symlink(&vp("/a/b/work/pwn.txt"), "../outside.txt")
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            !root.path().join("inside").join("pwn.txt").exists(),
+            "a refused link must not reach the host at all"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_dotdot_does_not_hand_out_the_mount_s_parent() {
+        // `ln -s ..` under `--mount /work:$HOME/project` left a live handle to
+        // $HOME in the workspace -- inert in the sandbox and fully live to
+        // whatever copies it afterwards, which is D26's threat model inverted.
+        let f = fixture();
+        let err = vfs_symlink_err(&f.vfs, "/work/up", "..");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(!work_host(&f).join("up").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cross_mount_target_is_refused_in_either_spelling() {
+        // The mount check lived only in the absolute branch, so the relative
+        // spelling of the same target walked straight past it.
+        let f = fixture();
+        assert!(f.vfs.symlink(&vp("/work/abs"), "/ro/readme.txt").is_err());
+        assert!(f.vfs.symlink(&vp("/work/rel"), "../ro/readme.txt").is_err());
+        assert!(!work_host(&f).join("abs").exists());
+        assert!(!work_host(&f).join("rel").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_cannot_be_chained_onto_an_escaping_link_already_on_disk() {
+        // The vfs refuses to *follow* such a link, but happily pointed a new
+        // one at it -- so the new link meant something different outside.
+        let f = fixture();
+        // Outside every mount: the fixture mounts `<root>/work` and `<root>/ro`,
+        // so `<root>/escape.txt` is in neither.
+        let outside = work_host(&f)
+            .parent()
+            .expect("work has a parent")
+            .join("escape.txt");
+        std::fs::write(&outside, b"outside").expect("write");
+        std::os::unix::fs::symlink("../escape.txt", work_host(&f).join("out"))
+            .expect("plant an escaping link");
+        assert!(
+            read(&f.vfs, "/work/out").is_err(),
+            "following it is refused"
+        );
+
+        // Refused; the kind depends on *why* the target leaves the namespace
+        // and is not the property under test.
+        let _ = vfs_symlink_err(&f.vfs, "/work/chain", "out");
+        assert!(!work_host(&f).join("chain").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_target_is_still_allowed() {
+        // `ln -s` to a file that does not exist yet is ordinary and must work;
+        // the containment check must not become an existence check.
+        let f = fixture();
+        assert!(f.vfs.symlink(&vp("/work/later"), "not-yet.txt").is_ok());
+        assert_eq!(
+            f.vfs.read_link(&vp("/work/later")).unwrap(),
+            std::path::PathBuf::from("not-yet.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    fn vfs_symlink_err(vfs: &Vfs, link: &str, target: &str) -> std::io::Error {
+        vfs.symlink(&vp(link), target)
+            .expect_err("this target must be refused")
+    }
+
     #[cfg(unix)]
     #[test]
     fn an_absolute_symlink_target_is_stored_relative_to_the_link() {
@@ -1485,4 +1648,13 @@ mod tests {
 // ===========================================================================
 // TEMPORARY: adversarial review of adeadc0's fast path in `Vfs::at`.
 // Added by a security review; remove or fold in once triaged.
+// ===========================================================================
+
+// ===========================================================================
+// TEMPORARY: adversarial review of 8f3510b (`symlink`, `rename`,
+// `remove_dir_all`, `relative_from`). Added by a security review; remove or
+// fold in once triaged.
+//
+// Each test asserts the INVARIANT THE DESIGN CLAIMS. A test that fails is a
+// broken claim, and its panic message is the transcript.
 // ===========================================================================

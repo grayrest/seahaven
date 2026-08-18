@@ -193,6 +193,19 @@ impl MountTable {
             .find_map(|m| path.strip_prefix(&m.at).map(|rest| (m, rest)))
     }
 
+    /// Whether some mount point lies strictly beneath `path`.
+    ///
+    /// Such a path is a directory of the namespace's own making: `/a` exists
+    /// when `/a/b/work` is mounted even though nothing on any host backs it.
+    /// A walk has to step through it without probing, because there is no
+    /// directory to probe.
+    #[must_use]
+    pub(crate) fn has_mount_below(&self, path: &VirtualPath) -> bool {
+        self.mounts
+            .iter()
+            .any(|m| m.at != *path && m.at.starts_with(path))
+    }
+
     /// The mounts, longest mount point first.
     pub fn mounts(&self) -> impl Iterator<Item = &Mount> {
         self.mounts.iter()
