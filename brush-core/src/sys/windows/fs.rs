@@ -53,25 +53,25 @@ fn is_executable_file(path: &Path) -> bool {
     has_executable_extension(path) && path.is_file()
 }
 
-/// Resolves an owned path to the actual on-disk executable file, if any.
+/// Returns the paths that could name the executable requested by `path`.
 ///
-/// If the path is already a file with a `PATHEXT` extension, it is returned
-/// unchanged (no allocation). Otherwise, each `PATHEXT` extension is appended
-/// in turn and the first existing file is returned.
-pub fn resolve_executable(path: PathBuf) -> Option<PathBuf> {
-    if is_executable_file(&path) {
-        return Some(path);
+/// Purely lexical: nothing here touches the filesystem, because the caller
+/// decides existence and executability by asking the namespace rather than
+/// the host. A name that already carries a `PATHEXT` extension is its own
+/// only candidate; otherwise every extension is a candidate, in `PATHEXT`
+/// order, which is the order Windows itself prefers them in.
+pub fn executable_candidates(path: PathBuf) -> Vec<PathBuf> {
+    if has_executable_extension(&path) {
+        return vec![path];
     }
-    // Try appending each PATHEXT extension.
-    for ext in PATHEXT_EXTENSIONS.iter() {
-        let mut name = path.as_os_str().to_owned();
-        name.push(ext);
-        let candidate = PathBuf::from(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    PATHEXT_EXTENSIONS
+        .iter()
+        .map(|ext| {
+            let mut name = path.as_os_str().to_owned();
+            name.push(ext);
+            PathBuf::from(name)
+        })
+        .collect()
 }
 
 impl crate::sys::fs::PathExt for Path {
@@ -456,9 +456,20 @@ mod tests {
     }
 
     #[test]
-    fn resolve_executable_for_nonexistent_returns_none() {
-        // A path that cannot exist on any test host.
-        let path = PathBuf::from(r"C:\__brush_test_definitely_missing__");
-        assert!(resolve_executable(path).is_none());
+    fn a_name_with_an_extension_is_its_own_only_candidate() {
+        let path = PathBuf::from(r"C:\dir\tool.exe");
+        assert_eq!(executable_candidates(path.clone()), vec![path]);
+    }
+
+    #[test]
+    fn a_bare_name_gets_one_candidate_per_pathext_entry() {
+        // Lexical only: none of these need to exist.
+        let candidates = executable_candidates(PathBuf::from(r"C:\dir\tool"));
+        assert_eq!(candidates.len(), PATHEXT_EXTENSIONS.len());
+        assert!(
+            candidates
+                .iter()
+                .all(|c| c.to_string_lossy().starts_with(r"C:\dir\tool."))
+        );
     }
 }

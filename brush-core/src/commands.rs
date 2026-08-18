@@ -394,8 +394,12 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
             // All else failed; if we were given path directories to search, try to look through
             // them for a matching executable. Otherwise, use our default search logic.
             let path = if let Some(path_dirs) = &self.path_dirs {
-                pathsearch::search_for_executable(path_dirs.iter(), self.command_name.as_str())
-                    .next()
+                pathsearch::search_for_executable(
+                    self.shell.session(),
+                    path_dirs.iter(),
+                    self.command_name.as_str(),
+                )
+                .next()
             } else {
                 self.shell
                     .find_first_executable_in_path_using_cache(&self.command_name)

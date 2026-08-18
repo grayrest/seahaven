@@ -12,9 +12,12 @@ pub trait PathExt {
     ///
     /// On Windows, this returns true if *either* the path itself is a file with
     /// a `PATHEXT` extension *or* appending some `PATHEXT` extension resolves
-    /// to an existing file. To recover the actual on-disk path in the
-    /// latter case, use [`resolve_executable`] which takes ownership
-    /// and avoids copies on platforms where no resolution is needed.
+    /// to an existing file.
+    ///
+    /// This asks the host directly and so must not be used outside `sys`;
+    /// callers that need an answer about a shell-visible path go through the
+    /// namespace instead. See [`executable_candidates`] for enumerating the
+    /// names a bare command could have, which the namespace then judges.
     fn executable(&self) -> bool;
 
     /// Returns true if the path exists and is a block device.

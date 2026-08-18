@@ -32,7 +32,7 @@ mod completion;
 mod env;
 mod execution;
 mod expansion;
-mod fs;
+pub(crate) mod fs;
 mod funcs;
 mod history;
 mod initscripts;

@@ -6,19 +6,25 @@ name: "Sandbox policy"
 # file cannot know an absolute host path.
 cases:
   - name: "A mounted tree is readable and writable"
-    args: ["--mount", "/work:.", "-c", "echo hi > /work/f.txt; cat < /work/f.txt"]
+    # `read` rather than `cat`: a restrictive policy has no external commands
+    # in it, so the assertion has to be built from builtins and redirection.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "echo hi > /work/f.txt; read -r line < /work/f.txt; echo \"$line\""
     expected_exit_code: 0
     expected_stdout: "hi\n"
 
   - name: "Supplying a mount makes everything else unnameable"
     # Not merely unreadable: /etc is not part of the namespace at all.
-    args: ["--mount", "/work:.", "-c", "cat < /etc/passwd"]
+    args: ["--mount", "/work:.", "-c", "read -r line < /etc/passwd"]
     expected_exit_code: 1
     expected_stdout: ""
     ignore_stderr: true
 
   - name: "Dotdot cannot climb out of the namespace"
-    args: ["--mount", "/work:.", "-c", "cat < /work/../etc/passwd"]
+    args: ["--mount", "/work:.", "-c", "read -r line < /work/../etc/passwd"]
     expected_exit_code: 1
     expected_stdout: ""
     ignore_stderr: true
@@ -29,12 +35,12 @@ cases:
       - "--mount"
       - "/work:."
       - "-c"
-      - "echo deep > /work/f.txt; cat < /work/sub/../f.txt"
+      - "echo deep > /work/f.txt; read -r line < /work/sub/../f.txt; echo \"$line\""
     expected_exit_code: 0
     expected_stdout: "deep\n"
 
   - name: "Climbing above the virtual root is refused"
-    args: ["--mount", "/work:.", "-c", "cat < /.."]
+    args: ["--mount", "/work:.", "-c", "read -r line < /.."]
     expected_exit_code: 1
     expected_stdout: ""
     ignore_stderr: true
@@ -46,7 +52,11 @@ cases:
     ignore_stderr: true
 
   - name: "A read-only mount still allows reads"
-    args: ["--mount", "/work:.:ro", "-c", "cat < /work/seed.txt"]
+    args:
+      - "--mount"
+      - "/work:.:ro"
+      - "-c"
+      - "read -r line < /work/seed.txt; echo \"$line\""
     expected_exit_code: 0
     expected_stdout: "seeded\n"
     test_files:
@@ -55,7 +65,7 @@ cases:
 
   - name: "Host path syntax is not virtual path syntax"
     # A drive letter is a colon, which the grammar forbids outright.
-    args: ["--mount", "/work:.", "-c", "cat < /C:/Windows/win.ini"]
+    args: ["--mount", "/work:.", "-c", "read -r line < /C:/Windows/win.ini"]
     expected_exit_code: 1
     expected_stdout: ""
     ignore_stderr: true
@@ -127,3 +137,29 @@ cases:
     args: ["--mount", "/work:.", "-c", "cd /work/../.."]
     expected_exit_code: 1
     ignore_stderr: true
+
+  - name: "Command completion offers only what the namespace holds"
+    # `compgen -c` walks every PATH directory itself rather than going through
+    # command lookup, so it needs its own routing; before this landed it read
+    # the host's directories and suggested host binaries that the shell could
+    # not have run.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "PATH=/work; compgen -c mytool; compgen -c notatool; echo done"
+    expected_exit_code: 0
+    expected_stdout: "mytool\ndone\n"
+    test_files:
+      - path: "mytool"
+        contents: "#!/bin/sh\necho hi\n"
+        executable: true
+      - path: "notatool"
+        contents: "not executable\n"
+
+  - name: "Command completion does not leak the host's PATH"
+    # The inherited PATH still names host directories; none of them are in the
+    # namespace, so the correct answer is that they hold nothing.
+    args: ["--mount", "/work:.", "-c", "compgen -c ls; echo done"]
+    expected_exit_code: 0
+    expected_stdout: "done\n"

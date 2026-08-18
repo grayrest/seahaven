@@ -121,16 +121,9 @@ pub const fn normalize_path_separators(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Borrowed(s)
 }
 
-/// Resolves an owned path to the actual on-disk executable file, if any.
+/// Returns the paths that could name the executable requested by `path`.
 ///
-/// In the stub implementation, returns the path unchanged if it is
-/// executable (per the stub `PathExt`, which considers every path
-/// executable).
-pub fn resolve_executable(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
-    use crate::sys::fs::PathExt;
-    if path.as_path().executable() {
-        Some(path)
-    } else {
-        None
-    }
+/// In the stub implementation, a name is its own only candidate.
+pub fn executable_candidates(path: std::path::PathBuf) -> Vec<std::path::PathBuf> {
+    vec![path]
 }

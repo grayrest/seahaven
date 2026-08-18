@@ -303,21 +303,13 @@ pub const fn normalize_path_separators(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Borrowed(s)
 }
 
-/// Resolves an owned path to the actual on-disk executable file, if any.
+/// Returns the paths that could name the executable requested by `path`.
 ///
-/// On Unix this is a straight passthrough: if the path is executable, the
-/// path is returned unchanged (no clone). This keeps `pathsearch::next`
-/// allocation-free on the happy path.
-///
-/// On Windows this function may append a `PATHEXT` extension and return a
-/// possibly-different `PathBuf`.
-pub fn resolve_executable(path: PathBuf) -> Option<PathBuf> {
-    use crate::sys::fs::PathExt;
-    if path.as_path().executable() {
-        Some(path)
-    } else {
-        None
-    }
+/// Purely lexical: nothing here touches the filesystem, because the caller
+/// decides existence and executability by asking the namespace rather than
+/// the host. On Unix a name is its own only candidate.
+pub fn executable_candidates(path: PathBuf) -> Vec<PathBuf> {
+    vec![path]
 }
 
 #[cfg(test)]
@@ -390,24 +382,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_executable_returns_input_unchanged() {
-        // /bin/sh exists and is executable on every supported Unix host.
-        let path = PathBuf::from("/bin/sh");
-        let resolved = resolve_executable(path.clone());
-        assert_eq!(resolved.as_deref(), Some(path.as_path()));
+    fn a_name_is_its_own_only_candidate() {
+        // Purely lexical: the path need not exist, since existence is the
+        // namespace's question, not this function's.
+        let path = PathBuf::from("/this/path/need/not/exist");
+        assert_eq!(executable_candidates(path.clone()), vec![path]);
     }
 
-    #[test]
-    fn resolve_executable_returns_none_for_nonexistent() {
-        let path = PathBuf::from("/this/path/should/not/exist/brush-test");
-        assert!(resolve_executable(path).is_none());
-    }
-
-    #[test]
-    fn resolve_executable_returns_none_for_non_executable() {
-        // /etc/hostname (or similar) is a regular file but not executable.
-        // Use /etc/passwd which is universally present and not executable.
-        let path = PathBuf::from("/etc/passwd");
-        assert!(resolve_executable(path).is_none());
-    }
 }

@@ -72,16 +72,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     #[must_use]
     pub fn is_executable_in_namespace(&self, path: impl AsRef<Path>) -> bool {
         let abs_path = self.absolute_path(path.as_ref());
-        self.to_virtual_path(&abs_path).is_ok_and(|p| {
-            self.session().vfs().access(
-                &p,
-                brush_vfs::AccessModes {
-                    readable: false,
-                    writable: false,
-                    executable: true,
-                },
-            )
-        })
+        is_executable(self.session(), &abs_path)
     }
 
     /// Resolves a path to its symlink-free form within the namespace.
@@ -152,7 +143,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         let path_var = self.env.get_str("PATH", self).unwrap_or_default();
         let paths = crate::sys::fs::split_paths(path_var.as_ref());
 
-        pathsearch::search_for_executable(paths, filename)
+        pathsearch::search_for_executable(self.session(), paths, filename)
     }
 
     /// Finds executables in the shell's current default PATH, with filenames matching the
@@ -165,11 +156,16 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         &self,
         filename_prefix: &str,
         case_insensitive: bool,
-    ) -> impl Iterator<Item = PathBuf> {
+    ) -> impl Iterator<Item = PathBuf> + '_ {
         let path_var = self.env.get_str("PATH", self).unwrap_or_default();
         let paths = crate::sys::fs::split_paths(path_var.as_ref());
 
-        pathsearch::search_for_executable_with_prefix(paths, filename_prefix, case_insensitive)
+        pathsearch::search_for_executable_with_prefix(
+            self.session(),
+            paths,
+            filename_prefix,
+            case_insensitive,
+        )
     }
 
     /// Determines whether the given filename is the name of an executable in one of the
@@ -284,15 +280,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         &self,
         path: &Path,
     ) -> Result<brush_vfs::VirtualPath, std::io::Error> {
-        let text = path.to_string_lossy().replace('\\', "/");
-        let text = match text.split_once(":/") {
-            Some((prefix, rest)) if prefix.len() == 1 => format!("/{rest}"),
-            _ => text,
-        };
-
-        self.session()
-            .resolve(&text)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
+        to_virtual_path(self.session(), path)
     }
 
     /// Replaces the shell's currently configured open files with the given set.
@@ -311,6 +299,49 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     pub(crate) const fn persistent_open_files(&self) -> &openfiles::OpenFiles {
         &self.open_files
     }
+}
+
+/// Converts a host-shaped path into a path in the shell's namespace.
+///
+/// Transitional: paths reach the shell in whatever shape the host, the
+/// environment or the script wrote them, so the separator and any drive
+/// prefix are folded away before the virtual path grammar sees them. Once
+/// paths are virtual end to end this disappears.
+pub(crate) fn to_virtual_path(
+    session: &brush_vfs::Session,
+    path: &Path,
+) -> Result<brush_vfs::VirtualPath, std::io::Error> {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let text = match text.split_once(":/") {
+        Some((prefix, rest)) if prefix.len() == 1 => format!("/{rest}"),
+        _ => text,
+    };
+
+    session
+        .resolve(&text)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
+}
+
+/// Returns true if the namespace has an executable file at the given path.
+pub(crate) fn is_executable(session: &brush_vfs::Session, path: &Path) -> bool {
+    to_virtual_path(session, path).is_ok_and(|p| {
+        session.vfs().access(
+            &p,
+            brush_vfs::AccessModes {
+                readable: false,
+                writable: false,
+                executable: true,
+            },
+        )
+    })
+}
+
+/// Returns true if the namespace has a directory at the given path.
+pub(crate) fn is_dir(session: &brush_vfs::Session, path: &Path) -> bool {
+    to_virtual_path(session, path)
+        .ok()
+        .and_then(|p| session.vfs().facts(&p, true))
+        .is_some_and(|facts| facts.is_dir)
 }
 
 fn shell_fd_path_to_fd(path: &Path) -> Option<ShellFd> {

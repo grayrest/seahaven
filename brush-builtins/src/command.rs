@@ -114,7 +114,7 @@ impl CommandCommand {
             if use_default_path {
                 let dirs = sys::fs::get_default_standard_utils_paths();
 
-                pathsearch::search_for_executable(dirs.iter(), command_name)
+                pathsearch::search_for_executable(shell.session(), dirs.iter(), command_name)
                     .next()
                     .map(|path| FoundCommand::External(path.to_string_lossy().to_string()))
             } else {
