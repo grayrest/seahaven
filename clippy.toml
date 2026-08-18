@@ -8,10 +8,14 @@ allow-expect-in-tests = true
 # banning the types would make the facade one large `#[allow]` and prove
 # nothing. A type carries no authority; the function that mints it does.
 #
-# An entry naming a path that does not resolve is silently ignored -- clippy
-# emits nothing and exits 0 -- so a typo here disables a ban invisibly. That is
-# what `cargo xtask check ban` exists to catch: it lints a fixture that uses
-# every entry below exactly once and requires exactly one diagnostic per entry.
+# An entry naming a path that does not resolve disables a ban almost invisibly:
+# clippy emits a plain warning, not a lint, so `-D warnings` does not escalate
+# it and the build stays green. That is what `cargo xtask check ban` exists to
+# catch: it lints a fixture that uses every entry below exactly once and
+# requires exactly one diagnostic per entry.
+#
+# The list bans *abilities*, not spellings. Every `nix` entry has a `libc` twin
+# and vice versa, because banning one without the other only moves the call.
 disallowed-methods = [
   # The free functions in std::fs, in the order the module documents them.
   { path = "std::fs::canonicalize", reason = "use brush_vfs::Vfs::canonicalize" },
@@ -79,15 +83,62 @@ disallowed-methods = [
   { path = "nix::sys::stat::lstat", reason = "use brush_vfs::Vfs::facts with follow=false" },
   { path = "nix::fcntl::readlink", reason = "use brush_vfs::Vfs::read_link" },
   { path = "nix::dir::Dir::open", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "nix::fcntl::open", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "nix::unistd::mkdir", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "nix::unistd::unlinkat", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "nix::unistd::truncate", reason = "open through brush_vfs::Vfs" },
+  { path = "nix::unistd::chown", reason = "not expressible in the namespace yet" },
+  { path = "nix::unistd::chroot", reason = "the namespace is the confinement, not chroot" },
+  { path = "nix::sys::stat::mkdirat", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "nix::sys::stat::utimes", reason = "not expressible in the namespace yet" },
+  # Every nix ban has a libc twin, and banning one without the other bans a
+  # spelling rather than an ability.
   { path = "libc::open", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "libc::openat", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "libc::creat", reason = "use brush_vfs::Vfs::create" },
   { path = "libc::chdir", reason = "the namespace's cwd is per-session" },
+  { path = "libc::getcwd", reason = "use Session::cwd" },
+  { path = "libc::access", reason = "use brush_vfs::Vfs::access" },
+  { path = "libc::stat", reason = "use brush_vfs::Vfs::facts" },
+  { path = "libc::lstat", reason = "use brush_vfs::Vfs::facts with follow=false" },
+  { path = "libc::realpath", reason = "use brush_vfs::Vfs::canonicalize" },
+  { path = "libc::readlink", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "libc::opendir", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "libc::mkdir", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "libc::rmdir", reason = "use brush_vfs::Vfs::remove_dir" },
   { path = "libc::unlink", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "libc::rename", reason = "use brush_vfs::Vfs::rename" },
+  { path = "libc::link", reason = "not expressible in the namespace yet" },
+  { path = "libc::symlink", reason = "use brush_vfs::Vfs::symlink, which validates the target" },
+  { path = "libc::truncate", reason = "open through brush_vfs::Vfs" },
+  { path = "libc::chmod", reason = "not expressible in the namespace yet" },
+  { path = "libc::chroot", reason = "the namespace is the confinement, not chroot" },
+
+  # A unix socket is named by a host path like anything else, and `bind`
+  # *creates* a file outside every mount.
+  { path = "std::os::unix::net::UnixStream::connect", reason = "not expressible in the namespace yet" },
+  { path = "std::os::unix::net::UnixListener::bind", reason = "creates a host file outside every mount" },
+  { path = "std::os::unix::net::UnixDatagram::bind", reason = "creates a host file outside every mount" },
 
   # Scratch space outside every mount. Here-documents use `tempfile::tempfile`
   # deliberately (D38) and carry an exemption; nothing else should.
+  # The three free functions are the thin wrappers; `Builder` is how the crate
+  # documents doing the same thing, so banning only the wrappers bans the
+  # shorthand and leaves the idiom.
   { path = "tempfile::tempfile", reason = "scratch space is outside the namespace; see D38" },
+  { path = "tempfile::tempfile_in", reason = "scratch space is outside the namespace" },
   { path = "tempfile::tempdir", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::tempdir_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::spooled_tempfile", reason = "scratch space is outside the namespace" },
   { path = "tempfile::NamedTempFile::new", reason = "a named temporary is a host path" },
+  { path = "tempfile::NamedTempFile::new_in", reason = "a named temporary is a host path" },
+  { path = "tempfile::TempDir::new", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::TempDir::new_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::Builder::tempfile", reason = "scratch space is outside the namespace; see D38" },
+  { path = "tempfile::Builder::tempfile_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::Builder::tempdir", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::Builder::tempdir_in", reason = "scratch space is outside the namespace" },
+  { path = "tempfile::env::temp_dir", reason = "the host's temp directory is not in the namespace" },
 
   # Hands a host path to a child process.
   { path = "std::process::Command::current_dir", reason = "the child's cwd comes from the session" },

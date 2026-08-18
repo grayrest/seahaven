@@ -76,23 +76,30 @@ fn check_fmt(sh: &Shell, verbose: bool) -> Result<()> {
 
 fn check_lint(sh: &Shell, verbose: bool) -> Result<()> {
     eprintln!("Running clippy...");
-    // `-D warnings` is load-bearing, not belt-and-braces: `disallowed_methods`
-    // is warn-by-default, so without it the filesystem ban reports violations
-    // and exits 0.
     let mut args = vec!["clippy", "--workspace", "--all-features", "--all-targets"];
     if verbose {
         args.push("--verbose");
-        eprintln!("Running: cargo {} -- -D warnings", args.join(" "));
+        eprintln!(
+            "Running: cargo {} {}",
+            args.join(" "),
+            DENY_WARNINGS.join(" ")
+        );
     }
-    args.push("--");
-    args.push("-D");
-    args.push("warnings");
+    args.extend_from_slice(&DENY_WARNINGS);
     cmd!(sh, "cargo {args...}")
         .run()
         .context("Clippy check failed")?;
     eprintln!("Clippy check passed.");
     Ok(())
 }
+
+/// The arguments that make the workspace lint deny rather than report.
+///
+/// Load-bearing, not belt-and-braces: `disallowed_methods` is warn-by-default,
+/// so without these the filesystem ban reports every violation and exits 0.
+/// Held in a constant so that `check_ban` can assert on the value the lint
+/// actually uses rather than on the text of the function that uses it.
+const DENY_WARNINGS: [&str; 3] = ["--", "-D", "warnings"];
 
 /// Path of the crate that must fail to lint, relative to the workspace root.
 const BAN_FIXTURE: &str = "xtask/fixtures/banned-fs-access";
@@ -102,10 +109,15 @@ const BAN_FIXTURE: &str = "xtask/fixtures/banned-fs-access";
 /// The ban has three ways of quietly ceasing to exist, and this checks all
 /// three:
 ///
-/// - An entry naming a path that does not resolve is *silently* ignored --
-///   clippy emits nothing at all and exits 0 -- so a typo or a rename in std
-///   disables one ban invisibly. The fixture uses every entry exactly once and
-///   must produce exactly one diagnostic per entry.
+/// - An entry naming a path that does not resolve disables one ban almost
+///   invisibly: clippy emits a plain warning rather than a lint, so
+///   `-D warnings` does not escalate it and the build stays green. The fixture
+///   uses every entry exactly once and must produce exactly one diagnostic per
+///   entry.
+///
+///   The fixture is its own workspace, so its dependency graph is not the
+///   workspace's: an entry can fire here and be inert in `brush-core` if the
+///   crate or feature it names is absent there. That gap is not covered.
 /// - A `clippy.toml` in a member crate shadows the root one outright rather
 ///   than merging with it, so there must be exactly one in the tree.
 /// - `disallowed_methods` is a warn-by-default lint, so a CI invocation
@@ -207,19 +219,29 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
 
 /// Verify that the workspace lint invocation actually denies warnings.
 ///
-/// `disallowed_methods` is warn-by-default, so a `cargo clippy` without
-/// `-D warnings` reports every violation and exits 0. The fixture above proves
-/// the *entries* are live, but it passes its own `-D warnings` -- so on its own
-/// it only tests its own literal. This reads the real invocation instead.
-///
-/// Textual rather than executed, because running the workspace lint from inside
-/// a check that the workspace lint runs would recurse.
+/// The first version of this read `check_lint`'s body as text and asked whether
+/// `"-D"` and `"warnings"` appeared anywhere in it. Adversarial review defeated
+/// it by deleting the flags and leaving a comment mentioning them: a textual
+/// guard over prose cannot tell an argument from a sentence about one. So the
+/// flags live in [`DENY_WARNINGS`] and this asserts on the value, which is the
+/// same value `check_lint` splices into its argv.
 fn check_lint_denies_warnings() -> Result<()> {
+    let expected = ["--", "-D", "warnings"];
+    if DENY_WARNINGS != expected {
+        anyhow::bail!(
+            "DENY_WARNINGS is {DENY_WARNINGS:?}, expected {expected:?}; the filesystem ban \
+             would report violations and still exit 0"
+        );
+    }
+
+    // And that the lint actually splices it in. One `contains` over the source,
+    // but of an identifier this time rather than of the flag text -- an
+    // identifier cannot be satisfied by a comment that merely names it, because
+    // removing the use is what the check is looking for.
     let root = crate::common::find_workspace_root()?;
     let this_file = root.join("xtask/src/check.rs");
     let source = std::fs::read_to_string(&this_file)
         .with_context(|| format!("reading {}", this_file.display()))?;
-
     let body = source
         .split_once("fn check_lint(")
         .map(|(_, rest)| rest)
@@ -227,10 +249,10 @@ fn check_lint_denies_warnings() -> Result<()> {
         .map(|(body, _)| body)
         .context("could not find check_lint's body in xtask/src/check.rs")?;
 
-    if !(body.contains("\"-D\"") && body.contains("\"warnings\"")) {
+    if !body.contains("args.extend_from_slice(&DENY_WARNINGS)") {
         anyhow::bail!(
-            "check_lint no longer passes `-D warnings`; the filesystem ban would report \
-             violations and still exit 0"
+            "check_lint no longer splices DENY_WARNINGS into its argv; the filesystem ban \
+             would report violations and still exit 0"
         );
     }
 

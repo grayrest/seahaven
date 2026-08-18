@@ -109,25 +109,73 @@ fn below_std() {
         nix::sys::stat::Mode::empty(),
     );
 
+    nix::fcntl::open(
+        path(),
+        nix::fcntl::OFlag::O_RDONLY,
+        nix::sys::stat::Mode::empty(),
+    );
+    nix::unistd::mkdir(path(), nix::sys::stat::Mode::empty());
+    nix::unistd::unlinkat(
+        std::io::stdin(),
+        path(),
+        nix::unistd::UnlinkatFlags::NoRemoveDir,
+    );
+    nix::unistd::truncate(path(), 0);
+    nix::unistd::chown(path(), None, None);
+    nix::unistd::chroot(path());
+    nix::sys::stat::mkdirat(std::io::stdin(), path(), nix::sys::stat::Mode::empty());
+    nix::sys::stat::utimes(
+        path(),
+        &nix::sys::time::TimeVal::new(0, 0),
+        &nix::sys::time::TimeVal::new(0, 0),
+    );
+
     // SAFETY: never executed; the fixture exists to be linted, not run.
     unsafe {
-        libc::open(c"/".as_ptr(), 0);
+        let p = c"/".as_ptr();
+        libc::open(p, 0);
+        libc::openat(0, p, 0);
+        libc::creat(p, 0);
+        libc::chdir(p);
+        libc::getcwd(std::ptr::null_mut(), 0);
+        libc::access(p, 0);
+        libc::stat(p, std::ptr::null_mut());
+        libc::lstat(p, std::ptr::null_mut());
+        libc::realpath(p, std::ptr::null_mut());
+        libc::readlink(p, std::ptr::null_mut(), 0);
+        libc::opendir(p);
+        libc::mkdir(p, 0);
+        libc::rmdir(p);
+        libc::unlink(p);
+        libc::rename(p, p);
+        libc::link(p, p);
+        libc::symlink(p, p);
+        libc::truncate(p, 0);
+        libc::chmod(p, 0);
+        libc::chroot(p);
     }
-    // SAFETY: as above.
-    unsafe {
-        libc::chdir(c"/".as_ptr());
-    }
-    // SAFETY: as above.
-    unsafe {
-        libc::unlink(c"/".as_ptr());
-    }
+
+    std::os::unix::net::UnixStream::connect(path());
+    std::os::unix::net::UnixListener::bind(path());
+    std::os::unix::net::UnixDatagram::bind(path());
 }
 
 /// Scratch space outside every mount, and a host path handed to a child.
 fn scratch_and_children() {
     tempfile::tempfile();
+    tempfile::tempfile_in(path());
     tempfile::tempdir();
+    tempfile::tempdir_in(path());
+    tempfile::spooled_tempfile(0);
     tempfile::NamedTempFile::new();
+    tempfile::NamedTempFile::new_in(path());
+    tempfile::TempDir::new();
+    tempfile::TempDir::new_in(path());
+    tempfile::Builder::new().tempfile();
+    tempfile::Builder::new().tempfile_in(path());
+    tempfile::Builder::new().tempdir();
+    tempfile::Builder::new().tempdir_in(path());
+    tempfile::env::temp_dir();
     std::process::Command::new("x").current_dir(path());
 }
 
