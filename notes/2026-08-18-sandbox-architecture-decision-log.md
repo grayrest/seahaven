@@ -325,6 +325,32 @@ be shown to a user before the run starts; requiring an explicit grant per
 outside import was rejected because rocjust documents the shared-justfile
 pattern as supported.
 
+**The union is not expressible as a mount table, and the read-only half is
+wrong for `mod`.** `MountTable::build` refuses overlapping host directories by
+contract, and D16's union overlaps by construction: `mod foo` resolves to a
+*subdirectory* of the root tree, and `import '../shared.just'` to a tree that
+*contains* it. Either way the table refuses to build. So the grant is a set of
+per-path access rules resolved by longest matching prefix, not a set of mounts —
+the root tree's read-write rule dominating an enclosing read-only import tree.
+And read-only is wrong for a submodule at all: its recipes run beside its own
+file, so the standard module layout is read-only exactly where it writes.
+
+**Nothing can resolve the graph before the sandbox exists.** Import and module
+resolution is performed by *guest* code, by probing four candidate filenames per
+`mod` — the text is static but the graph is a filesystem question. So graph
+resolution joins discovery as one launcher act, needing a host-side scanner that
+recognises `import`/`import?`/`mod`/`mod?`. The guest's loader must then fail
+closed on any file the host did not pre-resolve, which turns a divergence
+between the two parsers into an error rather than a silent gap in the grant.
+
+Three run-time widenings the up-front union cannot see, all of which must be
+resolved up front or refused under a restrictive policy: `set fallback` — which
+*is* implemented, contrary to an earlier note here, and performs a second
+unbounded upward walk inside the sandbox; `dotenv` resolution, which also climbs
+to the filesystem root; and `[working-directory(...)]`, which is a run-time
+expression that may contain a backtick and whose absolute result is passed
+straight through.
+
 Discovery -- finding the root justfile in the first place -- is not covered by
 this rule and could not be; see D44.
 
@@ -447,11 +473,23 @@ are advisory, not enforced.
 **So it is one store per sub-invocation, with the shared memo table owned by the
 host.** That makes the narrowing real, and gives each sub-invocation its own
 deadline and memory budget so a runaway job stops itself rather than its
-siblings. The rationale this entry was built on -- "splitting instances makes a
-diamond run twice" -- costs less than it appears: rocjust has *two* memo tables,
-and only the recipe "ran" set crosses invocations. That is a set of name and
-argument pairs, plain data the host can hold; the evaluator's memo caches effect
-values but is per-evaluation and stays in its own store.
+siblings. **Corrected: the account of what crosses was wrong.** The claim here was that
+only the recipe "ran" set crosses invocations and that the evaluator's memo is
+per-evaluation. The `ran` half holds — its key is a qualified name and the list
+of bound argument values, plain data. The other half does not. `Evaluator.Memo`
+caches `Backtick`, `Shell`, `ReadFile`, `Uuid`, `JustPid`, `Which` and the rest;
+it is seeded by `force_assignments!` before anything runs and then threaded
+through every planned invocation on the command line and back out of each one.
+So it is per-*invocation*, and its key is a tag union over builtin call shapes
+rather than flat data.
+
+That forks the design and the fork has to be stated rather than left implicit.
+A store is per **invocation**: parallel jobs within one invocation share it, and
+therefore share one deadline and one memory budget — one runaway job does trip
+its siblings, which is accepted and said out loud rather than claimed otherwise.
+A **sub-invocation** gets a fresh store with a fresh memo and a fresh `ran` set,
+which is exactly the subprocess semantics D30 is emulating. The host then holds
+nothing, and "host-owned memo table" is withdrawn.
 
 **Corrected:** one instance holds handles to sessions with *different* mount
 tables, and the guest supplies the selector — so the handle table is the whole
@@ -756,57 +794,28 @@ exactly the hardening cap-std was chosen to avoid re-deriving. This is the one
 place the design knowingly takes that on, and it is why D41's kernel-enforced
 check matters more here than anywhere else.
 
-## D43 — Handles are per-frame tables of generational indices, one table per kind
+## D43 — Withdrawn: the store boundary is the frame boundary
 
-D25 requires that a guest cannot select a session it is not entitled to, and
-recorded "generation-counted slab indices" as the mechanism. That names the
-wrong property. Generations are small counters; index 3 generation 2 is
-guessable. What generational indices prevent is use-after-free and ABA — a
-closed handle's slot being silently reused — not forgery.
+This entry designed frames because D25 put sub-invocations in one Wasmtime
+instance, where a guest could forge a sibling session handle and recover
+authority its frame had given up. D25 no longer does that, and the premise went
+with it. Within one invocation D16 derives a single grant covering the whole
+file graph, so every session in a store shares one mount table and differs only
+in working directory and environment — a forged handle recovers nothing. Across
+sub-invocations the store *is* the boundary, and Wasmtime handles cannot cross
+stores at all.
 
-Forgery is a real escalation here rather than a theoretical one. A single
-Wasmtime instance holds sessions with *different* mount tables, and after D16 a
-sub-invocation's grant is strictly narrower than its invoker's. D30's trampoline
-runs that sub-invocation in the same instance. So the adversary is the guest
-against its own narrowed frame, and guessing a sibling handle recovers authority
-the current frame gave up.
+Three properties from it survive and now live where they belong: generational
+indices within a store's tables, for use-after-free; one table per kind, so a
+type confusion is not expressible; and a host-side frame stack for D30's depth
+cap and for rejecting a duplicated or out-of-order `complete`. Frame teardown
+must reap, or a job spawned in a frame that exits before `wait_any` sees it
+leaves a live process holding that frame's mount handles —
+`kill_external_commands_on_drop` is mandatory for sandboxed sessions.
 
-**The frame is itself a capability, and it is host-minted.** D30 makes the
-guest's main loop the dispatcher, so the host cannot infer which frame a call
-belongs to: "the innermost open one" is wrong, because depth 0 must keep reaping
-its own jobs while a sub-invocation runs. Leaving the guest to name the frame
-with an integer would reinstate the forgeable selector one level up, which is
-what this entry exists to remove. So every host function takes a frame handle as
-its first argument, minted by the host into a table the host owns, and never a
-raw index the guest chose. The host also keeps its own frame stack and rejects a
-`complete` that is duplicated or out of order — nothing in the protocol makes
-the guest send one at all, and a frame the guest abandons would otherwise never
-tear down while still counting against D30's depth cap.
-
-**Each frame owns its own handle tables; a handle indexes only the
-current frame's.** Forging an integer then yields one of the guest's own
-handles, so escalation is not expressible rather than rejected at runtime — and
-frame teardown drops the tables, so lifetimes come for free. Generational
-indices are still used *within* a table, for use-after-free. Delegating a handle
-between frames is deliberately not possible; if it is ever wanted it needs its
-own named mechanism rather than arriving by accident.
-
-**One table per kind** — sessions, jobs, and whatever follows. A type confusion
-is then not expressible either: the host function's signature selects the table,
-so there is no tag to check and no mismatch error to write.
-
-Frame teardown must also reap. A spawned child outlives the handle that names
-it by default (`kill_external_commands_on_drop` is false for ordinary shells),
-so a job spawned in a frame that exits before `wait_any` observes it would leave
-a live process holding that frame's mount handles and nobody to reap it. That
-option is mandatory for sandboxed sessions.
-
-Rejected: a single instance-wide table with a per-frame ownership check, which
-works but puts the boundary in a check that a new host function can forget; and
-random 128-bit tokens, which are unforgeable by construction but need a CSPRNG
-carved out of D14's injected RNG — otherwise `--hermetic` freezes the token
-source and makes handles predictable exactly where the guarantee is claimed
-loudest.
+What does not survive is the host-minted frame handle as every host function's
+first argument. `Caller<'_, T>` already identifies the store, and the store
+already identifies the frame.
 
 ## D44 — Discovery is a launcher act, bounded by a source-control root
 
@@ -844,3 +853,45 @@ surprising grant would be least noticed.
 The strategy is configurable, because this platform is meant to carry more than
 rocjust and not every project is a repository. What is not configurable is that
 *some* bound applies.
+
+**Corrected — the bound has to be on the answer, not on the walk.** As first
+written it constrained only the search, and three routes reach a root justfile
+without searching: `--justfile PATH` is taken as-is, so `--justfile ~/justfile`
+yields the $HOME grant this entry calls nearly as bad as `/`;
+`--working-directory` relocates where recipes run to any absolute path, layered
+on *after* the search; and `--init` runs before the search by design. So the
+rule is a predicate on the resulting root directory — it must lie strictly below
+a marker that is itself strictly below every stop — applied to all four routes
+alike.
+
+**First-marker-wins deletes the monorepo root justfile.** A vendored subtree, a
+submodule or a linked worktree carries `.git`, so a walk from inside one stops
+there and discovery fails where upstream `just` succeeds. The two searches are
+therefore separate: walk up for the justfile, and independently for the
+outermost marker below the first stop, then require the justfile's directory to
+lie within that ceiling.
+
+**The grant must not contain the marker's own directory.** `.git/hooks/*` and
+`.git/config` — which carries `core.pager`, `core.fsmonitor` and `!sh -c`
+aliases — would otherwise be writable by an untrusted justfile, and git executes
+what it finds there at the user's next command. The same reasoning D26 applies
+to symlinks, and stronger. The walk knows where the marker is, so it carves it
+out when deriving the grant. Note the accidental asymmetry this removes: in a
+worktree or submodule the real git directory already lies outside the ceiling,
+so only an ordinary clone was exposed.
+
+**The stop list is per platform, canonicalized, and case-folded.** `/tmp`
+canonicalizes to `/private/tmp` on macOS and `$TMPDIR` to `/private/var/...`, so
+a list containing `/private` or `/var` would kill discovery for every
+temp-directory checkout — including this project's own scratch worktrees. The
+set is therefore enumerated rather than described: on macOS `/System`,
+`/Library`, `/usr`, `/bin`, `/sbin`, `/opt`, `/Applications`, `/Volumes` and
+`/private/etc`, but *not* `/private/tmp`; on Linux `/usr`, `/etc`, `/boot`,
+`/proc`, `/sys`, `/dev`; on Windows `%SystemRoot%` and the program directories.
+
+And the home directory is resolved through the same helper the shell uses, not
+through `HOME`. On Windows `HOME` is normally unset — the shell synthesizes it
+from `USERPROFILE` *inside* the boundary — so a launcher reading `HOME` would
+find nothing, the stop would silently vanish, and a `git init`'d user profile
+would become a valid ceiling. That is the same fail-open class as the two
+Windows defects e0b9ea2 fixed.
