@@ -31,6 +31,9 @@ fn confine_to(dir: &std::path::Path) {
 
 /// Runs the bundled `cat` with the given path argument, returning its exit code.
 fn cat(path: &str) -> i32 {
+    // See `run_util`: reset the process-global exit code so a prior test's
+    // failure does not stick to this call.
+    uucore::error::set_exit_code(0);
     let cmds = brush_coreutils_builtins::bundled_commands();
     let cat = cmds.get("cat").expect("cat is bundled under this feature");
     cat(vec![OsString::from("cat"), OsString::from(path)])
@@ -78,5 +81,54 @@ fn climbing_out_of_the_mount_is_refused() {
 
     // `..` from the mount root cannot escape to the parent directory.
     assert_ne!(cat("/work/../inside.txt"), 0, "climbing above the root must fail");
+    brush_vfs::ambient::uninstall();
+}
+
+/// Runs a bundled command with a single path argument, returning its exit code.
+///
+/// uutils keep a *process-global* exit code (`uucore::error::set_exit_code`);
+/// in production each bundled command is its own child process, so it starts at
+/// zero, but running several in one test process would let one util's failure
+/// stick to the next. Reset it first so each call is judged on its own.
+fn run_util(name: &str, path: &str) -> i32 {
+    uucore::error::set_exit_code(0);
+    let cmds = brush_coreutils_builtins::bundled_commands();
+    let f = cmds.get(name).expect("util is bundled under its feature");
+    f(vec![OsString::from(name), OsString::from(path)])
+}
+
+/// Every routed utility, not just `cat`, must be confined: a host path outside
+/// the mount is unreachable, and a path inside it works. If any of these still
+/// used raw `std::fs`, the outside path would open.
+#[cfg(all(
+    feature = "coreutils.head",
+    feature = "coreutils.wc",
+    feature = "coreutils.tac",
+    feature = "coreutils.nl",
+))]
+#[test]
+fn the_whole_routed_batch_is_confined() {
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("inside.txt"), b"one\ntwo\n").unwrap();
+    let outside = tmp.path().join("outside.txt");
+    std::fs::write(&outside, b"secret\n").unwrap();
+
+    let jail = tempfile::tempdir().unwrap();
+    std::fs::write(jail.path().join("inside.txt"), b"one\ntwo\n").unwrap();
+    confine_to(jail.path());
+
+    for util in ["cat", "head", "wc", "tac", "nl"] {
+        assert_eq!(
+            run_util(util, "/work/inside.txt"),
+            0,
+            "{util}: a file in the mount must be readable"
+        );
+        assert_ne!(
+            run_util(util, &outside.to_string_lossy()),
+            0,
+            "{util}: a host path outside the mount must not open"
+        );
+    }
     brush_vfs::ambient::uninstall();
 }
