@@ -15,16 +15,12 @@ implementation brief should not teach something and retract it forty entries
 later. `[ASSUMPTION]` marks the few resolved from existing patterns without an
 owner call.
 
-## Still open — owner decisions needed
+## Nothing is open
 
-| # | Question | Blocks |
-|---|---|---|
-| 1 | `ro` is a userspace field, not a property of a `Dir` fd. Make it real via the OS layer, or accept it? | D6, D26 |
-| 2 | `uu_env` execs; `xattr`/`notify`/`filetime`/`fs_extra`/`onig` have no cap-std expression. Drop, wrap, or exempt each? | D4, D34 |
-| 3 | Wasmtime `epoch_interruption` or `consume_fuel`? Without one, D35's deadline cannot stop a `loop {}` guest. | D35 |
-| 4 | Grant monotonicity for recursive invocation — subset of the invoker's grant, or of the launcher ceiling? | D16, D30 |
-| 5 | Session handles must be unforgeable. Generation-counted slab indices is the obvious shape; nothing says it. | D25 |
-| 6 | Delete `sys/wasm`, or restore a `cargo check` lane for it? It currently has neither. | D37 |
+The six questions that were open here were resolved by owner Q&A on 2026-08-18
+and folded into the decisions they qualify: `ro` in D6, the unexpressible
+capabilities in D4, the Wasmtime configuration in D35, grant derivation in D16,
+handle design in D43, and the `sys/wasm` question in D37.
 
 ---
 
@@ -75,13 +71,39 @@ Rejected: dropping coreutils for a hand-written set (loses GNU fidelity and the
 upstream suites) and keeping only argv-pure utilities (two filesystem models in
 one process).
 
-**Corrected:** the fork set carries capabilities the codemod's four
-transformations do not cover. `uu_env` is in `coreutils.all` and **execs** via
-`std::process::Command` inside a third-party crate. And these have no cap-std
-expression at all: `xattr` (via `uucore` — cap-std has no xattr API), `notify`
-(`uu_tail`), `filetime` (`uu_cp`, `uu_touch`), `fs_extra` (`uu_mv`), `walkdir`,
-`onig` (`uu_expr`). The spike confirmed `xattr` concretely — `uucore::fsxattr::has_acl`
-backs `ls -l`'s ACL indicator. **Open decision #2.**
+**Corrected:** the fork set carries capabilities the codemod's transformations
+do not cover. Checking each against `cap-fs-ext` splits the list the earlier
+correction lumped together, and only two members survive as genuinely
+unexpressible:
+
+- **Expressible, merely unwritten — codemod targets, not exemptions.**
+  `filetime` (`uu_cp`, `uu_touch`) has `cap_fs_ext::DirExt::set_times` and
+  `set_symlink_times`. `fs_extra` (`uu_mv`) and `walkdir` (`uucore`) are
+  recursive copy, move and walk, which a walk over `Vfs` expresses; there is no
+  crate to swap in, but nothing is blocked.
+- **Not expressible.** `xattr` (via `uucore` — verified: `cap-fs-ext` exposes
+  `set_times`, `symlink`, `access` and `set_symlink_permissions`, and no xattr
+  surface at all) and `notify` (`uu_tail`).
+- **Not filesystem questions.** `uu_env`'s exec is governed by D2's predicate,
+  not by the namespace. `onig` is a C regex library; its risk class is memory
+  safety in a C dependency, and it was in this list by category error.
+
+**The disposition for something the namespace cannot express is to drop the
+capability and keep the utility** — `tail` without `-f`, `cp` and `ls` without
+xattr preservation. Dropping whole utilities was rejected because `cp` and `ls`
+are not optional in a recipe runner; exempting the crates was rejected because
+it turns the vfs claim into one a reader has to carry an exception list for;
+and writing the missing primitives against raw `*at` syscalls was rejected as
+exactly the hand-rolled hardening D3 exists to avoid. The closed world is
+already lossy — D2 accepts losing `cargo` and `npm`, and `awk` has no supplier
+— so losing a flag is in keeping, and each loss is a documented difference from
+GNU that the upstream suites will name case by case.
+
+`env` is kept with its exec form refused: `env` with no command is `printenv`
+and is harmless, and `env CMD` already fails closed through D2's predicate, so
+the fork only has to make the failure legible. `onig` is replaced with
+`fancy-regex`, which is already a dependency, removing a C library and the
+`onig_sys` build-time toolchain from the fork.
 
 ## D5 — Re-exec now; in-process is a different project
 
@@ -106,9 +128,20 @@ host paths *unnameable*: an escape has no syntax.
 (`expansion.rs:1050` → passwd DB). Same class, all function calls rather than
 variables so D21's policy does not reach them: `prompt.rs:87,96,118` (`\u`, root
 test, `\h`), `completion.rs:552,568,637` (`compgen -g/-u/-A hostname`),
-`wellknownvars.rs:459` (`$SHELL`). And `test -ef` exposes host device numbers via
-`get_device_and_inode` (`sys/unix/fs.rs:62-65`), leaking mount layout — synthesise
-stable per-session ids or accept it explicitly.
+`wellknownvars.rs:459` (`$SHELL`). And `test -ef` exposes host device numbers,
+leaking mount layout — synthesise stable per-session ids or accept it explicitly.
+
+**`ro` is a policy property, not a kernel one.** `openat(dirfd, name,
+O_WRONLY|O_CREAT)` succeeds regardless of how the dirfd was opened, and
+`cap_std::fs::Dir` has no read-only mode, so `ro` is a field checked in
+userspace. Making it kernel-real was considered and rejected: Landlock would do
+it on Linux and leave macOS and Windows behaving differently, and a
+writer-holding broker would buy uniformity at the price of pulling a whole
+later milestone forward and paying IPC per open. The claim is therefore scoped
+rather than strengthened — **`ro` holds for code inside the `brush-vfs`
+boundary**, which the clippy ban bounds and the Landlock test exercises. It says
+nothing about code that reaches the filesystem another way, which today means
+the bundled coreutils.
 
 ## D7 — No in-memory mounts
 
@@ -212,10 +245,23 @@ justfile's own directory tree rw and nothing else. A hostile repo is inert, and
 the common case needs no configuration — which is what keeps D29's prompts rare
 enough to stay meaningful.
 
-**Open decision #4:** a recursive invocation (D30) is a *new* invocation. If its
-grant re-derives from the launcher ceiling, a manifest that narrowed itself
-recurses and recovers the full ceiling. The rule must be: **a sub-invocation's
-grant is a subset of its invoker's**, not of the launcher's.
+**Corrected — the rule applies at every level, not only the first.** A recursive
+invocation (D30) is a *new* invocation, so re-deriving its grant from the
+launcher ceiling would let a manifest narrow itself, recurse, and recover the
+ceiling. **A sub-invocation's grant is a subset of its invoker's**, never of the
+launcher's.
+
+Subset permits equality, and equality is the wrong default. The rule above is
+"a justfile gets its own directory tree rw and nothing else"; applying it only
+at depth 0 means a justfile in a vendored subdirectory — *more*
+attacker-controlled than the root one, not less — runs with the root's
+authority. So a sub-invocation's default grant is **its own tree, intersected
+with its invoker's grant**, which reads identically at depth 3 and at depth 0.
+Plain inheritance was rejected for that reason; requiring every recursion to
+declare its grant explicitly was rejected as breaking every existing recursive
+justfile until its parent is edited. The cost is real and accepted: a
+sub-justfile writing into a shared parent build directory now needs an explicit
+grant, and that pattern is common.
 
 ## D17 — Roc compiles to wasm by default; native is a trusted opt-in
 
@@ -318,11 +364,10 @@ is shared state, so splitting instances makes a diamond run twice. Designed now
 even though the executor lands with `[parallel]`, because retrofitting handles
 means re-porting the Roc app.
 
-**Open decision #5:** one instance holds handles to sessions with *different*
-mount tables, and the guest supplies the selector — so the handle table is the
-whole boundary for D10's ambient-path model. Handles must be generation-counted
-slab indices, never guest-chosen integers, with every effect re-resolving its
-mount table from the handle.
+**Corrected:** one instance holds handles to sessions with *different* mount
+tables, and the guest supplies the selector — so the handle table is the whole
+boundary for D10's ambient-path model, and every effect re-resolves its mount
+table from the handle. The handle design itself is D43.
 
 ## D26 — Links are validated at creation
 
@@ -333,11 +378,10 @@ does. The check is free because an escaping link can never resolve anyway: **the
 safe set and the useful set are the same set**. Also: no cross-mount hardlinks,
 and the policy loader rejects mounts whose host directories overlap.
 
-**Corrected — `ro` is not a property of a `Dir` fd.** `openat(dirfd, name,
-O_WRONLY|O_CREAT)` succeeds regardless of how the dirfd was opened, and
-`cap_std::fs::Dir` has no read-only mode. `ro` is enforced in userspace from a
-field, so anything reaching the filesystem without passing the vfs's access check
-writes to a `ro` mount anyway. **Open decision #1.**
+**Corrected — `ro` is not a property of a `Dir` fd.** It is enforced in
+userspace from a field, so anything reaching the filesystem without passing the
+vfs's access check writes to a `ro` mount anyway. That is accepted and scoped
+rather than fixed; see D6.
 
 ## D27 — DoS is in scope, bounded cheaply
 
@@ -382,8 +426,12 @@ and calls `complete`. A trampoline, not wasm re-entrancy — but rocjust's main 
 becomes a dispatcher, far cheaper to do *during* the basic-cli port than after.
 
 **Corrected:** the trampoline is unbounded — D2's "fork bombs are impossible" is
-true of processes and false here. Needs a depth cap; rocjust's 256 bound on user
-functions is the precedent. Grant monotonicity is **open decision #4**.
+true of processes and false here. Depth is capped per invoke chain at **256**,
+reusing the bound rocjust already applies to user functions so there is one
+number to remember rather than two. A total-invocation cap was considered and
+dropped: it would catch breadth, which depth alone does not bound, but adds a
+second knob for a case D35's deadline already terminates. Grant derivation is
+in D16.
 
 ## D31 — `HOME` is a per-project persistent mount
 
@@ -448,11 +496,27 @@ deadline. Generous by design — both catch *unbounded* behaviour, not legitimat
 work. Tight defaults with a raise flow were rejected as the fatigue pattern D29
 exists to avoid.
 
-**Open decision #3:** the deadline is unenforceable against a `loop {}` guest
-without `epoch_interruption` or `consume_fuel` — a wasm infinite loop is not
-preemptible and an RSS quota never sees it. Also unpinned: `wasm_threads`,
-`max_wasm_stack`, `memory_maximum_size`, and `allocation_strategy` (pooling reuses
-slabs, so cross-job residue is one config line away).
+**Corrected — the deadline needs a mechanism to reach a guest that never
+yields.** A wasm infinite loop is not preemptible and an RSS quota never sees
+it. **`epoch_interruption`**: a counter bumped by a tokio interval task, checked
+at loop backedges and function entries, around 1% overhead, and per-store
+deadlines so D25's parallel jobs each carry their own. `consume_fuel` was
+rejected because the limit here is wall-clock, and fuel is a work budget — it
+would need an instructions-to-time calibration that drifts with hardware, so a
+slow machine trips the deadline later or never. Fuel's determinism buys nothing
+until D14's hermetic mode exists, and the two flags are independent, so it can
+be added then. Killing the process from outside was rejected because it cannot
+unwind and, under D25, takes every sibling job with it.
+
+Three Wasmtime settings are pinned rather than left at their defaults.
+**`allocation_strategy` is on-demand, not pooling** — pooling reuses memory
+slabs across instantiations, so a job could read residue from a previous job's
+heap; it may arrive later with an explicit zeroing guarantee and a test for it.
+**`wasm_threads` is off** — D25 establishes that Roc has no async or threads, so
+shared-memory threading adds a concurrency surface to the boundary and buys
+nothing. **`memory_maximum_size` and `max_wasm_stack` are given explicit
+values**, so a runaway allocation traps inside the guest instead of reaching an
+RSS quota that measures the whole host process.
 
 ## D36 — The sandbox has no terminal
 
@@ -487,9 +551,20 @@ native in the host — the Roc *guest* is wasm, the shell never is. Removed the
 `wasm32-unknown-unknown` and `wasm32-wasip2` build entries, the `wasm32/wasi-0.2`
 test lane, and the dead WASI-runtime step.
 
-`brush-core/src/sys/wasm/` stays in the tree but now has **no target that lints or
-compiles it** — note `sys/wasm/fs.rs:6-16` returns `true` unconditionally from
-`readable`/`writable`/`executable`, a fail-open nothing sees. **Open decision #6.**
+`brush-core/src/sys/wasm/` was left in the tree with **no target that linted or
+compiled it**, and `sys/wasm/fs.rs` returned `true` unconditionally from
+`readable`/`writable`/`executable` — recorded then as a wasm-specific fail-open
+that nothing saw.
+
+**Corrected — it was not wasm-specific.** Those methods came from `PathExt`,
+which the whole platform layer implemented and which, once executable lookup
+moved to `access(2)` and `FileFacts` replaced the `exists_and_is_*` predicates,
+had no callers anywhere. Deleting the trait removed the fail-open on every
+platform rather than on one. What remained of `sys/wasm/` was a re-export of
+`sys/stubs` under another name, so it went too: this decision already settled
+that brush is always native, and restoring the module is a revert against that.
+Keeping it behind a `cargo check` lane was rejected as paying a CI lane to
+compile something nobody builds.
 
 ## D38–D40 — Here-documents materialize to a temp file
 
@@ -550,3 +625,37 @@ The cost, stated because it cuts against D3: resolving symlinks ourselves is
 exactly the hardening cap-std was chosen to avoid re-deriving. This is the one
 place the design knowingly takes that on, and it is why D41's kernel-enforced
 check matters more here than anywhere else.
+
+## D43 — Handles are per-frame tables of generational indices, one table per kind
+
+D25 requires that a guest cannot select a session it is not entitled to, and
+recorded "generation-counted slab indices" as the mechanism. That names the
+wrong property. Generations are small counters; index 3 generation 2 is
+guessable. What generational indices prevent is use-after-free and ABA — a
+closed handle's slot being silently reused — not forgery.
+
+Forgery is a real escalation here rather than a theoretical one. A single
+Wasmtime instance holds sessions with *different* mount tables, and after D16 a
+sub-invocation's grant is strictly narrower than its invoker's. D30's trampoline
+runs that sub-invocation in the same instance. So the adversary is the guest
+against its own narrowed frame, and guessing a sibling handle recovers authority
+the current frame gave up.
+
+**Each invocation frame owns its own handle tables; a handle indexes only the
+current frame's.** Forging an integer then yields one of the guest's own
+handles, so escalation is not expressible rather than rejected at runtime — and
+frame teardown drops the tables, so lifetimes come for free. Generational
+indices are still used *within* a table, for use-after-free. Delegating a handle
+between frames is deliberately not possible; if it is ever wanted it needs its
+own named mechanism rather than arriving by accident.
+
+**One table per kind** — sessions, jobs, and whatever follows. A type confusion
+is then not expressible either: the host function's signature selects the table,
+so there is no tag to check and no mismatch error to write.
+
+Rejected: a single instance-wide table with a per-frame ownership check, which
+works but puts the boundary in a check that a new host function can forget; and
+random 128-bit tokens, which are unforgeable by construction but need a CSPRNG
+carved out of D14's injected RNG — otherwise `--hermetic` freezes the token
+source and makes handles predictable exactly where the guarantee is claimed
+loudest.
