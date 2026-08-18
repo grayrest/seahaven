@@ -152,7 +152,7 @@ impl MountTable {
     /// Longest match wins, so a mount at `/work/target` takes precedence over
     /// one at `/work` for anything beneath it.
     #[must_use]
-    pub fn resolve<'a>(&'a self, path: &'a VirtualPath) -> Option<(&'a Mount, Vec<&'a str>)> {
+    pub fn resolve<'s, 'p>(&'s self, path: &'p VirtualPath) -> Option<(&'s Mount, Vec<&'p str>)> {
         self.mounts
             .iter()
             .find_map(|m| path.strip_prefix(&m.at).map(|rest| (m, rest)))

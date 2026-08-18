@@ -704,6 +704,8 @@ dependencies = [
 name = "brush-vfs"
 version = "0.1.0"
 dependencies = [
+ "cap-fs-ext",
+ "cap-primitives",
  "cap-std",
  "tempfile",
  "thiserror 2.0.20",
@@ -786,6 +788,18 @@ checksum = "5abbd6eeda6885048d357edc66748eea6e0268e3dd11f326fff5bd248d779c26"
 dependencies = [
  "core_maths",
  "displaydoc",
+]
+
+[[package]]
+name = "cap-fs-ext"
+version = "4.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d78e5a3368ae89b7cb68186411452b4b9fac8b41be9c19bf3f47c2d2c8e36e6b"
+dependencies = [
+ "cap-primitives",
+ "cap-std",
+ "io-lifetimes 3.0.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
