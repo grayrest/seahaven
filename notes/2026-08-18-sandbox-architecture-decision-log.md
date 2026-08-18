@@ -251,6 +251,15 @@ drive-relative paths — is deleted rather than defended.
 A `syn` codemod re-run on each upstream import; the diff is the codemod plus a
 residual patch set, whose size per rebase is the health metric.
 
+**A deliberate divergence gets an expected-failure entry, keyed to the decision
+that causes it.** The upstream suites are the other health metric, and they only
+stay one if a failure means something. So each upstream case a divergence breaks
+names the decision responsible -- D26's link rewrite is the first -- and a case
+that starts *passing* is itself a failure, the same rule the compat harness
+already applies to its 379 known failures. Editing an upstream case to assert
+our behaviour was rejected: the next rebase reverts it silently and nothing
+records why it differed.
+
 **Revised after the spike:** `uucore` **already ships the abstraction point** —
 `safe_traversal.rs`, 1,464 lines of `DirFd` over
 `openat`/`fstatat`/`unlinkat`/`mkdirat`/`fchmodat`, described upstream as
@@ -505,6 +514,17 @@ does. The check is free because an escaping link can never resolve anyway: **the
 safe set and the useful set are the same set**. Also: no cross-mount hardlinks,
 and the policy loader rejects mounts whose host directories overlap.
 
+**Why the rewrite is containment and not tidiness.** It was briefly argued here
+that an absolute virtual target stored verbatim is harmless -- that `/work/a` on
+the host is dangling or unrelated, so no reach is possible. That is wrong, and
+wrong in the direction that matters: the virtual and host namespaces share a
+*spelling* space. A policy built to look like a normal filesystem mounts exactly
+the names the host also has, so with something mounted at `/etc`,
+`ln -s /etc/passwd evil` is a valid virtual target that, stored verbatim, points
+at the host's real file the moment anything outside the sandbox follows it. The
+collision is the common case for a realistic policy, not the edge case. This is
+D26's original hazard, unchanged.
+
 **Resolved: an absolute target is rewritten relative to the link, or refused.**
 The check had no creation site at all -- `brush-vfs` could not create a link --
 so it was unwritten rather than free. Now that it can, the rule is that a link
@@ -514,6 +534,16 @@ containment ends when the run does: `ln -s /work/a/b c` inside `/work` stores
 refused. The cost, stated because it is observable: `readlink` reports the
 stored form, so it prints the rewritten target rather than what was written.
 Storing what was written was rejected as reopening the hazard this entry names.
+
+**Three costs, accepted and recorded rather than discovered later.** `uu_ln`
+already implements this rewrite as the opt-in `--relative` flag, so making it
+mandatory renders `ln -s` and `ln -sr` indistinguishable and fails the upstream
+`test_ln` cases that separate them -- see D13 for how such a failure is tracked.
+`/dev` is synthetic under D20 and `/bin` is synthesized under D22, so neither is
+a mount and `ln -sf /dev/null x`, a common idiom, is refused. And a link
+pointing outside the subtree being copied but inside the mount can be retargeted
+by a copy to a different depth -- narrower than it first appears, since relative
+links are what *survive* a tree being moved and absolute ones are not, but real.
 
 **Corrected — `ro` is not a property of a `Dir` fd.** It is enforced in
 userspace from a field, so anything reaching the filesystem without passing the
@@ -632,6 +662,14 @@ codegen rewrites outputs, so a legitimate run trips it. Default
 deadline. Generous by design — both catch *unbounded* behaviour, not legitimate
 work. Tight defaults with a raise flow were rejected as the fatigue pattern D29
 exists to avoid.
+
+**Unbounded host compute is bounded at the call site, not by interruption.**
+Neither mechanism below reaches host code that is CPU-bound in Rust: the regex
+builtins behind `=~` and `!~`, and `canonicalize` and `FileDigest` on a
+pathological input. A `select!` can observe a deadline but cannot stop a thread,
+and abandoning one still holds the store's `&mut`. So the bound is a refusal to
+start unbounded work -- a backtracking limit on every host regex, as D27 already
+requires for `expr`, and a byte cap on digest and canonicalize.
 
 **Resolved: two mechanisms, because neither covers the other.** Epoch
 interruption reaches a guest spinning in its own code, at loop backedges and
