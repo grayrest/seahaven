@@ -189,6 +189,41 @@ on the smallest utility, and the rest is repetition of it:
   yet confined to the parent's mounts — the in-process routing test confines it
   directly to prove the routing is real.
 
+**Second increment — the batch, the automation, and two walls.** The pipeline
+now has `cargo xtask vendor-fork <name>` (vendor + generate manifest + run the
+codemod in one step), and the codemod grew the distinctively-named half of the
+inherent-method visitor (`path.exists()`, `.read_link()`, `.read_dir()`,
+`.canonicalize()`, `.try_exists()` → `ambient::m(&(recv))`, sound because those
+names are `Path`-only and the facade's `AsRef<Path>` bound turns a wrong
+receiver into a compile error) plus the `canonicalize` carve-out (a virtual
+path). **Five utilities are routed and confinement-proven** — `cat`, `head`,
+`wc`, `tac`, `nl` — each verified by an in-process test that a host path outside
+the mount does not open.
+
+Two walls the batch exposed, each an owner decision before the remaining ~95:
+
+1. **`uucore` is the real fork boundary, not the `uu_*` crates.** `uu_cksum`
+   codemods to *zero* sites: it opens nothing directly, delegating to
+   `uucore::checksum`. `uucore` has its own filesystem surface —
+   `safe_copy::open_source`, `safe_traversal::DirFd`, and bare `File::open` in
+   `fsext`/`smack`/`uptime`. So forking a leaf `uu_*` routes only the utilities
+   that open directly (the five above do; the confinement test is how you tell).
+   The rest need `uucore` itself forked and routed, which D13's spike already
+   pointed at ("route through `safe_traversal::DirFd`, make its root
+   injectable") — but `DirFd` is Unix-only and `nix`-based, so reconciling it
+   with the cap-std, cross-platform facade is a real design task, not a codemod
+   run. **This is the gating decision for scale.**
+2. **`symlink_metadata` has no `std::fs::Metadata` form under cap-std.** The
+   facade returns `std` types so signatures survive, but cap-std's
+   `symlink_metadata` yields a `cap_std::fs::Metadata` with no conversion to
+   `std::fs::Metadata` (which has no public constructor). Any utility that keeps
+   a `Metadata` across calls — `ls` most of all — cannot be routed until this is
+   resolved (a facade `Metadata` type breaks signature preservation; a
+   descriptor-based `fstatat` needs writing). `metadata`/`is_dir`/`is_file` as
+   *methods* are the related unsolved case: ambiguous between `Path` and
+   `File`/`FileType`, they need receiver-type inference the syntactic codemod
+   does not have.
+
 ## D5 — Re-exec now; in-process is a different project
 
 `bundled.rs:3` already spawns `current_exe() --invoke-bundled` *because* uutils
