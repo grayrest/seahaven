@@ -87,9 +87,6 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         let path = path.as_ref();
         tracing::debug!("sourcing: {}", path.display());
 
-        let mut options = std::fs::File::options();
-        options.read(true);
-
         let opened_file: openfiles::OpenFile = self
             .open_file(brush_vfs::OpenMode::read(), path, params)
             .map_err(|e| error::ErrorKind::FailedSourcingFile(path.to_owned(), e))?;

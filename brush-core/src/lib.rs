@@ -22,6 +22,7 @@ mod ioutils;
 pub mod jobs;
 mod keywords;
 pub mod namedoptions;
+pub mod namespace;
 pub mod openfiles;
 pub mod options;
 pub mod pathcache;
@@ -61,4 +62,9 @@ pub use shell::{
     ShellFd, ShellState,
 };
 pub use sourceinfo::SourceInfo;
+
+/// The shell's virtual filesystem: every path the shell names is resolved
+/// through it. Re-exported so that callers outside this crate can describe an
+/// open without depending on the crate directly.
+pub use brush_vfs as vfs;
 pub use variables::{ShellValue, ShellVariable};

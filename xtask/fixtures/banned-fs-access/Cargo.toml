@@ -1,0 +1,13 @@
+# Positive control for the filesystem ban. Deliberately its own workspace, so
+# that `cargo clippy --workspace` at the repo root never builds it: its whole
+# purpose is to fail.
+[workspace]
+
+[package]
+name = "banned-fs-access"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"

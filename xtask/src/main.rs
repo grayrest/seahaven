@@ -1,5 +1,10 @@
 //! xtask-style command-line tool for building this project.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the build tool operates on the host by definition; it is not shell code"
+)]
+
 mod analyze;
 #[cfg(unix)]
 mod bash_tests;

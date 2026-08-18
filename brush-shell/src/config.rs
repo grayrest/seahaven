@@ -212,6 +212,13 @@ pub fn default_config_path() -> Option<PathBuf> {
 /// Note: This function sets `explicit_path` to `false`. Use `load_config` for
 /// proper handling of explicit vs. default paths.
 pub fn load_from_path(path: &Path) -> ConfigLoadResult {
+    // The launcher's own configuration, read before a shell -- and therefore
+    // before a namespace -- exists. It is what decides the policy; it cannot
+    // be subject to it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "launcher configuration is read before there is a namespace"
+    )]
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(e) => {
@@ -268,7 +275,12 @@ pub fn load_config(disabled: bool, explicit_path: Option<&Path>) -> ConfigLoadRe
     };
 
     // If using default path and file doesn't exist, silently use defaults
-    if !is_explicit && !path.exists() {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "launcher configuration is read before there is a namespace"
+    )]
+    let default_is_missing = !is_explicit && !path.exists();
+    if default_is_missing {
         return ConfigLoadResult {
             path: Some(path),
             ..Default::default()

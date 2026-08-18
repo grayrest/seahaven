@@ -12,9 +12,6 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
             return Ok(None);
         };
 
-        let mut options = std::fs::File::options();
-        options.read(true);
-
         let mut history_file = self.open_file(
             brush_vfs::OpenMode::read(),
             history_path,
@@ -55,20 +52,31 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
 
     /// Saves history back to any backing storage.
     pub fn save_history(&mut self) -> Result<(), error::Error> {
-        if let Some(history_file_path) = self.history_file_path()
-            && let Some(history) = &mut self.history
-        {
-            // See if there's *any* time format configured. That triggers writing out
-            // timestamps.
-            let write_timestamps = self.env.is_set("HISTTIMEFORMAT");
+        let Some(history_file_path) = self.history_file_path() else {
+            return Ok(());
+        };
+        if self.history.is_none() {
+            return Ok(());
+        }
 
-            // TODO(history): Observe options.append_to_history_file
-            history.flush(
-                history_file_path,
-                true, /* append? */
-                true, /* unsaved items only? */
-                write_timestamps,
-            )?;
+        // See if there's *any* time format configured. That triggers writing out
+        // timestamps.
+        let write_timestamps = self.env.is_set("HISTTIMEFORMAT");
+
+        // Open before borrowing the history mutably: the file has to be
+        // resolved in the shell's namespace, and that needs the shell.
+        // TODO(history): Observe options.append_to_history_file
+        let file = self.open_file(
+            brush_vfs::OpenMode::default()
+                .with_write(true)
+                .with_append(true)
+                .with_create(true),
+            &history_file_path,
+            &self.default_exec_params(),
+        )?;
+
+        if let Some(history) = &mut self.history {
+            history.flush(file, true /* unsaved items only? */, write_timestamps)?;
         }
 
         Ok(())

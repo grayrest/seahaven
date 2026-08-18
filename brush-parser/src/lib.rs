@@ -17,6 +17,10 @@ mod source;
 mod tokenizer;
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 mod snapshot_tests;
 
 pub use error::{

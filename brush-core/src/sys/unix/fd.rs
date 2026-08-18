@@ -28,6 +28,20 @@ cfg_if::cfg_if! {
 ///
 /// If the platform does not support enumerating file descriptors, an empty iterator
 /// is returned. This function will skip any file descriptors that cannot be opened.
+///
+/// # Namespace exemption
+///
+/// This reads the host filesystem directly and deliberately does not route
+/// through the shell's namespace. `/proc/self/fd` and `/dev/fd` are process
+/// introspection wearing a filesystem's clothes: what they enumerate is
+/// descriptors this process already holds, so reading them grants no authority
+/// the process did not already have. Routing them through the namespace would
+/// also be circular -- the namespace's own mounts are descriptors, and would
+/// appear in the listing.
+///
+/// The entries are *not* handed on as paths. Each is parsed back to a
+/// descriptor number and reopened by number, so nothing here can name a file
+/// the shell could not already reach.
 #[cfg(any(
     target_os = "linux",
     target_os = "android",

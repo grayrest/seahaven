@@ -236,6 +236,13 @@ impl MountTableBuilder {
             .entries
             .iter()
             .map(|(_, host, _)| {
+                // The one place a host path is legitimately resolved against
+                // the host: mount construction is where the namespace is
+                // built, before there is a namespace to ask.
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "building the namespace out of host directories is this crate's job"
+                )]
                 host.canonicalize().map_err(|source| MountError::HostDir {
                     path: host.clone(),
                     source,
@@ -277,6 +284,10 @@ impl MountTableBuilder {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 mod tests {
     use super::*;
 

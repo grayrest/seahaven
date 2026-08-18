@@ -4,6 +4,10 @@
 //! or insta snapshots, without comparing against an oracle shell.
 
 #![cfg(any(unix, windows))]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 
 use anyhow::Result;
 use brush_test_harness::{RunnerConfig, TestMode, TestOptions, TestRunner};

@@ -1,6 +1,10 @@
 #![no_main]
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "libfuzzer_sys::fuzz_target! opens a host file in its own expansion"
+)]
 
 use brush_vfs::VirtualPath;
 use libfuzzer_sys::fuzz_target;

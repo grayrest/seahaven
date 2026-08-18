@@ -1,5 +1,9 @@
 //! Interactive integration tests for brush shell
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 // Only compile this for platforms supported by expectrl's pty backend.
 #![cfg(any(
     target_os = "linux",

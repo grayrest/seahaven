@@ -391,5 +391,4 @@ mod tests {
         let path = PathBuf::from("/this/path/need/not/exist");
         assert_eq!(executable_candidates(path.clone()), vec![path]);
     }
-
 }

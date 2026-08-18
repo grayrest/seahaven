@@ -1,5 +1,9 @@
 //! Completion integration tests for brush shell.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 // For now, only compile this for Linux.
 #![cfg(target_os = "linux")]
 #![cfg(test)]

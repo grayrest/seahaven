@@ -66,11 +66,33 @@ impl builtins::Command for HistoryCommand {
             time_format: context.shell.history_time_format(),
         };
 
+        // Open any destination before borrowing the history mutably: the path
+        // is resolved in the shell's namespace, and only the shell can do
+        // that. `-d` returns before it would ever write, so opening for it
+        // would create a file the command never uses.
+        let save_file = if self.delete_offset.is_some() {
+            None
+        } else {
+            self.save_destination(&config)
+                .map(|(path, append)| {
+                    context.shell.open_file(
+                        brush_core::vfs::OpenMode::default()
+                            .with_write(true)
+                            .with_create(true)
+                            .with_append(append)
+                            .with_truncate(!append),
+                        path,
+                        &context.params,
+                    )
+                })
+                .transpose()?
+        };
+
         let stdout = context.stdout();
         let stderr = context.stderr();
 
         if let Some(history) = context.shell.history_mut() {
-            self.execute_with_history(history, &config, stdout, stderr)
+            self.execute_with_history(history, &config, save_file, stdout, stderr)
         } else {
             Err(brush_core::ErrorKind::HistoryNotEnabled.into())
         }
@@ -85,6 +107,7 @@ impl HistoryCommand {
         &self,
         history: &mut history::History,
         config: &HistoryConfig,
+        save_file: Option<brush_core::openfiles::OpenFile>,
         stdout: impl Write,
         mut stderr: impl Write,
     ) -> Result<ExecutionResult, brush_core::Error> {
@@ -119,14 +142,10 @@ impl HistoryCommand {
             return Ok(ExecutionResult::success());
         }
 
-        if let Some(append_option) = &self.append_session_to_file {
-            if let Some(file_path) = get_effective_history_file_path(
-                config.default_history_file_path.as_deref(),
-                append_option.as_deref(),
-            ) {
+        if self.append_session_to_file.is_some() {
+            if let Some(file) = save_file {
                 history.flush(
-                    file_path,
-                    true,                         /* append? */
+                    file,
                     true,                         /* unsaved items only */
                     config.time_format.is_some(), /* write timestamps? */
                 )?;
@@ -143,14 +162,10 @@ impl HistoryCommand {
             return error::unimp("history -r is not yet implemented");
         }
 
-        if let Some(write_option) = &self.write_session_to_file {
-            if let Some(file_path) = get_effective_history_file_path(
-                config.default_history_file_path.as_deref(),
-                write_option.as_deref(),
-            ) {
+        if self.write_session_to_file.is_some() {
+            if let Some(file) = save_file {
                 history.flush(
-                    file_path,
-                    false,                        /* append? */
+                    file,
                     false,                        /* unsaved items only? */
                     config.time_format.is_some(), /* write timestamps? */
                 )?;
@@ -212,6 +227,28 @@ fn display_history(
     }
 
     Ok(())
+}
+
+impl HistoryCommand {
+    /// Returns the file this invocation will write history to, and whether it
+    /// appends rather than replaces.
+    ///
+    /// `-a` and `-w` are in the same clap group, so at most one can apply.
+    fn save_destination<'a>(&'a self, config: &'a HistoryConfig) -> Option<(&'a Path, bool)> {
+        let (option, append) = if let Some(option) = &self.append_session_to_file {
+            (option, true)
+        } else if let Some(option) = &self.write_session_to_file {
+            (option, false)
+        } else {
+            return None;
+        };
+
+        get_effective_history_file_path(
+            config.default_history_file_path.as_deref(),
+            option.as_deref(),
+        )
+        .map(|path| (path, append))
+    }
 }
 
 fn get_effective_history_file_path<'a>(

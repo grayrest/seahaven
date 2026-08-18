@@ -287,6 +287,10 @@ pub fn fold_for_collision(component: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 mod tests {
     use super::*;
 

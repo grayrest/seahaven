@@ -485,7 +485,14 @@ async fn instantiate_shell(
 fn instantiate_shell_from_file(
     file_path: &Path,
 ) -> Result<BrushShell, brush_interactive::ShellError> {
-    let mut shell: BrushShell = serde_json::from_reader(std::fs::File::open(file_path)?)
+    // Before any shell exists, so there is no namespace to resolve in: this
+    // reads the shell that is about to exist.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "reconstitutes the shell itself; runs before there is a namespace"
+    )]
+    let file = std::fs::File::open(file_path)?;
+    let mut shell: BrushShell = serde_json::from_reader(file)
         .map_err(|e| brush_interactive::ShellError::IoError(std::io::Error::other(e)))?;
 
     // NOTE: We need to manually register builtins because we can't serialize/deserialize them.
@@ -632,16 +639,22 @@ fn enable_xtrace_to_file(
     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
     file_path: &Path,
 ) -> Result<(), brush_interactive::ShellError> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(file_path)
+    // Through the shell's namespace: a trace file is named by the user like
+    // any other redirect target, and a confined shell must not be able to
+    // write outside its mounts by asking for one.
+    let file = shell
+        .open_file(
+            brush_core::vfs::OpenMode::default()
+                .with_create(true)
+                .with_write(true)
+                .with_truncate(true),
+            file_path,
+            &shell.default_exec_params(),
+        )
         .map_err(|e| {
             brush_interactive::ShellError::FailedToCreateXtraceFile(file_path.to_path_buf(), e)
         })?;
 
-    let file = brush_core::openfiles::OpenFile::from(file);
     let file_fd = shell.open_files_mut().add(file)?;
 
     shell.options_mut().print_commands_and_arguments = true;

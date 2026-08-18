@@ -15,6 +15,10 @@
 //! 3. **Hybrid**: Combines both modes - runs oracle comparison AND validates against expectations.
 //!    Both must pass for the test to succeed.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the harness seeds host fixtures and compares host temp directories; it is the observer, not the observed"
+)]
 #![cfg(any(unix, windows))]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::unwrap_used)]

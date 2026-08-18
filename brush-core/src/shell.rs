@@ -32,7 +32,7 @@ mod completion;
 mod env;
 mod execution;
 mod expansion;
-pub(crate) mod fs;
+mod fs;
 mod funcs;
 mod history;
 mod initscripts;
@@ -251,6 +251,13 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
             args: options.shell_args.unwrap_or_default(),
             version: options.shell_version,
             product_display_str: options.shell_product_display_str,
+            // Bootstrap: the process's directory is what the shell starts
+            // out believing its working directory is, before any policy has
+            // been installed. Every later answer comes from the session.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "there is no namespace yet to ask at construction time"
+            )]
             working_dir: options.working_dir.map_or_else(std::env::current_dir, Ok)?,
             // Identity by default: the shell behaves exactly as it did before
             // the vfs existed. A launcher installs a real policy with

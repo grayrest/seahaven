@@ -649,6 +649,10 @@ fn read_link_contents(mount: &Mount, relative: &std::path::Path) -> std::io::Res
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 mod tests {
     use std::io::Write as _;
 

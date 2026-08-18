@@ -1,5 +1,10 @@
 //! Simple example of miette usage
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "reads its own input from the host; not shell code"
+)]
+
 use std::io::Cursor;
 
 use brush_parser::Parser;

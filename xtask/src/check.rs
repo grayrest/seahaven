@@ -19,6 +19,8 @@ use xshell::{Shell, cmd};
 /// Run code quality checks.
 #[derive(Parser)]
 pub enum CheckCommand {
+    /// Check that the filesystem ban is switched on and complete.
+    Ban,
     /// Check that the code compiles.
     Build,
     /// Check dependencies for security vulnerabilities and license compliance.
@@ -46,6 +48,7 @@ pub fn run(cmd: &CheckCommand, verbose: bool) -> Result<()> {
     let sh = Shell::new()?;
 
     match cmd {
+        CheckCommand::Ban => check_ban(&sh, verbose),
         CheckCommand::Fmt => check_fmt(&sh, verbose),
         CheckCommand::Lint => check_lint(&sh, verbose),
         CheckCommand::Deps => check_deps(&sh, verbose),
@@ -73,16 +76,191 @@ fn check_fmt(sh: &Shell, verbose: bool) -> Result<()> {
 
 fn check_lint(sh: &Shell, verbose: bool) -> Result<()> {
     eprintln!("Running clippy...");
+    // `-D warnings` is load-bearing, not belt-and-braces: `disallowed_methods`
+    // is warn-by-default, so without it the filesystem ban reports violations
+    // and exits 0.
     let mut args = vec!["clippy", "--workspace", "--all-features", "--all-targets"];
     if verbose {
         args.push("--verbose");
-        eprintln!("Running: cargo {}", args.join(" "));
+        eprintln!("Running: cargo {} -- -D warnings", args.join(" "));
     }
+    args.push("--");
+    args.push("-D");
+    args.push("warnings");
     cmd!(sh, "cargo {args...}")
         .run()
         .context("Clippy check failed")?;
     eprintln!("Clippy check passed.");
     Ok(())
+}
+
+/// Path of the crate that must fail to lint, relative to the workspace root.
+const BAN_FIXTURE: &str = "xtask/fixtures/banned-fs-access";
+
+/// Verify that the filesystem ban in `clippy.toml` is switched on and complete.
+///
+/// The ban has three ways of quietly ceasing to exist, and this checks all
+/// three:
+///
+/// - An entry naming a path that does not resolve is *silently* ignored --
+///   clippy emits nothing at all and exits 0 -- so a typo or a rename in std
+///   disables one ban invisibly. The fixture uses every entry exactly once and
+///   must produce exactly one diagnostic per entry.
+/// - A `clippy.toml` in a member crate shadows the root one outright rather
+///   than merging with it, so there must be exactly one in the tree.
+/// - `disallowed_methods` is a warn-by-default lint, so a CI invocation
+///   without `-D warnings` reports it and exits 0 regardless.
+fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Checking the filesystem ban...");
+    let root = crate::common::find_workspace_root()?;
+
+    // Exactly one clippy.toml: a member crate's would shadow the root's.
+    let found = find_clippy_configs(&root)?;
+    if found.len() != 1 {
+        anyhow::bail!(
+            "expected exactly one clippy.toml in the tree, found {}: {}",
+            found.len(),
+            found
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    let expected = banned_paths(&found[0])?;
+    if expected.is_empty() {
+        anyhow::bail!("clippy.toml declares no disallowed-methods; the ban is not switched on");
+    }
+
+    // Lint the positive control. It must fail, and it must name every entry.
+    let fixture = root.join(BAN_FIXTURE);
+    let manifest = fixture.join("Cargo.toml");
+    if verbose {
+        eprintln!("Running: cargo clippy on {}", fixture.display());
+    }
+
+    // Clippy caches by crate fingerprint, and the fixture's source rarely
+    // changes even when clippy.toml does, so a stale result would pass the
+    // check without linting anything.
+    cmd!(sh, "cargo clean --manifest-path {manifest}")
+        .quiet()
+        .run()
+        .context("Failed to clean the ban fixture")?;
+
+    let output = cmd!(
+        sh,
+        "cargo clippy --manifest-path {manifest} --message-format short -- -D warnings"
+    )
+    .env("CLIPPY_CONF_DIR", &root)
+    .ignore_status()
+    .quiet()
+    .read_stderr()
+    .context("Failed to run clippy on the ban fixture")?;
+
+    let mut counts: std::collections::BTreeMap<&str, usize> = expected
+        .iter()
+        .map(|path| (path.as_str(), 0usize))
+        .collect();
+    let mut unexpected = Vec::new();
+    for reported in reported_paths(&output) {
+        match counts.get_mut(reported) {
+            Some(count) => *count += 1,
+            None => unexpected.push(reported.to_owned()),
+        }
+    }
+
+    let never_fired: Vec<&str> = counts
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(path, _)| *path)
+        .collect();
+    if !never_fired.is_empty() {
+        anyhow::bail!(
+            "these bans produced no diagnostic -- either the path no longer resolves (clippy \
+             ignores unresolvable entries silently) or {BAN_FIXTURE} does not use them:\n  {}",
+            never_fired.join("\n  ")
+        );
+    }
+    if !unexpected.is_empty() {
+        anyhow::bail!(
+            "{BAN_FIXTURE} tripped bans it does not declare a use for:\n  {}",
+            unexpected.join("\n  ")
+        );
+    }
+
+    // Every entry fired, so the fixture must have failed to lint. If it did
+    // not, `-D warnings` is not reaching the invocation.
+    if !output.contains("error") {
+        anyhow::bail!(
+            "the ban fixture reported diagnostics but clippy did not fail; \
+             `-D warnings` is not taking effect"
+        );
+    }
+
+    eprintln!("Ban check passed ({} entries, all firing).", expected.len());
+    Ok(())
+}
+
+/// Returns every `clippy.toml` in the tree, ignoring build output.
+fn find_clippy_configs(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
+    fn walk(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) -> Result<()> {
+        for entry in dir.read_dir()? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name();
+            if entry.file_type()?.is_dir() {
+                if name == "target" || name == ".git" {
+                    continue;
+                }
+                walk(&path, found)?;
+            } else if name == "clippy.toml" || name == ".clippy.toml" {
+                found.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    let mut found = Vec::new();
+    walk(root, &mut found)?;
+    found.sort();
+    Ok(found)
+}
+
+/// Reads the banned method paths out of a `clippy.toml`.
+fn banned_paths(config: &std::path::Path) -> Result<Vec<String>> {
+    let text =
+        std::fs::read_to_string(config).with_context(|| format!("reading {}", config.display()))?;
+    let parsed: toml::Value =
+        toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
+
+    let Some(entries) = parsed
+        .get("disallowed-methods")
+        .and_then(toml::Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+
+    Ok(entries
+        .iter()
+        .filter_map(|entry| match entry {
+            toml::Value::String(path) => Some(path.clone()),
+            other => other
+                .get("path")
+                .and_then(toml::Value::as_str)
+                .map(ToOwned::to_owned),
+        })
+        .collect())
+}
+
+/// Extracts the method paths clippy named in its diagnostics.
+fn reported_paths(output: &str) -> Vec<&str> {
+    const MARKER: &str = "use of a disallowed method `";
+    output
+        .split(MARKER)
+        .skip(1)
+        .filter_map(|rest| rest.split('`').next())
+        .collect()
 }
 
 fn check_deps(sh: &Shell, verbose: bool) -> Result<()> {

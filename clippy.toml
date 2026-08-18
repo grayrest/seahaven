@@ -1,2 +1,66 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# Ambient filesystem authority is banned outside `brush-vfs` and `sys`.
+#
+# Constructors, not types. `brush-vfs`'s own API hands back `std::fs::File` and
+# `std::fs::Metadata` on purpose (see notes/2026-08-18-codemod-spike.md), so
+# banning the types would make the facade one large `#[allow]` and prove
+# nothing. A type carries no authority; the function that mints it does.
+#
+# An entry naming a path that does not resolve is silently ignored -- clippy
+# emits nothing and exits 0 -- so a typo here disables a ban invisibly. That is
+# what `cargo xtask check ban` exists to catch: it lints a fixture that uses
+# every entry below exactly once and requires exactly one diagnostic per entry.
+disallowed-methods = [
+  # The free functions in std::fs, in the order the module documents them.
+  { path = "std::fs::canonicalize", reason = "use brush_vfs::Vfs::canonicalize" },
+  { path = "std::fs::copy", reason = "read and write through brush_vfs::Vfs" },
+  { path = "std::fs::create_dir", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "std::fs::create_dir_all", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "std::fs::exists", reason = "use brush_vfs::Vfs::exists" },
+  { path = "std::fs::hard_link", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::metadata", reason = "use brush_vfs::Vfs::metadata or facts" },
+  { path = "std::fs::read", reason = "open through brush_vfs::Vfs" },
+  { path = "std::fs::read_dir", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "std::fs::read_link", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "std::fs::read_to_string", reason = "open through brush_vfs::Vfs" },
+  { path = "std::fs::remove_dir", reason = "use brush_vfs::Vfs::remove_dir" },
+  { path = "std::fs::remove_dir_all", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::remove_file", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "std::fs::rename", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::set_permissions", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::soft_link", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::symlink_metadata", reason = "use brush_vfs::Vfs::facts with follow=false" },
+  { path = "std::fs::write", reason = "open through brush_vfs::Vfs" },
+
+  # The constructors that mint a handle out of a path.
+  { path = "std::fs::File::open", reason = "use brush_vfs::Vfs::open" },
+  { path = "std::fs::File::create", reason = "use brush_vfs::Vfs::create" },
+  { path = "std::fs::File::create_new", reason = "use brush_vfs::OpenMode::create_new" },
+  { path = "std::fs::File::options", reason = "use brush_vfs::OpenMode" },
+  { path = "std::fs::OpenOptions::new", reason = "use brush_vfs::OpenMode" },
+  { path = "std::fs::OpenOptions::open", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "std::fs::DirBuilder::new", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "std::fs::DirBuilder::create", reason = "use brush_vfs::Vfs::create_dir_all" },
+
+  # Inherent Path methods that do I/O. These read as pure predicates and are
+  # the easiest way to reintroduce an ambient lookup by accident.
+  { path = "std::path::Path::canonicalize", reason = "use brush_vfs::Vfs::canonicalize" },
+  { path = "std::path::Path::exists", reason = "use brush_vfs::Vfs::exists" },
+  { path = "std::path::Path::is_dir", reason = "use brush_vfs::Vfs::facts" },
+  { path = "std::path::Path::is_file", reason = "use brush_vfs::Vfs::facts" },
+  { path = "std::path::Path::is_symlink", reason = "use brush_vfs::Vfs::is_symlink" },
+  { path = "std::path::Path::metadata", reason = "use brush_vfs::Vfs::metadata" },
+  { path = "std::path::Path::read_dir", reason = "use brush_vfs::Vfs::read_dir_names" },
+  { path = "std::path::Path::read_link", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "std::path::Path::symlink_metadata", reason = "use brush_vfs::Vfs::facts with follow=false" },
+  { path = "std::path::Path::try_exists", reason = "use brush_vfs::Vfs::exists" },
+
+  # Process-wide ambient state that names a place on the host.
+  { path = "std::env::current_dir", reason = "use Session::cwd" },
+  { path = "std::env::set_current_dir", reason = "the namespace's cwd is per-session" },
+  { path = "std::env::current_exe", reason = "the host's layout is not the namespace's" },
+  { path = "std::env::home_dir", reason = "HOME is synthesized by policy" },
+  { path = "std::env::temp_dir", reason = "the host's temp directory is not in the namespace" },
+]

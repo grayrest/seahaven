@@ -416,6 +416,13 @@ jobs:
         if: matrix.rust-version == 'stable'
         run: cargo xtask check lint
 
+      # Proves the filesystem ban in clippy.toml is actually switched on: a
+      # typo'd entry is ignored silently by clippy, so the lint above would
+      # pass with the ban half-disabled.
+      - name: Filesystem ban check
+        if: matrix.rust-version == 'stable'
+        run: cargo xtask check ban
+
   # Check for unneeded dependencies.
   check-deps:
     name: "Check for unneeded dependencies"

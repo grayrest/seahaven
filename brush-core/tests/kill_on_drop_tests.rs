@@ -7,6 +7,10 @@
 //! detaches rather than aborts. Dropping the tasks is what drops the `Child`,
 //! where `kill_on_drop` takes effect.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "observes a host pid file written by a child process; not shell code"
+)]
 #![cfg(unix)]
 #![cfg(test)]
 #![allow(clippy::panic_in_result_fn, clippy::expect_used)]

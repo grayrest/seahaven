@@ -2,6 +2,10 @@
 #![allow(missing_docs)]
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::panic)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "libfuzzer_sys::fuzz_target! opens a host file in its own expansion"
+)]
 
 use libfuzzer_sys::fuzz_target;
 use std::sync::LazyLock;

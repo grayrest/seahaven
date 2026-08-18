@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use crate::{
     ExecutionParameters, ShellFd,
     env::{EnvironmentLookup, EnvironmentScope},
-    error, openfiles, pathsearch,
+    error,
+    namespace::{is_executable, to_virtual_path},
+    openfiles, pathsearch,
     sys::users,
     variables,
 };
@@ -73,6 +75,16 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     pub fn is_executable_in_namespace(&self, path: impl AsRef<Path>) -> bool {
         let abs_path = self.absolute_path(path.as_ref());
         is_executable(self.session(), &abs_path)
+    }
+
+    /// Returns true if the namespace has anything at the given path.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to look for; may be relative to the working directory.
+    pub fn exists_in_namespace(&self, path: impl AsRef<Path>) -> bool {
+        let abs_path = self.absolute_path(path.as_ref());
+        crate::namespace::exists(self.session(), &abs_path)
     }
 
     /// Resolves a path to its symlink-free form within the namespace.
@@ -229,12 +241,21 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
 
     /// Opens the given file, using the context of this shell and the provided execution parameters.
     ///
+    /// This is the only way to name a file from outside `brush-core`: the path
+    /// is resolved in the shell's namespace, so a caller cannot reach anything
+    /// the shell's policy does not mount.
+    ///
     /// # Arguments
     ///
-    /// * `options` - The options to use opening the file.
+    /// * `mode` - How to open the file.
     /// * `path` - The path to the file to open; may be relative to the shell's working directory.
     /// * `params` - Execution parameters.
-    pub(crate) fn open_file(
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path does not resolve in the namespace, or if
+    /// the open itself fails.
+    pub fn open_file(
         &self,
         mode: brush_vfs::OpenMode,
         path: impl AsRef<Path>,
@@ -310,49 +331,6 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     pub(crate) const fn persistent_open_files(&self) -> &openfiles::OpenFiles {
         &self.open_files
     }
-}
-
-/// Converts a host-shaped path into a path in the shell's namespace.
-///
-/// Transitional: paths reach the shell in whatever shape the host, the
-/// environment or the script wrote them, so the separator and any drive
-/// prefix are folded away before the virtual path grammar sees them. Once
-/// paths are virtual end to end this disappears.
-pub(crate) fn to_virtual_path(
-    session: &brush_vfs::Session,
-    path: &Path,
-) -> Result<brush_vfs::VirtualPath, std::io::Error> {
-    let text = path.to_string_lossy().replace('\\', "/");
-    let text = match text.split_once(":/") {
-        Some((prefix, rest)) if prefix.len() == 1 => format!("/{rest}"),
-        _ => text,
-    };
-
-    session
-        .resolve(&text)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
-}
-
-/// Returns true if the namespace has an executable file at the given path.
-pub(crate) fn is_executable(session: &brush_vfs::Session, path: &Path) -> bool {
-    to_virtual_path(session, path).is_ok_and(|p| {
-        session.vfs().access(
-            &p,
-            brush_vfs::AccessModes {
-                readable: false,
-                writable: false,
-                executable: true,
-            },
-        )
-    })
-}
-
-/// Returns true if the namespace has a directory at the given path.
-pub(crate) fn is_dir(session: &brush_vfs::Session, path: &Path) -> bool {
-    to_virtual_path(session, path)
-        .ok()
-        .and_then(|p| session.vfs().facts(&p, true))
-        .is_some_and(|facts| facts.is_dir)
 }
 
 fn shell_fd_path_to_fd(path: &Path) -> Option<ShellFd> {

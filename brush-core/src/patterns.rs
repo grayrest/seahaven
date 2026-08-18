@@ -586,6 +586,10 @@ pub(crate) fn remove_smallest_matching_suffix<'a>(
 
 #[cfg(test)]
 #[expect(clippy::panic_in_result_fn)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 mod tests {
     use super::*;
     use anyhow::Result;

@@ -4,6 +4,10 @@
 //! 1. PEG parser (tokenize + peg parse)
 //! 2. `Winnow_str` parser (direct string parse) - when winnow-parser feature enabled
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "reads its own input from the host; not shell code"
+)]
 #![allow(missing_docs)]
 #![allow(clippy::unwrap_used)]
 

@@ -1,10 +1,7 @@
 //! Facilities for tracking and persisting the shell's command history.
 
 use chrono::Utc;
-use std::{
-    io::{BufRead, Read, Write},
-    path::Path,
-};
+use std::io::{BufRead, Read};
 
 use crate::error;
 
@@ -165,33 +162,24 @@ impl History {
         Ok(())
     }
 
-    /// Flushes the history to backing storage (if relevant).
+    /// Writes the history out to the given destination.
+    ///
+    /// Takes an already-open writer rather than a path: opening it is the
+    /// shell's business, since only the shell knows which namespace the path
+    /// is to be resolved in, and whether it is to be appended or truncated.
     ///
     /// # Arguments
     ///
-    /// * `history_file_path` - The path to the history file.
-    /// * `append` - Whether to append to the file or overwrite it.
+    /// * `file` - Where to write the history.
     /// * `unsaved_items_only` - Whether to only write unsaved items; if true, any items will be
     ///   marked as "saved" once saved.
     /// * `write_timestamps` - Whether to write timestamps for each command line.
     pub fn flush(
         &mut self,
-        history_file_path: impl AsRef<Path>,
-        append: bool,
+        mut file: impl std::io::Write,
         unsaved_items_only: bool,
         write_timestamps: bool,
     ) -> Result<(), error::Error> {
-        // Open the file
-        let mut file_options = std::fs::File::options();
-
-        if append {
-            file_options.append(true);
-        } else {
-            file_options.write(true).truncate(true);
-        }
-
-        let mut file = file_options.create(true).open(history_file_path.as_ref())?;
-
         for item_id in &self.items {
             if let Some(item) = self.id_map.get_mut(item_id) {
                 if unsaved_items_only && !item.dirty {

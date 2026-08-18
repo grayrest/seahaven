@@ -1,6 +1,22 @@
 //! Platform abstraction facilities
+//!
+//! # Namespace exemption
+//!
+//! This is the only part of `brush-core` allowed to reach the host filesystem
+//! directly, and the exemption is narrow by construction: nothing here decides
+//! *whether* a path may be named. It answers questions the namespace itself
+//! has to ask -- the mode bits behind a `Metadata`, the process's own
+//! descriptor table -- and the shell reaches it only through `brush-vfs` or
+//! through the handful of platform helpers that take no path at all.
+//!
+//! Everything above this module goes through the namespace; see the ban list
+//! in `clippy.toml` and `cargo xtask check ban`.
 
 #![allow(unused)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the platform layer is where host access is implemented; see the module docs"
+)]
 
 #[cfg(unix)]
 pub(crate) mod unix;

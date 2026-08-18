@@ -147,7 +147,15 @@ fn exit_code(code: ExecutionExitCode) -> i32 {
 /// Returns the path to the running brush executable (cached).
 fn self_exe() -> Option<&'static PathBuf> {
     SELF_EXE
-        .get_or_init(|| std::env::current_exe().ok())
+        .get_or_init(|| {
+            // Where this binary lives on the host, used to re-invoke it. Not a
+            // path the shell ever names, and known before any policy exists.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the launcher's own location, not a path in the namespace"
+            )]
+            std::env::current_exe().ok()
+        })
         .as_ref()
 }
 

@@ -8,7 +8,8 @@
 //! 1. **Format check** - Fast, catches formatting issues early
 //! 2. **Build check** - Ensures code compiles with all features
 //! 3. **Lint check** - Clippy warnings that should be addressed
-//! 4. **Unit tests** - Fast tests excluding integration test binaries
+//! 4. **Filesystem ban check** - Proves the `clippy.toml` ban is switched on
+//! 5. **Unit tests** - Fast tests excluding integration test binaries
 //!
 //! ## Pre-commit workflow (`cargo xtask ci pre-commit`)
 //!
@@ -115,6 +116,10 @@ fn run_quick(args: &QuickArgs, verbose: bool) -> Result<()> {
             Box::new(|| check::run(&CheckCommand::Lint, verbose)),
         ),
         (
+            "Filesystem ban check",
+            Box::new(|| check::run(&CheckCommand::Ban, verbose)),
+        ),
+        (
             "Unit tests",
             Box::new(|| test::run(&make_unit_test_command(), verbose)),
         ),
@@ -139,6 +144,10 @@ fn run_pre_commit(args: &PreCommitArgs, verbose: bool) -> Result<()> {
         (
             "Lint check",
             Box::new(|| check::run(&CheckCommand::Lint, verbose)),
+        ),
+        (
+            "Filesystem ban check",
+            Box::new(|| check::run(&CheckCommand::Ban, verbose)),
         ),
         (
             "Unit tests",

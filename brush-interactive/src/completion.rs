@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use brush_core::escape;
 
@@ -8,7 +8,9 @@ pub(crate) async fn complete_async(
     line: &str,
     pos: usize,
 ) -> brush_core::completion::Completions {
-    let working_dir = shell.working_dir().to_path_buf();
+    // Clone the session before the shell is borrowed mutably below; it is an
+    // `Arc` and a virtual path, so this is cheap.
+    let session = shell.session().clone();
 
     // Intentionally ignore any errors that arise.
     let completion_future = shell.complete(line, pos);
@@ -68,7 +70,7 @@ pub(crate) async fn complete_async(
             postprocess_completion_candidate(
                 candidate,
                 &completions.options,
-                working_dir.as_ref(),
+                &session,
                 completing_end_of_line,
                 quote_char,
             )
@@ -82,21 +84,15 @@ pub(crate) async fn complete_async(
 fn postprocess_completion_candidate(
     mut candidate: String,
     options: &brush_core::completion::ProcessingOptions,
-    working_dir: &Path,
+    session: &brush_core::vfs::Session,
     completing_end_of_line: bool,
     quote_char: Option<char>,
 ) -> String {
     if options.treat_as_filenames {
-        // Check if it's a directory.
+        // Check if it's a directory. The session resolves a relative candidate
+        // against its own working directory, so no joining is needed here.
         if !brush_core::sys::fs::ends_with_path_separator(&candidate) {
-            let candidate_path = Path::new(&candidate);
-            let abs_candidate_path = if candidate_path.is_absolute() {
-                PathBuf::from(candidate_path)
-            } else {
-                working_dir.join(candidate_path)
-            };
-
-            if abs_candidate_path.is_dir() {
+            if brush_core::namespace::is_dir(session, Path::new(&candidate)) {
                 // Use forward slash: backslash is the shell escape character.
                 candidate.push('/');
             }

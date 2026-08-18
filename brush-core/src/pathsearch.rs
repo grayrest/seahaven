@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::shell::fs::{is_dir, is_executable, to_virtual_path};
+use crate::namespace::{is_dir, is_executable, to_virtual_path};
 use crate::sys;
 
 /// Encapsulates the result of a path search.

@@ -3,6 +3,10 @@
 //! Most CLI tests have been moved to YAML format in tests/cases/brush/cli.yaml.
 //! This file contains tests that require dynamic value comparison.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "test fixtures are built on the host, which is the one place that is the point"
+)]
 // For now, only compile this for Unix-like platforms (Linux, macOS).
 #![cfg(unix)]
 #![cfg(test)]
