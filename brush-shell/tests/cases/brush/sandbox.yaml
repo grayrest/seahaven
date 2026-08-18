@@ -66,3 +66,45 @@ cases:
     args: ["-c", "echo hi > f.txt && cat < f.txt"]
     expected_exit_code: 0
     expected_stdout: "hi\n"
+
+  - name: "test predicates answer from the namespace, not the host"
+    # Before this landed, -e/-d/-r consulted the host directly: a restrictive
+    # policy leaked the host's existence map, and predicates were false for
+    # files that were plainly present in a mount.
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "[[ -e /etc/passwd ]] && echo leak; [[ -d /etc ]] && echo leak; [ -r /etc/passwd ] && echo leak; echo done"
+    expected_exit_code: 0
+    expected_stdout: "done\n"
+
+  - name: "test predicates see a mounted tree"
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "echo body > /work/f.txt; [[ -d /work && -e /work/f.txt && -f /work/f.txt && -r /work/f.txt && -s /work/f.txt ]] && echo yes"
+    expected_exit_code: 0
+    expected_stdout: "yes\n"
+
+  - name: "A read-only mount reports -w false"
+    args:
+      - "--mount"
+      - "/work:.:ro"
+      - "-c"
+      - "[[ -r /work/seed.txt ]] && echo readable; [[ -w /work/seed.txt ]] && echo writable; echo done"
+    expected_exit_code: 0
+    expected_stdout: "readable\ndone\n"
+    test_files:
+      - path: "seed.txt"
+        contents: "seeded\n"
+
+  - name: "-ef is false across the namespace boundary"
+    args:
+      - "--mount"
+      - "/work:."
+      - "-c"
+      - "echo x > /work/f.txt; [[ /work/f.txt -ef /work/f.txt ]] && echo same; [[ /work/f.txt -ef /etc/passwd ]] && echo leak; echo done"
+    expected_exit_code: 0
+    expected_stdout: "same\ndone\n"

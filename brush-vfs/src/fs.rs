@@ -28,6 +28,8 @@
 
 use std::path::PathBuf;
 
+pub use cap_primitives::fs::AccessModes;
+
 use crate::mount::{Mount, MountTable};
 use crate::path::VirtualPath;
 
@@ -167,6 +169,94 @@ impl OpenMode {
             .create_new(self.create_new)
             .truncate(self.truncate);
         options
+    }
+}
+
+/// What a `test` predicate can ask about a path.
+///
+/// Gathered in one probe rather than exposed as a `Metadata`, because the
+/// no-follow case cannot be answered by opening the file and so has no `std`
+/// metadata to hand back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileFacts {
+    /// Whether it is a directory.
+    pub is_dir: bool,
+    /// Whether it is a regular file.
+    pub is_file: bool,
+    /// Whether it is a symbolic link. Only ever true for a no-follow probe.
+    pub is_symlink: bool,
+    /// Size in bytes.
+    pub len: u64,
+    /// Whether it is a block device.
+    pub is_block_device: bool,
+    /// Whether it is a character device.
+    pub is_char_device: bool,
+    /// Whether it is a FIFO.
+    pub is_fifo: bool,
+    /// Whether it is a socket.
+    pub is_socket: bool,
+    /// Whether the set-user-ID bit is set.
+    pub is_setuid: bool,
+    /// Whether the set-group-ID bit is set.
+    pub is_setgid: bool,
+    /// Whether the sticky bit is set.
+    pub is_sticky: bool,
+    /// Owning user and group, which `-O` and `-G` compare.
+    pub uid_gid: (u32, u32),
+    /// Device and inode, which `-ef` compares.
+    ///
+    /// These are host values, so they leak the host's mount layout into a
+    /// namespace that otherwise hides it. Synthesising stable per-session
+    /// identifiers is an open question.
+    pub dev_ino: (u64, u64),
+}
+
+impl FileFacts {
+    fn from_metadata(metadata: &cap_std::fs::Metadata) -> Self {
+        let file_type = metadata.file_type();
+
+        #[cfg(unix)]
+        let (mode, dev, ino, uid, gid) = {
+            use cap_std::fs::MetadataExt as _;
+            (
+                metadata.mode(),
+                metadata.dev(),
+                metadata.ino(),
+                metadata.uid(),
+                metadata.gid(),
+            )
+        };
+        #[cfg(not(unix))]
+        let (mode, dev, ino, uid, gid) = (0u32, 0u64, 0u64, 0u32, 0u32);
+
+        #[cfg(unix)]
+        let (is_block_device, is_char_device, is_fifo, is_socket) = {
+            use cap_std::fs::FileTypeExt as _;
+            (
+                file_type.is_block_device(),
+                file_type.is_char_device(),
+                file_type.is_fifo(),
+                file_type.is_socket(),
+            )
+        };
+        #[cfg(not(unix))]
+        let (is_block_device, is_char_device, is_fifo, is_socket) = (false, false, false, false);
+
+        Self {
+            is_dir: file_type.is_dir(),
+            is_file: file_type.is_file(),
+            is_symlink: file_type.is_symlink(),
+            len: metadata.len(),
+            is_block_device,
+            is_char_device,
+            is_fifo,
+            is_socket,
+            is_setuid: mode & 0o4000 != 0,
+            is_setgid: mode & 0o2000 != 0,
+            is_sticky: mode & 0o1000 != 0,
+            uid_gid: (uid, gid),
+            dev_ino: (dev, ino),
+        }
     }
 }
 
@@ -368,25 +458,80 @@ impl Vfs {
     /// Whether `path` exists, following symlinks.
     #[must_use]
     pub fn exists(&self, path: &VirtualPath) -> bool {
-        self.locate_follow(path).is_ok_and(|located| {
+        self.facts(path, true).is_some()
+    }
+
+    /// Kernel-evaluated accessibility, as `access(2)` reports it.
+    ///
+    /// Mode bits are deliberately not consulted: they give the wrong answer for
+    /// root and under ACLs, and `test -w` has to agree with what a write would
+    /// actually do. A read-only mount is also unwritable regardless of what the
+    /// host permits, since the mount is the narrower authority.
+    #[must_use]
+    pub fn access(&self, path: &VirtualPath, modes: AccessModes) -> bool {
+        let Ok(located) = self.locate_follow(path) else {
+            return false;
+        };
+
+        if modes.writable && !located.mount.access().is_writable() {
+            return false;
+        }
+
+        let Ok(dir) = located
+            .mount
+            .dir()
+            .try_clone()
+            .map(cap_std::fs::Dir::into_std_file)
+        else {
+            return false;
+        };
+
+        cap_primitives::fs::access(
+            &dir,
+            &located.relative,
+            cap_primitives::fs::AccessType::Access(modes),
+            cap_primitives::fs::FollowSymlinks::Yes,
+        )
+        .is_ok()
+    }
+
+    /// Everything a `test` predicate needs about a path, or `None` if it names
+    /// nothing in this namespace.
+    ///
+    /// `None` covers unmounted paths and paths the grammar rejects as well as
+    /// missing ones, because a predicate must answer *false* for all three.
+    /// bash reports a missing file as false rather than as an error, and an
+    /// unmounted path is missing as far as the sandbox is concerned.
+    #[must_use]
+    pub fn facts(&self, path: &VirtualPath, follow: bool) -> Option<FileFacts> {
+        let located = if follow {
+            self.locate_follow(path).ok()?
+        } else {
+            self.locate_nofollow(path).ok()?
+        };
+
+        // An empty relative path is the mount point itself, which the `Dir`
+        // handle already names -- `metadata("")` would simply fail, which is why
+        // `[[ -d /work ]]` was false for a mounted directory.
+        let metadata = if located.relative.as_os_str().is_empty() {
+            located.mount.dir().dir_metadata().ok()?
+        } else if follow {
+            located.mount.dir().metadata(&located.relative).ok()?
+        } else {
             located
                 .mount
                 .dir()
                 .symlink_metadata(&located.relative)
-                .is_ok()
-        })
+                .ok()?
+        };
+
+        Some(FileFacts::from_metadata(&metadata))
     }
 
     /// Whether `path` is a symlink, without following it.
     #[must_use]
     pub fn is_symlink(&self, path: &VirtualPath) -> bool {
-        self.locate_nofollow(path).is_ok_and(|located| {
-            located
-                .mount
-                .dir()
-                .symlink_metadata(&located.relative)
-                .is_ok_and(|m| m.is_symlink())
-        })
+        self.facts(path, false).is_some_and(|f| f.is_symlink)
     }
 
     /// Reads a symlink's target verbatim, without resolving it.
@@ -706,6 +851,42 @@ mod tests {
                 .open_with(&vp("/ro/readme.txt"), OpenMode::read())
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn the_mount_point_itself_has_facts() {
+        // Regression: the mount root's relative path is empty, and
+        // `metadata("")` fails -- so `[[ -d /work ]]` was false for a directory
+        // that plainly existed.
+        let f = fixture();
+        let facts = f
+            .vfs
+            .facts(&vp("/work"), true)
+            .expect("mount root has facts");
+        assert!(facts.is_dir);
+        assert!(f.vfs.exists(&vp("/work")));
+    }
+
+    #[test]
+    fn facts_are_absent_for_unmounted_paths() {
+        // The semantic every `test` predicate depends on: unmounted is not an
+        // error, it is simply nothing, so predicates answer false as bash does
+        // for a missing file.
+        let f = fixture();
+        assert!(f.vfs.facts(&vp("/etc/passwd"), true).is_none());
+        assert!(f.vfs.facts(&vp("/etc"), true).is_none());
+    }
+
+    #[test]
+    fn a_read_only_mount_is_never_writable() {
+        let f = fixture();
+        let w = AccessModes {
+            readable: false,
+            writable: true,
+            executable: false,
+        };
+        assert!(!f.vfs.access(&vp("/ro/readme.txt"), w));
+        assert!(f.vfs.access(&vp("/work/hello.txt"), w));
     }
 
     #[test]

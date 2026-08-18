@@ -4,10 +4,7 @@ use std::path::Path;
 use crate::{
     ExecutionParameters, Shell, ShellFd, arithmetic, env, error, escape, expansion, extensions,
     namedoptions, patterns,
-    sys::{
-        fs::{MetadataExt, PathExt},
-        users,
-    },
+    sys::users,
     variables::{self, ArrayLiteral},
 };
 
@@ -77,53 +74,43 @@ pub(crate) fn apply_unary_predicate_to_str(
     match op {
         ast::UnaryPredicate::StringHasNonZeroLength => Ok(!operand.is_empty()),
         ast::UnaryPredicate::StringHasZeroLength => Ok(operand.is_empty()),
-        ast::UnaryPredicate::FileExists => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists())
-        }
+        ast::UnaryPredicate::FileExists => Ok(probe(shell, operand, true).is_some()),
         ast::UnaryPredicate::FileExistsAndIsBlockSpecialFile => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_block_device())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_block_device))
         }
         ast::UnaryPredicate::FileExistsAndIsCharSpecialFile => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_char_device())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_char_device))
         }
         ast::UnaryPredicate::FileExistsAndIsDir => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.is_dir())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_dir))
         }
         ast::UnaryPredicate::FileExistsAndIsRegularFile => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.is_file())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_file))
         }
         ast::UnaryPredicate::FileExistsAndIsSetgid => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_setgid())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_setgid))
         }
         ast::UnaryPredicate::FileExistsAndIsSymlink => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.is_symlink())
+            // No-follow: the question is whether this path *is* a link.
+            Ok(probe(shell, operand, false).is_some_and(|f| f.is_symlink))
         }
         ast::UnaryPredicate::FileExistsAndHasStickyBit => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_sticky_bit())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_sticky))
         }
         ast::UnaryPredicate::FileExistsAndIsFifo => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_fifo())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_fifo))
         }
-        ast::UnaryPredicate::FileExistsAndIsReadable => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.readable())
-        }
+        ast::UnaryPredicate::FileExistsAndIsReadable => Ok(accessible(
+            shell,
+            operand,
+            brush_vfs::AccessModes {
+                readable: true,
+                writable: false,
+                executable: false,
+            },
+        )),
         ast::UnaryPredicate::FileExistsAndIsNotZeroLength => {
-            let path = shell.absolute_path(Path::new(operand));
-            if let Ok(metadata) = path.metadata() {
-                Ok(metadata.len() > 0)
-            } else {
-                Ok(false)
-            }
+            Ok(probe(shell, operand, true).is_some_and(|f| f.len > 0))
         }
         ast::UnaryPredicate::FdIsOpenTerminal => {
             // Trim whitespace before parsing, matching bash behavior.
@@ -138,41 +125,39 @@ pub(crate) fn apply_unary_predicate_to_str(
             }
         }
         ast::UnaryPredicate::FileExistsAndIsSetuid => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_setuid())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_setuid))
         }
-        ast::UnaryPredicate::FileExistsAndIsWritable => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.writable())
-        }
-        ast::UnaryPredicate::FileExistsAndIsExecutable => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.executable())
-        }
+        ast::UnaryPredicate::FileExistsAndIsWritable => Ok(accessible(
+            shell,
+            operand,
+            brush_vfs::AccessModes {
+                readable: false,
+                writable: true,
+                executable: false,
+            },
+        )),
+        ast::UnaryPredicate::FileExistsAndIsExecutable => Ok(accessible(
+            shell,
+            operand,
+            brush_vfs::AccessModes {
+                readable: false,
+                writable: false,
+                executable: true,
+            },
+        )),
         ast::UnaryPredicate::FileExistsAndOwnedByEffectiveGroupId => {
-            let path = shell.absolute_path(Path::new(operand));
-            if !path.exists() {
-                return Ok(false);
-            }
-
-            let md = path.metadata()?;
-            Ok(md.gid() == users::get_effective_gid()?)
+            let gid = users::get_effective_gid()?;
+            Ok(probe(shell, operand, true).is_some_and(|f| f.uid_gid.1 == gid))
         }
         ast::UnaryPredicate::FileExistsAndModifiedSinceLastRead => {
             error::unimp("unary extended test predicate: FileExistsAndModifiedSinceLastRead")
         }
         ast::UnaryPredicate::FileExistsAndOwnedByEffectiveUserId => {
-            let path = shell.absolute_path(Path::new(operand));
-            if !path.exists() {
-                return Ok(false);
-            }
-
-            let md = path.metadata()?;
-            Ok(md.uid() == users::get_effective_uid()?)
+            let uid = users::get_effective_uid()?;
+            Ok(probe(shell, operand, true).is_some_and(|f| f.uid_gid.0 == uid))
         }
         ast::UnaryPredicate::FileExistsAndIsSocket => {
-            let path = shell.absolute_path(Path::new(operand));
-            Ok(path.exists_and_is_socket())
+            Ok(probe(shell, operand, true).is_some_and(|f| f.is_socket))
         }
         ast::UnaryPredicate::ShellOptionEnabled => {
             let shopt_name = operand;
@@ -288,7 +273,9 @@ async fn apply_binary_predicate(
                     .await;
             }
 
-            files_refer_to_same_device_and_inode_numbers(shell, left, right)
+            Ok(files_refer_to_same_device_and_inode_numbers(
+                shell, left, right,
+            ))
         }
         ast::BinaryPredicate::LeftFileIsNewerOrExistsWhenRightDoesNot => {
             let left = expansion::basic_expand_word(shell, params, left).await?;
@@ -480,9 +467,9 @@ pub(crate) fn apply_binary_predicate_to_strs(
     shell: &Shell<impl extensions::ShellExtensions>,
 ) -> Result<bool, error::Error> {
     match op {
-        ast::BinaryPredicate::FilesReferToSameDeviceAndInodeNumbers => {
-            files_refer_to_same_device_and_inode_numbers(shell, left, right)
-        }
+        ast::BinaryPredicate::FilesReferToSameDeviceAndInodeNumbers => Ok(
+            files_refer_to_same_device_and_inode_numbers(shell, left, right),
+        ),
         ast::BinaryPredicate::LeftFileIsNewerOrExistsWhenRightDoesNot => {
             left_file_is_newer_or_exists_when_right_does_not(shell, left, right)
         }
@@ -598,15 +585,45 @@ fn files_refer_to_same_device_and_inode_numbers(
     shell: &Shell<impl extensions::ShellExtensions>,
     left: impl AsRef<str>,
     right: impl AsRef<str>,
-) -> Result<bool, error::Error> {
-    let (l_path, r_path) = (
-        shell.absolute_path(Path::new(left.as_ref())),
-        shell.absolute_path(Path::new(right.as_ref())),
-    );
+) -> bool {
+    // Both operands must resolve inside the namespace and be readable; an
+    // unmounted path is simply not the same file as anything.
+    let (Some(left), Some(right)) = (
+        probe(shell, left.as_ref(), true),
+        probe(shell, right.as_ref(), true),
+    ) else {
+        return false;
+    };
 
-    if !l_path.readable() || !r_path.readable() {
-        return Ok(false);
-    }
+    left.dev_ino == right.dev_ino
+}
 
-    Ok(l_path.get_device_and_inode()? == r_path.get_device_and_inode()?)
+/// Facts about `operand` as a `test` predicate sees it, or `None` when the path
+/// names nothing in the shell's namespace.
+///
+/// `None` covers three cases that a predicate must treat identically: the file
+/// is missing, the path is unmounted, or the virtual grammar rejects it. bash
+/// reports a missing file as *false*, not as an error, and an unmounted path is
+/// missing as far as the sandbox is concerned. Returning `Err` here would turn
+/// `[[ -e /etc/passwd ]]` into a status-2 failure where bash gives status 1.
+fn probe<SE: extensions::ShellExtensions>(
+    shell: &Shell<SE>,
+    operand: &str,
+    follow: bool,
+) -> Option<brush_vfs::FileFacts> {
+    let path = shell.absolute_path(Path::new(operand));
+    let virtual_path = shell.to_virtual_path(&path).ok()?;
+    shell.session().vfs().facts(&virtual_path, follow)
+}
+
+/// Whether `operand` is accessible in the given modes.
+fn accessible<SE: extensions::ShellExtensions>(
+    shell: &Shell<SE>,
+    operand: &str,
+    modes: brush_vfs::AccessModes,
+) -> bool {
+    let path = shell.absolute_path(Path::new(operand));
+    shell
+        .to_virtual_path(&path)
+        .is_ok_and(|p| shell.session().vfs().access(&p, modes))
 }
