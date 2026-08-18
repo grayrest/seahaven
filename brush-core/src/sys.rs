@@ -3,20 +3,21 @@
 //! # Namespace exemption
 //!
 //! This is the only part of `brush-core` allowed to reach the host filesystem
-//! directly, and the exemption is narrow by construction: nothing here decides
-//! *whether* a path may be named. It answers questions the namespace itself
-//! has to ask -- the mode bits behind a `Metadata`, the process's own
-//! descriptor table -- and the shell reaches it only through `brush-vfs` or
-//! through the handful of platform helpers that take no path at all.
+//! directly, and the exemption is written per call site rather than over the
+//! module. It used to be a blanket `#![allow]` across the whole tree, which is
+//! a poor way to state a narrow rule: it made two dead helpers that took a
+//! caller-supplied path and called `metadata()` on it invisible for as long as
+//! they existed, which is exactly the shape the ban exists to catch.
+//!
+//! On Unix the whole exemption is three sites: the null device, which is in no
+//! mount and must work under every policy, and `/proc/self/fd`, which is
+//! process introspection wearing a filesystem's clothes. Nothing here decides
+//! *whether* a path may be named.
 //!
 //! Everything above this module goes through the namespace; see the ban list
 //! in `clippy.toml` and `cargo xtask check ban`.
 
 #![allow(unused)]
-#![allow(
-    clippy::disallowed_methods,
-    reason = "the platform layer is where host access is implemented; see the module docs"
-)]
 
 #[cfg(unix)]
 pub(crate) mod unix;

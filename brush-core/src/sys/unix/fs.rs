@@ -151,6 +151,13 @@ fn confstr(name: nix::libc::c_int) -> Result<Option<std::ffi::OsString>, std::io
 
 /// Opens a null file that will discard all I/O.
 pub fn open_null_file() -> Result<std::fs::File, error::Error> {
+    // The null device, opened by host path because it is not in any mount and
+    // must work under every policy. Taken once at startup and held; see
+    // `openfiles::null`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the null device is not in the namespace and cannot be"
+    )]
     let f = std::fs::File::options()
         .read(true)
         .write(true)

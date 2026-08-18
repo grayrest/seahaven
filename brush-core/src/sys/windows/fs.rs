@@ -86,6 +86,13 @@ pub fn split_paths<T: AsRef<OsStr> + ?Sized>(s: &T) -> std::env::SplitPaths<'_> 
 
 /// Opens a null file that will discard all I/O.
 pub fn open_null_file() -> Result<std::fs::File, error::Error> {
+    // As on Unix: the null device is not in any mount and must work under every
+    // policy. `allow` rather than `expect` only because this file is not
+    // compiled on the machine the narrowing was done on.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the null device is not in the namespace and cannot be"
+    )]
     let f = std::fs::File::options()
         .read(true)
         .write(true)

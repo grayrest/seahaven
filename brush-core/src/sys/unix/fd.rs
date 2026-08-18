@@ -51,6 +51,12 @@ cfg_if::cfg_if! {
     target_os = "openbsd"
 ))]
 pub fn try_iter_open_fds() -> impl Iterator<Item = (ShellFd, openfiles::OpenFile)> {
+    // Process introspection wearing a filesystem's clothes; see the exemption
+    // written out above this function.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "enumerates this process's own descriptors, granting no new authority"
+    )]
     std::fs::read_dir(FD_DIR_PATH)
         .into_iter()
         .flatten()

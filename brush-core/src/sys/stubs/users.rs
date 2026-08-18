@@ -6,6 +6,12 @@ pub(crate) fn get_user_home_dir(_username: &str) -> Option<PathBuf> {
 }
 
 pub(crate) fn get_current_user_home_dir() -> Option<PathBuf> {
+    // The host's idea of a home directory, which D31 replaces with a
+    // per-project mount. Reached only when `HOME` is unset.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "platform fallback; the shell prefers HOME, which policy synthesizes"
+    )]
     std::env::home_dir()
 }
 
