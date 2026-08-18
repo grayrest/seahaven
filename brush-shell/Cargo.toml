@@ -44,6 +44,14 @@ path = "tests/interactive_tests.rs"
 name = "brush-completion-tests"
 path = "tests/completion_tests.rs"
 
+# Not part of the default test run: it confines the process irreversibly, so it
+# has to own its binary, and it needs a Linux 6.2+ kernel. Run it with
+# `cargo test -p brush-shell --features landlock-tests --test brush-landlock-tests`.
+[[test]]
+name = "brush-landlock-tests"
+path = "tests/landlock_tests.rs"
+harness = false
+
 [[bench]]
 name = "shell"
 path = "benches/shell.rs"
@@ -71,6 +79,11 @@ experimental-parser = [
     "brush-parser/winnow-parser",
 ]
 schema = ["dep:schemars"]
+
+# Opts into the Landlock completeness test. Off by default: it needs a Linux
+# 6.2+ kernel and it confines the process it runs in, so it must not be swept
+# into an ordinary `cargo test`.
+landlock-tests = []
 
 [lints]
 workspace = true
@@ -141,6 +154,9 @@ test-with = { version = "0.16.0", default-features = false, features = [
 version-compare = "0.2.1"
 walkdir = "2.5.0"
 which = "8.0.2"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+landlock = "0.4.3"
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { version = "0.31.2" }

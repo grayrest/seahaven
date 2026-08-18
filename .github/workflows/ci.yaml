@@ -423,6 +423,45 @@ jobs:
         if: matrix.rust-version == 'stable'
         run: cargo xtask check ban
 
+  # Prove the namespace is complete, using the kernel rather than a lint.
+  #
+  # The ban in clippy.toml shows that no source line reaches the host outside
+  # the exemptions. It cannot show that the exemptions are narrow enough, or
+  # that a dependency does not reach past them. Landlock confines the test
+  # process to the mount roots, so anything that did not route through
+  # brush-vfs is refused by the kernel and the case fails.
+  #
+  # ubuntu-24.04 runs a 6.8 kernel; the test requires Landlock ABI 3 (6.2),
+  # which is the first to gate truncation, and skips rather than fails below
+  # that. Pinned rather than -latest so a runner image change cannot silently
+  # turn the test into a no-op.
+  landlock:
+    name: "Landlock completeness test"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Enable cargo cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Report the kernel's Landlock ABI
+        run: |
+          uname -r
+          cat /sys/kernel/security/lsm 2>/dev/null || echo "no lsm list"
+
+      - name: Run the completeness test
+        run: |
+          cargo test -p brush-shell --features landlock-tests \
+            --test brush-landlock-tests -- --nocapture
+
   # Check for unneeded dependencies.
   check-deps:
     name: "Check for unneeded dependencies"
