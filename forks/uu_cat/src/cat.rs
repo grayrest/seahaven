@@ -11,7 +11,6 @@ use crate::platform::is_safe_overwrite;
 use clap::{Arg, ArgAction, Command};
 use memchr::memchr2;
 use std::ffi::OsString;
-use std::fs::{File, metadata};
 use std::io::{self, BufWriter, ErrorKind, IsTerminal, Read, Write};
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::fd::AsFd;
@@ -383,7 +382,7 @@ fn cat_path(path: &OsString, options: &OutputOptions, state: &mut OutputState) -
         #[cfg(unix)]
         InputType::Socket => Err(CatError::NoSuchDeviceOrAddress),
         _ => {
-            let file = File::open(path)?;
+            let file = brush_vfs::ambient::open(path)?;
             if !is_safe_overwrite(&file, &io::stdout()) {
                 return Err(CatError::OutputIsInput);
             }
@@ -439,7 +438,7 @@ fn get_input_type(path: &OsString) -> CatResult<InputType> {
         return Ok(InputType::StdIn);
     }
 
-    let ft = match metadata(path) {
+    let ft = match brush_vfs::ambient::metadata(path) {
         Ok(md) => md.file_type(),
         Err(e) => {
             if let Some(raw_error) = e.raw_os_error() {
