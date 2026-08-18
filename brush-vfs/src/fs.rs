@@ -760,6 +760,97 @@ impl Vfs {
         })
     }
 
+    /// Removes a directory and everything beneath it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if the path is unmounted, the mount is
+    /// read-only, or removal fails.
+    pub fn remove_dir_all(&self, path: &VirtualPath) -> std::io::Result<()> {
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            located.mount.dir().remove_dir_all(&located.relative)
+        })
+    }
+
+    /// Renames a file or directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if either path is unmounted, if either mount
+    /// is read-only, or if the rename fails. Renaming across a mount boundary
+    /// returns `CrossesDevices`: a mount boundary *is* a filesystem boundary as
+    /// far as `renameat` is concerned, and reporting it as one lets callers use
+    /// the copy-then-delete fallback they already have for `EXDEV` rather than
+    /// learn a new failure. Emulating the move here would silently turn an
+    /// atomic operation into one that is not.
+    pub fn rename(&self, from: &VirtualPath, to: &VirtualPath) -> std::io::Result<()> {
+        let from = self.locate(from, false)?;
+        let to = self.locate(to, false)?;
+
+        if !std::ptr::eq(from.mount, to.mount) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::CrossesDevices,
+                format!(
+                    "rename across a mount boundary: {from} to {to}",
+                    from = from.virtual_path,
+                    to = to.virtual_path
+                ),
+            ));
+        }
+
+        Self::require_writable(&from)?;
+        Self::require_writable(&to)?;
+        from.mount
+            .dir()
+            .rename(&from.relative, to.mount.dir(), &to.relative)
+    }
+
+    /// Creates a symbolic link at `path` pointing at `target`.
+    ///
+    /// The target is validated, and rewritten when it has to be. An absolute
+    /// target names a place in *this* namespace, but the link is a host artifact
+    /// that outlives the run -- so it is stored relative to the link, and then
+    /// means the same thing whether it is followed inside the sandbox or by
+    /// whatever copies the workspace afterwards. A target in another mount
+    /// cannot be expressed that way and is refused. `read_link` reports what was
+    /// stored, so it reports the rewritten form.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::Error`] if the link's path is unmounted or read-only,
+    /// if the target does not name anywhere in this namespace, if it lies in
+    /// another mount, or if creation fails.
+    pub fn symlink(&self, path: &VirtualPath, target: &str) -> std::io::Result<()> {
+        let link = self.locate(path, false)?;
+        Self::require_writable(&link)?;
+
+        let stored = if target.starts_with('/') {
+            let resolved = VirtualPath::new(target).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
+            })?;
+            let landing = self.locate_exact(&resolved)?;
+            if !std::ptr::eq(landing.mount, link.mount) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("symlink target {resolved} is in another mount"),
+                ));
+            }
+            relative_from(&link.relative, &landing.relative)
+        } else {
+            // A relative target is already host-meaningful. It still has to stay
+            // inside the namespace once followed, which is the same check the
+            // walk would apply, made here so the link is never written at all.
+            let parent = link.virtual_path.parent().unwrap_or_else(VirtualPath::root);
+            parent.resolve(target).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
+            })?;
+            target.to_owned()
+        };
+
+        cap_fs_ext::DirExt::symlink(link.mount.dir(), &stored, &link.relative)
+    }
+
     fn require_writable(located: &Located<'_>) -> std::io::Result<()> {
         if located.mount.access().is_writable() {
             Ok(())
@@ -776,6 +867,34 @@ impl Vfs {
 /// filesystem" even for a link this namespace can resolve perfectly well. The
 /// underlying primitive still validates the path *to* the link against the
 /// mount root; only the returned contents are raw, which is what D42 needs.
+/// Expresses `target` relative to the directory holding `link`, both given
+/// relative to one mount's root.
+fn relative_from(link: &std::path::Path, target: &std::path::Path) -> String {
+    let link_dir: Vec<_> = link
+        .parent()
+        .map(|p| p.components().collect())
+        .unwrap_or_default();
+    let target: Vec<_> = target.components().collect();
+
+    let shared = link_dir
+        .iter()
+        .zip(&target)
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let ups = std::iter::repeat_n("..", link_dir.len() - shared);
+    let downs = target[shared..]
+        .iter()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned());
+
+    let parts: Vec<String> = ups.map(ToOwned::to_owned).chain(downs).collect();
+    if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
+    }
+}
+
 fn read_link_contents(mount: &Mount, relative: &std::path::Path) -> std::io::Result<PathBuf> {
     let dir = mount.dir().try_clone()?.into_std_file();
     cap_primitives::fs::read_link_contents(&dir, relative)
@@ -1099,6 +1218,113 @@ mod tests {
             "the grammar reserves this name"
         );
         assert_eq!(read(&f.vfs, "/work/res").unwrap(), "reserved");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_absolute_symlink_target_is_stored_relative_to_the_link() {
+        // The link outlives the run, so it has to mean the same thing to
+        // whatever copies the workspace afterwards.
+        let f = fixture();
+        f.vfs
+            .symlink(&vp("/work/sub/link.txt"), "/work/hello.txt")
+            .expect("same mount");
+
+        assert_eq!(
+            f.vfs.read_link(&vp("/work/sub/link.txt")).unwrap(),
+            std::path::PathBuf::from("../hello.txt"),
+            "readlink reports what was stored, which is the rewritten form"
+        );
+        assert_eq!(read(&f.vfs, "/work/sub/link.txt").unwrap(), "hello");
+
+        // And the host agrees, which is the whole point.
+        let host = work_host(&f).join("sub").join("link.txt");
+        assert_eq!(std::fs::read_to_string(host).unwrap(), "hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_target_in_another_mount_is_refused() {
+        // Expressible virtually, not expressible relatively on the host.
+        let f = fixture();
+        let err = f
+            .vfs
+            .symlink(&vp("/work/cross.txt"), "/ro/readme.txt")
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_target_that_would_escape_is_refused_before_it_is_written() {
+        let f = fixture();
+        let err = f
+            .vfs
+            .symlink(&vp("/work/evil.txt"), "../../../../etc/passwd")
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(
+            !work_host(&f).join("evil.txt").exists(),
+            "a refused link must not reach the host at all"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cannot_be_created_in_a_read_only_mount() {
+        let f = fixture();
+        let err = f
+            .vfs
+            .symlink(&vp("/ro/link.txt"), "readme.txt")
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn rename_within_a_mount_moves_the_file() {
+        let f = fixture();
+        f.vfs
+            .rename(&vp("/work/hello.txt"), &vp("/work/sub/moved.txt"))
+            .expect("same mount");
+        assert_eq!(read(&f.vfs, "/work/sub/moved.txt").unwrap(), "hello");
+        assert!(f.vfs.facts(&vp("/work/hello.txt"), false).is_none());
+    }
+
+    #[test]
+    fn rename_across_a_mount_boundary_reports_crossing_devices() {
+        // So that callers use the copy-then-delete fallback they already have
+        // for EXDEV rather than learn a new failure.
+        let f = fixture();
+        let err = f
+            .vfs
+            .rename(&vp("/work/hello.txt"), &vp("/ro/hello.txt"))
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::CrossesDevices);
+    }
+
+    #[test]
+    fn rename_into_a_read_only_mount_is_refused() {
+        let f = fixture();
+        let mounts = MountTable::builder()
+            .mount("/work", work_host(&f), Access::ReadOnly)
+            .expect("mount")
+            .build()
+            .expect("build");
+        let ro = Vfs::new(mounts);
+        let err = ro
+            .rename(&vp("/work/hello.txt"), &vp("/work/other.txt"))
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn remove_dir_all_respects_the_mount_s_access() {
+        let f = fixture();
+        assert!(f.vfs.remove_dir_all(&vp("/work/sub")).is_ok());
+        assert!(f.vfs.facts(&vp("/work/sub"), false).is_none());
+
+        let err = f.vfs.remove_dir_all(&vp("/ro")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[cfg(unix)]

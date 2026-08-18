@@ -26,11 +26,11 @@ disallowed-methods = [
   { path = "std::fs::read_link", reason = "use brush_vfs::Vfs::read_link" },
   { path = "std::fs::read_to_string", reason = "open through brush_vfs::Vfs" },
   { path = "std::fs::remove_dir", reason = "use brush_vfs::Vfs::remove_dir" },
-  { path = "std::fs::remove_dir_all", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::remove_dir_all", reason = "use brush_vfs::Vfs::remove_dir_all" },
   { path = "std::fs::remove_file", reason = "use brush_vfs::Vfs::remove_file" },
-  { path = "std::fs::rename", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::rename", reason = "use brush_vfs::Vfs::rename" },
   { path = "std::fs::set_permissions", reason = "not expressible in the namespace yet" },
-  { path = "std::fs::soft_link", reason = "not expressible in the namespace yet" },
+  { path = "std::fs::soft_link", reason = "use brush_vfs::Vfs::symlink" },
   { path = "std::fs::symlink_metadata", reason = "use brush_vfs::Vfs::facts with follow=false" },
   { path = "std::fs::write", reason = "open through brush_vfs::Vfs" },
 
@@ -63,7 +63,7 @@ disallowed-methods = [
   { path = "std::path::absolute", reason = "use Session::resolve" },
 
   # The unix extension surface. `std::fs` is not the only door.
-  { path = "std::os::unix::fs::symlink", reason = "links are validated at creation; see D26" },
+  { path = "std::os::unix::fs::symlink", reason = "use brush_vfs::Vfs::symlink, which validates the target" },
   { path = "std::os::unix::fs::chown", reason = "not expressible in the namespace yet" },
   { path = "std::os::unix::fs::lchown", reason = "not expressible in the namespace yet" },
   { path = "std::os::unix::fs::chroot", reason = "the namespace is the confinement, not chroot" },
@@ -74,7 +74,7 @@ disallowed-methods = [
   { path = "nix::unistd::chdir", reason = "the namespace's cwd is per-session" },
   { path = "nix::unistd::getcwd", reason = "use Session::cwd" },
   { path = "nix::unistd::unlink", reason = "use brush_vfs::Vfs::remove_file" },
-  { path = "nix::unistd::symlinkat", reason = "links are validated at creation; see D26" },
+  { path = "nix::unistd::symlinkat", reason = "use brush_vfs::Vfs::symlink, which validates the target" },
   { path = "nix::sys::stat::stat", reason = "use brush_vfs::Vfs::facts" },
   { path = "nix::sys::stat::lstat", reason = "use brush_vfs::Vfs::facts with follow=false" },
   { path = "nix::fcntl::readlink", reason = "use brush_vfs::Vfs::read_link" },
