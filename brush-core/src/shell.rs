@@ -78,6 +78,15 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
     #[cfg_attr(feature = "serde", serde(skip))]
     session: brush_vfs::Session,
 
+    /// The closed-world policy governing external process execution (D2).
+    ///
+    /// Skipped by serde for the same reason as `session`: it names the
+    /// launcher's host binary, which is process state rather than data. A
+    /// deserialized shell fails closed (`Sealed`) and a caller must reinstall a
+    /// policy, matching the session's empty-namespace default.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    external_execution: crate::execpolicy::ExternalExecution,
+
     /// The shell environment, containing shell variables.
     env: ShellEnvironment,
 
@@ -163,6 +172,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
             open_files: self.open_files.clone(),
             working_dir: self.working_dir.clone(),
             session: self.session.clone(),
+            external_execution: self.external_execution.clone(),
             env: self.env.clone(),
             funcs: self.funcs.clone(),
             options: self.options.clone(),
@@ -218,6 +228,21 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     /// Mutable access to the session, for changing its working directory.
     pub const fn session_mut(&mut self) -> &mut brush_vfs::Session {
         &mut self.session
+    }
+
+    /// The closed-world policy governing external process execution (D2).
+    pub(crate) const fn external_execution(&self) -> &crate::execpolicy::ExternalExecution {
+        &self.external_execution
+    }
+
+    /// Installs the closed-world execution policy.
+    ///
+    /// Independent of the namespace: `set_mounts` decides what a running process
+    /// can *name*, this decides what may be *run*. A launcher confining the
+    /// filesystem to a project tree also seals external execution to the bundled
+    /// utilities by calling both.
+    pub fn set_external_execution(&mut self, policy: crate::execpolicy::ExternalExecution) {
+        self.external_execution = policy;
     }
 
     /// Replaces the sandbox namespace.
@@ -294,6 +319,9 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
                 brush_vfs::Policy::identity()
                     .map_err(|e| error::ErrorKind::from(std::io::Error::other(e.to_string())))?,
             ))),
+            // The identity namespace is an open world: behave as an ordinary
+            // bash until a launcher installs a closed-world policy.
+            external_execution: crate::execpolicy::ExternalExecution::Open,
             builtins: options.builtins,
             parser_impl: options.parser,
             key_bindings: options.key_bindings,

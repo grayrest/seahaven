@@ -61,6 +61,10 @@ pub enum ErrorKind {
     #[error("command not found: {0}")]
     CommandNotFound(String),
 
+    /// External execution was refused by the closed-world policy (D2).
+    #[error("{0}: external execution is disabled")]
+    ExternalExecutionRefused(String),
+
     /// Not a builtin.
     #[error("not a shell builtin: {0}")]
     BuiltinNotFound(String),
@@ -356,6 +360,9 @@ impl From<&ErrorKind> for results::ExecutionExitCode {
     fn from(value: &ErrorKind) -> Self {
         match value {
             ErrorKind::CommandNotFound(..) => Self::NotFound,
+            // The program exists as a name, but policy refuses to run it -- the
+            // "found but cannot execute" class (126), not "not found" (127).
+            ErrorKind::ExternalExecutionRefused(..) => Self::CannotExecute,
             ErrorKind::Unimplemented(..) | ErrorKind::UnimplementedAndTracked(..) => {
                 Self::Unimplemented
             }

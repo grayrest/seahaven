@@ -15,6 +15,7 @@ use sys::commands::{CommandExt, CommandFdInjectionExt, CommandFgControlExt};
 use crate::{
     ErrorKind, ExecutionControlFlow, ExecutionExitCode, ExecutionParameters, ExecutionResult,
     Shell, ShellFd, builtins, commands, env, error, escape,
+    execpolicy,
     extensions::{self, ShellExtensions},
     functions,
     interp::{self, Execute, ProcessGroupPolicy},
@@ -177,14 +178,28 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     args: &[S],
     empty_env: bool,
 ) -> Result<std::process::Command, error::Error> {
-    // The name the namespace resolved, translated into a host path. Without
-    // this the namespace's approval of a *virtual* path authorizes running the
-    // host's file at the same spelling -- so under `--mount /:jail` every
-    // command ran the host's binary rather than the mounted one.
-    let host_command = context
-        .shell
-        .host_path_for_execution(command_name)
-        .map_err(|_| error::ErrorKind::CommandNotFound(command_name.to_owned()))?;
+    // The closed-world predicate (D2). Under an open world this is a no-op that
+    // routes to the namespace; under a closed world the only spawn permitted is
+    // the launcher re-invoking itself for a bundled command. `argv1` is the
+    // first element after the program, which is what lands in the child's
+    // `argv[1]` -- `argv[0]` is set separately below.
+    let argv1 = args.first().and_then(|a| a.as_ref().to_str());
+    let host_command = match context.shell.external_execution().permit(command_name, argv1) {
+        // The name the namespace resolved, translated into a host path. Without
+        // this the namespace's approval of a *virtual* path authorizes running
+        // the host's file at the same spelling -- so under `--mount /:jail`
+        // every command ran the host's binary rather than the mounted one.
+        Some(execpolicy::ExecPermit::ViaNamespace) => context
+            .shell
+            .host_path_for_execution(command_name)
+            .map_err(|_| error::ErrorKind::CommandNotFound(command_name.to_owned()))?,
+        // The trusted launcher lives outside the namespace, so it is run by its
+        // known host path rather than resolved through the vfs.
+        Some(execpolicy::ExecPermit::TrustedLauncher(host)) => host,
+        None => {
+            return Err(error::ErrorKind::ExternalExecutionRefused(command_name.to_owned()).into());
+        }
+    };
     let mut cmd = std::process::Command::new(&host_command);
 
     // Override argv[0].
@@ -408,11 +423,18 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
 
         // A name containing a separator names a file directly rather than
         // something to search for -- but it still has to be a file the namespace
-        // has, which this branch did not check at all.
+        // has, which this branch did not check at all. The one exception is the
+        // trusted launcher, whose binary lives outside the namespace on purpose
+        // (it delivers the bundled utilities); the closed-world predicate in
+        // `compose_std_command` still enforces the dispatch flag before it runs.
         if sys::fs::contains_path_separator(&self.command_name)
             && !self
                 .shell
                 .is_executable_in_namespace(Path::new(&self.command_name))
+            && !self
+                .shell
+                .external_execution()
+                .names_launcher(&self.command_name)
         {
             let last_arg = Self::take_last_arg(&self.args);
             self.shell.update_last_arg_variable(last_arg);

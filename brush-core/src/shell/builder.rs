@@ -244,6 +244,8 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
             working_dir: PathBuf::default(),
             // Fail closed: an unconfigured shell reaches nothing.
             session: brush_vfs::Session::default(),
+            // And runs nothing external until a policy says which world it is in.
+            external_execution: crate::execpolicy::ExternalExecution::Sealed,
             env: env::ShellEnvironment::default(),
             funcs: functions::FunctionEnv::default(),
             options: options::RuntimeOptions::default(),
