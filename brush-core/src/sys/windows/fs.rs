@@ -45,14 +45,6 @@ fn has_executable_extension(path: &Path) -> bool {
     })
 }
 
-/// Returns true if `path` is, by itself, an existing executable file.
-///
-/// Used both for the initial check in [`resolve_executable`] and for
-/// [`PathExt::executable`].
-fn is_executable_file(path: &Path) -> bool {
-    has_executable_extension(path) && path.is_file()
-}
-
 /// Returns the paths that could name the executable requested by `path`.
 ///
 /// Purely lexical: nothing here touches the filesystem, because the caller
@@ -72,62 +64,6 @@ pub fn executable_candidates(path: PathBuf) -> Vec<PathBuf> {
             PathBuf::from(name)
         })
         .collect()
-}
-
-impl crate::sys::fs::PathExt for Path {
-    fn readable(&self) -> bool {
-        self.exists()
-    }
-
-    fn writable(&self) -> bool {
-        self.metadata().is_ok_and(|m| !m.permissions().readonly())
-    }
-
-    fn executable(&self) -> bool {
-        if is_executable_file(self) {
-            return true;
-        }
-        // Try each PATHEXT extension without allocating a separate PathBuf
-        // per candidate until one exists.
-        PATHEXT_EXTENSIONS.iter().any(|ext| {
-            let mut name = self.as_os_str().to_owned();
-            name.push(ext);
-            Self::new(&name).is_file()
-        })
-    }
-
-    fn exists_and_is_block_device(&self) -> bool {
-        false
-    }
-
-    fn exists_and_is_char_device(&self) -> bool {
-        false
-    }
-
-    fn exists_and_is_fifo(&self) -> bool {
-        false
-    }
-
-    fn exists_and_is_socket(&self) -> bool {
-        false
-    }
-
-    fn exists_and_is_setgid(&self) -> bool {
-        false
-    }
-
-    fn exists_and_is_setuid(&self) -> bool {
-        false
-    }
-
-    fn exists_and_is_sticky_bit(&self) -> bool {
-        false
-    }
-
-    fn get_device_and_inode(&self) -> Result<(u64, u64), crate::error::Error> {
-        // TODO(windows): implement using file index / volume serial number.
-        Err(error::ErrorKind::NotSupportedOnThisPlatform("get_device_and_inode").into())
-    }
 }
 
 /// Splits a platform-specific PATH-like value into individual paths.

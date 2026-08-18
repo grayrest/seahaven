@@ -28,11 +28,6 @@ pub(crate) mod windows;
 #[cfg(windows)]
 pub(crate) use windows as platform;
 
-#[cfg(target_family = "wasm")]
-pub(crate) mod wasm;
-#[cfg(target_family = "wasm")]
-pub(crate) use wasm as platform;
-
 #[cfg(not(unix))]
 pub(crate) mod stubs;
 
