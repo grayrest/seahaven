@@ -10,6 +10,7 @@ mod analyze;
 mod bash_tests;
 mod check;
 mod codemod;
+mod vendor;
 mod ci;
 mod common;
 mod generate;
@@ -46,6 +47,8 @@ enum Command {
     Check(check::CheckCommand),
     /// Route a forked utility's filesystem access through the vfs (D4).
     Codemod(codemod::CodemodCommand),
+    /// Vendor a uutils crate and route it through the vfs (D4).
+    VendorFork(vendor::VendorCommand),
     /// Run CI workflows.
     #[clap(subcommand)]
     Ci(ci::CiCommand),
@@ -65,6 +68,7 @@ fn main() -> Result<()> {
         Command::Gen(cmd) => generate::run(cmd, verbose),
         Command::Check(cmd) => check::run(cmd, verbose),
         Command::Codemod(cmd) => codemod::run(cmd, verbose),
+        Command::VendorFork(cmd) => vendor::run(cmd, verbose),
         Command::Test(cmd) => test::run(cmd, verbose),
         Command::Ci(cmd) => ci::run(cmd, verbose),
     }
