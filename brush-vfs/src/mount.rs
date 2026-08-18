@@ -100,8 +100,11 @@ impl Mount {
     }
 
     /// The capability handle for the mount's root directory.
-    #[must_use]
-    pub const fn dir(&self) -> &cap_std::fs::Dir {
+    ///
+    /// Deliberately crate-private: a `Dir` is the authority itself, and the
+    /// facade's whole contract is that callers receive paths and descriptors
+    /// rather than capabilities they could re-root from.
+    pub(crate) const fn dir(&self) -> &cap_std::fs::Dir {
         &self.dir
     }
 

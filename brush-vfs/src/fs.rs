@@ -48,6 +48,121 @@ pub fn is_symlink_loop(error: &std::io::Error) -> bool {
     error.kind() == std::io::ErrorKind::Other && error.to_string().contains(SYMLINK_LOOP_MESSAGE)
 }
 
+/// How a file is to be opened.
+///
+/// The write intent is carried explicitly rather than recovered from
+/// `cap_std::fs::OpenOptions`, which does not expose its flags. Inferring it
+/// would mean a read-only mount's enforcement depended on a formatting detail of
+/// another crate — the kind of coupling that breaks silently and in the
+/// permissive direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OpenMode {
+    read: bool,
+    write: bool,
+    append: bool,
+    create: bool,
+    create_new: bool,
+    truncate: bool,
+}
+
+impl OpenMode {
+    /// Opens an existing file for reading.
+    #[must_use]
+    pub const fn read() -> Self {
+        Self {
+            read: true,
+            write: false,
+            append: false,
+            create: false,
+            create_new: false,
+            truncate: false,
+        }
+    }
+
+    /// Creates or truncates a file for writing.
+    #[must_use]
+    pub const fn write() -> Self {
+        Self {
+            read: false,
+            write: true,
+            append: false,
+            create: true,
+            create_new: false,
+            truncate: true,
+        }
+    }
+
+    /// Appends to a file, creating it if absent.
+    #[must_use]
+    pub const fn append() -> Self {
+        Self {
+            read: false,
+            write: false,
+            append: true,
+            create: true,
+            create_new: false,
+            truncate: false,
+        }
+    }
+
+    /// Also opens for reading.
+    #[must_use]
+    pub const fn with_read(mut self, yes: bool) -> Self {
+        self.read = yes;
+        self
+    }
+
+    /// Also opens for writing.
+    #[must_use]
+    pub const fn with_write(mut self, yes: bool) -> Self {
+        self.write = yes;
+        self
+    }
+
+    /// Creates the file if it does not exist.
+    #[must_use]
+    pub const fn with_create(mut self, yes: bool) -> Self {
+        self.create = yes;
+        self
+    }
+
+    /// Fails if the file already exists, which is what `noclobber` needs.
+    #[must_use]
+    pub const fn with_create_new(mut self, yes: bool) -> Self {
+        self.create_new = yes;
+        self
+    }
+
+    /// Truncates an existing file.
+    #[must_use]
+    pub const fn with_truncate(mut self, yes: bool) -> Self {
+        self.truncate = yes;
+        self
+    }
+
+    /// Whether this mode would modify the filesystem in any way.
+    ///
+    /// Creation counts even without `write`: making a file is a change to the
+    /// directory containing it.
+    #[must_use]
+    pub const fn is_write(self) -> bool {
+        self.write || self.append || self.create || self.create_new || self.truncate
+    }
+
+    /// The equivalent `cap-std` options.
+    fn to_cap_std(self) -> cap_std::fs::OpenOptions {
+        let mut options = cap_std::fs::OpenOptions::new();
+        options
+            .read(self.read)
+            .write(self.write)
+            .append(self.append)
+            .create(self.create)
+            .create_new(self.create_new)
+            .truncate(self.truncate);
+        options
+    }
+}
+
 /// Filesystem access confined to a [`MountTable`].
 #[derive(Debug)]
 pub struct Vfs {
@@ -191,22 +306,18 @@ impl Vfs {
     /// Returns [`std::io::Error`] if the path is unmounted, if the mount is
     /// read-only and the options request writing, or if the underlying open
     /// fails.
-    pub fn open_with(
-        &self,
-        path: &VirtualPath,
-        options: &cap_std::fs::OpenOptions,
-    ) -> std::io::Result<std::fs::File> {
+    pub fn open_with(&self, path: &VirtualPath, mode: OpenMode) -> std::io::Result<std::fs::File> {
         let located = self.locate_follow(path)?;
         // The write check is on the resolved location, not the requested one: a
         // symlink from a writable mount into a read-only one must be governed by
         // where it lands.
-        if !located.mount.access().is_writable() && opens_for_write(options) {
+        if !located.mount.access().is_writable() && mode.is_write() {
             return Err(read_only(&located.virtual_path));
         }
         Ok(located
             .mount
             .dir()
-            .open_with(&located.relative, options)?
+            .open_with(&located.relative, &mode.to_cap_std())?
             .into_std())
     }
 
@@ -216,7 +327,7 @@ impl Vfs {
     ///
     /// As [`Vfs::open_with`].
     pub fn open(&self, path: &VirtualPath) -> std::io::Result<std::fs::File> {
-        self.open_with(path, cap_std::fs::OpenOptions::new().read(true))
+        self.open_with(path, OpenMode::read())
     }
 
     /// Creates or truncates a file for writing.
@@ -225,13 +336,7 @@ impl Vfs {
     ///
     /// As [`Vfs::open_with`].
     pub fn create(&self, path: &VirtualPath) -> std::io::Result<std::fs::File> {
-        self.open_with(
-            path,
-            cap_std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true),
-        )
+        self.open_with(path, OpenMode::write())
     }
 
     /// Metadata for `path`, following symlinks.
@@ -367,22 +472,6 @@ impl Vfs {
 fn read_link_contents(mount: &Mount, relative: &std::path::Path) -> std::io::Result<PathBuf> {
     let dir = mount.dir().try_clone()?.into_std_file();
     cap_primitives::fs::read_link_contents(&dir, relative)
-}
-
-/// Whether these options would open for writing in any form.
-fn opens_for_write(options: &cap_std::fs::OpenOptions) -> bool {
-    // cap-std does not expose its flags, so the caller's intent is recovered by
-    // asking for the one thing it will tell us: a read-only open succeeds
-    // against a read-only directory, and anything else is a write.
-    let probe = format!("{options:?}");
-    [
-        "write: true",
-        "append: true",
-        "create: true",
-        "truncate: true",
-    ]
-    .iter()
-    .any(|flag| probe.contains(flag))
 }
 
 #[cfg(test)]
@@ -579,6 +668,37 @@ mod tests {
 
         let names = f.vfs.read_dir_names(&vp("/work/sub")).unwrap();
         assert_eq!(names, vec!["deep.txt"]);
+    }
+
+    #[test]
+    fn every_write_intent_is_refused_on_a_read_only_mount() {
+        // One case per flag, because the previous implementation inferred intent
+        // from a Debug string and would have failed open on any it did not name.
+        let f = fixture();
+        for mode in [
+            OpenMode::write(),
+            OpenMode::append(),
+            OpenMode::read().with_write(true),
+            OpenMode::read().with_create(true),
+            OpenMode::read().with_create_new(true),
+            OpenMode::read().with_truncate(true),
+        ] {
+            assert!(mode.is_write(), "{mode:?} should count as a write");
+            let err = f.vfs.open_with(&vp("/ro/readme.txt"), mode).unwrap_err();
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::PermissionDenied,
+                "{mode:?} was allowed on a read-only mount"
+            );
+        }
+
+        // And a pure read is still permitted.
+        assert!(!OpenMode::read().is_write());
+        assert!(
+            f.vfs
+                .open_with(&vp("/ro/readme.txt"), OpenMode::read())
+                .is_ok()
+        );
     }
 
     #[test]
