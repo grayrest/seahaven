@@ -63,9 +63,9 @@ const SYMLINK_LOOP_MESSAGE: &str = "too many levels of symbolic links";
 /// does not depend on, and matched by number rather than by `ErrorKind`,
 /// because `ErrorKind::FilesystemLoop` is still unstable.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-const ELOOP: i32 = 40;
+pub(crate) const ELOOP: i32 = 40;
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
-const ELOOP: i32 = 62;
+pub(crate) const ELOOP: i32 = 62;
 
 /// Whether an error reports a symlink loop.
 ///

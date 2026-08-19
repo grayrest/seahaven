@@ -101,6 +101,26 @@ Since a mechanism whose failure mode is silence needs proving on — the same
 reasoning that gave the ban its positive control — it is asserted by test, not
 by review convention.
 
+**And one carve-out inside the amendment, because `DirFd` was not portable onto
+the sealed type in this milestone.** `Dir::into_owned_fd_for_at_traversal`
+surrenders the descriptor to a caller that does its own syscalls. The fd is
+confined *where it lands* — resolution proved the directory is inside the
+namespace, and no path survives — but it does not refuse `..`, because a
+directory descriptor is a position in the host tree and the kernel will move
+upward from it. So `safe_traversal` is *rooted* in the namespace rather than
+sealed inside it.
+
+That is a real weakening and is recorded as one rather than described as a
+detail. It was taken because the alternative it replaces is worse by a wide
+margin — `DirFd::open` accepted **any host path outright** — and because
+sealing it means porting `DirFd` onto the capability's API, which needs
+`chown`, a call `cap-std` does not provide at all, plus converting `FileStat`
+to `Metadata` through every caller and removing the public `AsFd`/`AsRawFd`
+impls `perms.rs` depends on. That is a milestone, not a step. The residual
+exposure is that a future upstream change starts passing `".."` where it
+passes directory entry names today; the carve-out is named in the gate that
+would otherwise fail, so a *second* one cannot appear quietly.
+
 And the ban can silently switch itself off in three ways, all verified: globs are
 not expanded, a typo'd entry warns but exits 0, and a member-crate `clippy.toml`
 shadows the root. **That is why it needs a positive control** rather than trust —

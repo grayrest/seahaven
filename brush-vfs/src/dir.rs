@@ -17,11 +17,11 @@
 //!
 //! Two properties, both asserted by test rather than left to review:
 //!
-//! 1. **Nothing here yields a host path.** No method returns a `PathBuf`, hands
-//!    out the underlying descriptor, or otherwise lets a holder learn where in
-//!    the host filesystem it is standing. `cap_std::fs::Dir` has three ways to
-//!    do that — `canonicalize`, `open_parent_dir`, and the `AsFd`/`into_std_file`
-//!    conversions — and none is re-exported.
+//! 1. **Nothing here yields a host path.** No method returns a `PathBuf` or
+//!    otherwise lets a holder learn where in the host filesystem it is
+//!    standing. `cap_std::fs::Dir` has three ways to do that — `canonicalize`,
+//!    `open_parent_dir`, and the `AsFd`/`into_std_file` conversions — and none
+//!    is re-exported.
 //! 2. **Every operation names a single component, never a path.** `..` and `/`
 //!    are rejected before `cap-std` is asked, so a holder cannot walk upward
 //!    even to a location still inside the namespace, let alone out of it. This
@@ -30,6 +30,16 @@
 //!
 //! What a holder can do is descend, and read or modify what it finds — which is
 //! exactly the authority the mount it came from already grants by path.
+//!
+//! # The exception to that, stated plainly
+//!
+//! [`Dir::into_owned_fd_for_at_traversal`] surrenders the raw descriptor, and a
+//! raw descriptor *can* be walked upward with `openat(fd, "..")`. So a caller
+//! holding one is **rooted** in the namespace, not sealed inside it. It exists
+//! for `DirFd`, which is a raw fd with its own syscalls and whose alternative
+//! today is accepting any host path at all. The gate that enforces property 1
+//! names this method explicitly, so a second such method fails the build rather
+//! than joining it quietly.
 
 use crate::fs::{OpenMode, Vfs};
 use crate::path::VirtualPath;
@@ -81,6 +91,37 @@ impl Dir {
     #[must_use]
     pub const fn is_writable(&self) -> bool {
         self.writable
+    }
+
+    /// Surrenders the descriptor for `*at` traversal by a caller that does its
+    /// own syscalls.
+    ///
+    /// **This is the one documented hole in this module, and it is narrower
+    /// than "no confinement" but wider than the rest of this type.** The
+    /// descriptor is confined *at the moment it is produced*: it names a
+    /// directory that resolution already proved is inside the namespace, and
+    /// nothing about the path that produced it survives. What it does not carry
+    /// is the refusal of `..`. A holder doing raw `openat(fd, "..")` walks to
+    /// the real parent and can keep going to the host root, because a directory
+    /// descriptor is a position in the host tree and the kernel will happily
+    /// move upward from it.
+    ///
+    /// It exists for `uucore::safe_traversal::DirFd`, which is a raw `OwnedFd`
+    /// with `openat`/`fstatat`/`unlinkat`/`fchownat` written directly against
+    /// it, plus public `AsFd`/`AsRawFd` impls its callers use. Porting it onto
+    /// this type's sealed API is the sound alternative and a milestone in its
+    /// own right — it needs `chown`, which `cap-std` does not provide at all.
+    /// Against that, `DirFd::open` today takes *any host path outright*, so
+    /// rooting it here is a large gain for small work, and the residual risk is
+    /// that a future upstream change starts passing `".."` where it passes
+    /// directory entry names today.
+    ///
+    /// Do not reach for this to avoid a missing method. Add the method.
+    #[must_use]
+    pub fn into_owned_fd_for_at_traversal(self) -> std::os::fd::OwnedFd {
+        use std::os::fd::OwnedFd;
+
+        OwnedFd::from(self.inner.into_std_file())
     }
 
     /// Duplicates the descriptor.
@@ -376,6 +417,12 @@ mod tests {
         // the *shape of the public API*, which no runtime call can observe. It
         // fails loudly the moment someone adds a returning method that leaks,
         // which is what a mechanism whose failure mode is silence requires.
+        // The single documented carve-out, named so that a *second* one still
+        // fails this test. Its own caveats are on the method; the point here is
+        // that surrendering a descriptor stays a deliberate, reviewed act
+        // rather than something that accretes.
+        const ALLOWED: &str = "into_owned_fd_for_at_traversal";
+
         let source = include_str!("dir.rs");
         let banned = [
             "PathBuf", "&Path", "as_fd", "as_raw_fd", "OwnedFd", "RawFd",
@@ -389,6 +436,9 @@ mod tests {
             }) else {
                 continue;
             };
+            if rest.starts_with(ALLOWED) {
+                continue;
+            }
             // Only the return type matters: taking a `&str` name is the point.
             let Some((_, ret)) = rest.split_once("->") else {
                 continue;

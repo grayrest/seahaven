@@ -126,6 +126,31 @@ pub fn open_dir(path: impl AsRef<Path>) -> io::Result<crate::dir::Dir> {
     with(path, crate::fs::Vfs::open_dir)
 }
 
+/// Opens a directory and surrenders its descriptor for `*at` traversal.
+///
+/// The rewrite target for `nix::fcntl::open(path, O_DIRECTORY, ..)` in
+/// `uucore::safe_traversal::DirFd::open`. Read
+/// [`crate::dir::Dir::into_owned_fd_for_at_traversal`] before using it: the
+/// descriptor is confined where it lands but does not refuse `..`, so this
+/// roots a traversal in the namespace rather than sealing it inside one.
+///
+/// `follow` false refuses a final symlink, matching the `O_NOFOLLOW` the caller
+/// would otherwise have passed.
+///
+/// # Errors
+/// As [`open_dir`], plus `ELOOP` when `follow` is false and the final component
+/// is a symlink.
+#[cfg(unix)]
+pub fn open_dir_fd(path: impl AsRef<Path>, follow: bool) -> io::Result<std::os::fd::OwnedFd> {
+    with(path, |vfs, p| {
+        if !follow && vfs.is_symlink(p) {
+            return Err(io::Error::from_raw_os_error(crate::fs::ELOOP));
+        }
+        vfs.open_dir(p)
+    })
+    .map(crate::dir::Dir::into_owned_fd_for_at_traversal)
+}
+
 // -- Opening ---------------------------------------------------------------
 
 /// Opens a file for reading. The rewrite target for `File::open(path)`.
