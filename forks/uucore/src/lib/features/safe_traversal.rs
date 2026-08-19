@@ -487,7 +487,7 @@ fn find_existing_ancestor(path: &Path) -> io::Result<(PathBuf, Vec<OsString>)> {
     loop {
         // Use metadata (follow symlinks) so that symlinks to directories are
         // treated as existing ancestors rather than components to create.
-        match fs::metadata(&current) {
+        match brush_vfs::ambient::metadata(&current) {
             Ok(meta) => {
                 if meta.is_dir() {
                     // Found a directory (real or via symlink)

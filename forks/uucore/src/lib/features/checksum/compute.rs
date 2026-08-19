@@ -6,7 +6,6 @@
 // spell-checker:ignore bitlen
 
 use std::ffi::OsStr;
-use std::fs::File;
 use std::io;
 use std::path::Path;
 
@@ -264,7 +263,7 @@ where
                     ));
                     continue;
                 }
-                file_buf = match File::open(filepath) {
+                file_buf = match brush_vfs::ambient::open(filepath) {
                     Ok(file) => {
                         #[cfg(any(
                             target_os = "linux",

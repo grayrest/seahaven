@@ -257,7 +257,7 @@ fn is_root(path: &Path, would_traverse_symlink: bool) -> bool {
     // FIXME: TOCTOU bug! canonicalize() runs at a different time than WalkDir's recursion decision.
     // However, we're forced to make the decision whether to warn about --preserve-root
     // *before* even attempting to chown the path, let alone doing the stat inside WalkDir.
-    if let Ok(p) = path.canonicalize() {
+    if let Ok(p) = brush_vfs::ambient::canonicalize(&(path)) {
         let path_buf = path.to_path_buf();
         if p.parent().is_none() {
             if path_buf.as_os_str() == "/" {
@@ -280,7 +280,7 @@ pub fn get_metadata(file: &Path, follow: bool) -> Result<Metadata, std::io::Erro
     if follow {
         file.metadata()
     } else {
-        file.symlink_metadata()
+        brush_vfs::ambient::symlink_metadata(&(file))
     }
 }
 

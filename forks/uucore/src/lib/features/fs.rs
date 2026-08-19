@@ -14,7 +14,6 @@ use std::collections::VecDeque;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::fs::read_dir;
 use std::hash::Hash;
 use std::io::Stdin;
 use std::io::{Error, ErrorKind, Result as IOResult};
@@ -106,9 +105,9 @@ impl FileInformation {
         #[cfg(target_os = "wasi")]
         {
             let metadata = if dereference {
-                fs::metadata(path.as_ref())
+                brush_vfs::ambient::metadata(path.as_ref())
             } else {
-                fs::symlink_metadata(path.as_ref())
+                brush_vfs::ambient::symlink_metadata(path.as_ref())
             };
             Ok(Self(metadata?))
         }
@@ -310,8 +309,8 @@ pub fn normalize_path(path: &Path) -> PathBuf {
 }
 
 fn resolve_symlink<P: AsRef<Path>>(path: P) -> IOResult<Option<PathBuf>> {
-    let result = if fs::symlink_metadata(&path)?.file_type().is_symlink() {
-        Some(fs::read_link(&path)?)
+    let result = if brush_vfs::ambient::symlink_metadata(&path)?.file_type().is_symlink() {
+        Some(brush_vfs::ambient::read_link(&path)?)
     } else {
         None
     };
@@ -357,10 +356,10 @@ impl<'a> From<Component<'a>> for OwningComponent {
 /// directory" check should not need (e.g. `realpath /root/` succeeds for
 /// non-root users even though they can't list `/root`).
 fn ensure_is_directory(path: &Path) -> IOResult<()> {
-    if fs::metadata(path)?.is_dir() {
+    if brush_vfs::ambient::metadata(path)?.is_dir() {
         Ok(())
     } else {
-        read_dir(path)?;
+        brush_vfs::ambient::read_dir(path)?;
         Ok(())
     }
 }
@@ -476,12 +475,12 @@ pub fn canonicalize<P: AsRef<Path>>(
             }
         }
         MissingHandling::Normal => {
-            if result.exists() {
+            if brush_vfs::ambient::exists(&(result)) {
                 if has_to_be_directory {
                     ensure_is_directory(&result)?;
                 }
             } else if let Some(parent) = result.parent() {
-                read_dir(parent)?;
+                brush_vfs::ambient::read_dir(parent)?;
             }
         }
         MissingHandling::Missing => {}
@@ -705,8 +704,8 @@ pub fn is_symlink_loop(path: &Path) -> bool {
     let mut current_path = path.to_path_buf();
 
     while let (Ok(metadata), Ok(link)) = (
-        current_path.symlink_metadata(),
-        fs::read_link(&current_path),
+        brush_vfs::ambient::symlink_metadata(&(current_path)),
+        brush_vfs::ambient::read_link(&current_path),
     ) {
         if !metadata.file_type().is_symlink() {
             return false;
@@ -740,10 +739,10 @@ pub fn are_hardlinks_to_same_file(_source: &Path, _target: &Path) -> bool {
 pub fn are_hardlinks_to_same_file(source: &Path, target: &Path) -> bool {
     // The target is usually the one that does not exist, so look it up first
     // and return early instead of also querying the source for nothing.
-    let Ok(target_metadata) = fs::symlink_metadata(target) else {
+    let Ok(target_metadata) = brush_vfs::ambient::symlink_metadata(target) else {
         return false;
     };
-    let Ok(source_metadata) = fs::symlink_metadata(source) else {
+    let Ok(source_metadata) = brush_vfs::ambient::symlink_metadata(source) else {
         return false;
     };
 
@@ -769,10 +768,10 @@ pub fn are_hardlinks_or_one_way_symlink_to_same_file(_source: &Path, _target: &P
 pub fn are_hardlinks_or_one_way_symlink_to_same_file(source: &Path, target: &Path) -> bool {
     // As above, look up the target first: if it does not exist, there is
     // nothing to compare the source with.
-    let Ok(target_metadata) = fs::symlink_metadata(target) else {
+    let Ok(target_metadata) = brush_vfs::ambient::symlink_metadata(target) else {
         return false;
     };
-    let Ok(source_metadata) = fs::metadata(source) else {
+    let Ok(source_metadata) = brush_vfs::ambient::metadata(source) else {
         return false;
     };
 
@@ -845,7 +844,7 @@ pub fn is_stdin_directory(stdin: &Stdin) -> bool {
     {
         use std::os::windows::io::AsRawHandle;
         let handle = stdin.as_raw_handle();
-        if let Ok(metadata) = fs::metadata(format!("{}", handle as usize)) {
+        if let Ok(metadata) = brush_vfs::ambient::metadata(format!("{}", handle as usize)) {
             return metadata.is_dir();
         }
         false
@@ -904,7 +903,7 @@ pub mod sane_blksize {
     /// If the metadata can't be fetched or contain invalid values a
     /// meaningful adaption of that value is done.
     pub fn sane_blksize_from_path(path: &Path) -> u64 {
-        match metadata(path) {
+        match brush_vfs::ambient::metadata(path) {
             Ok(metadata) => sane_blksize_from_metadata(&metadata),
             Err(_) => DEFAULT,
         }

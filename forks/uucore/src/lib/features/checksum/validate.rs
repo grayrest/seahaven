@@ -9,7 +9,6 @@ use crate::util_name;
 
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::fs::File;
 use std::io::{self, BufReader, Read, Write, stderr, stdin};
 
 use os_display::Quotable;
@@ -560,7 +559,7 @@ fn get_file_to_check(
                     .to_string()
             }));
         };
-        match File::open(filename) {
+        match brush_vfs::ambient::open(filename) {
             Ok(f) => {
                 if f.metadata()
                     .map_err(|_| LineCheckError::CantOpenFile)?
@@ -592,7 +591,7 @@ fn get_file_to_check(
 
 /// Returns a reader to the list of checksums
 fn get_input_file(filename: &OsStr) -> UResult<Box<dyn Read>> {
-    match File::open(filename) {
+    match brush_vfs::ambient::open(filename) {
         Ok(f) => {
             if f.metadata()?.is_dir() {
                 Err(io::Error::other(

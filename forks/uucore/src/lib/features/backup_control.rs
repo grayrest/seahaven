@@ -448,7 +448,7 @@ fn numbered_backup_path(path: &Path) -> PathBuf {
         // symlink still counts as an existing backup (avoiding a silent
         // overwrite), and so we do not report a live symlink as missing when
         // the target cannot be stat'd.
-        if fs::symlink_metadata(&new_path).is_err() {
+        if brush_vfs::ambient::symlink_metadata(&new_path).is_err() {
             return new_path;
         }
         i += 1;
@@ -457,7 +457,7 @@ fn numbered_backup_path(path: &Path) -> PathBuf {
 
 fn existing_backup_path<S: AsRef<OsStr>>(path: &Path, suffix: S) -> PathBuf {
     let test_path = simple_backup_path(path, OsString::from(".~1~"));
-    if fs::symlink_metadata(&test_path).is_ok() {
+    if brush_vfs::ambient::symlink_metadata(&test_path).is_ok() {
         return numbered_backup_path(path);
     }
     simple_backup_path(path, suffix.as_ref())
