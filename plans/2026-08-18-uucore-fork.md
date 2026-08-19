@@ -5,9 +5,10 @@ utilities (`cat`, `head`, `wc`, `tac`, `nl`) are forked and routed;
 `cargo xtask vendor-fork` automates the leaf case. `uucore` is not a leaf, and
 the attempt to run the same tool at it stopped on `couldn't read build.rs`.
 
-**Status: not started. The one open decision is settled — a directory
-capability is added to `brush-vfs` (option (a)) — and scoping it shrank it
-considerably. See "Resolved: the directory capability".**
+**Status: implemented.** All nine steps landed; see "Where it landed" at the
+end for what matched the plan, what diverged, and what remains. The one open
+decision — the directory capability — was settled as option (a) before any of
+it was written.
 
 **Revised once, after an independent review.** The first draft's measurements
 held up; four of its conclusions did not. It counted upstream's own test code as
