@@ -241,12 +241,9 @@ impl OpenMode {
         {
             use cap_std::fs::OpenOptionsExt as _;
 
-            // `custom_flags` is additive over what cap-std computes, which is
-            // what lets `O_NOFOLLOW` ride alongside the resolution flags rather
-            // than replacing them.
-            if self.nofollow {
-                options.custom_flags(libc::O_NOFOLLOW);
-            }
+            // `nofollow` is deliberately *not* forwarded as a flag: see
+            // `Vfs::open_with`, which answers it during resolution because a
+            // final symlink is followed before any descriptor exists.
             if let Some(mode) = self.mode {
                 options.mode(mode);
             }
@@ -634,6 +631,22 @@ impl Vfs {
     /// read-only and the options request writing, or if the underlying open
     /// fails.
     pub fn open_with(&self, path: &VirtualPath, mode: OpenMode) -> std::io::Result<std::fs::File> {
+        // `O_NOFOLLOW` has to be answered here rather than passed down as a
+        // flag. Resolution walks the path itself and *follows* a final symlink
+        // before any open happens, so the descriptor cap-std would apply the
+        // flag to is already the target -- the flag would be set on something
+        // that is by construction not a link, and silently never fire. Asking
+        // the namespace whether the final component is a link is the same
+        // question `O_NOFOLLOW` asks the kernel.
+        //
+        // The race this leaves is narrower than it looks: if the final
+        // component becomes a symlink between this check and the open,
+        // cap-std's own beneath-the-root re-check still refuses an escape. What
+        // is lost is only the caller's stricter intent, not confinement.
+        if mode.nofollow && self.is_symlink(path) {
+            return Err(std::io::Error::from_raw_os_error(ELOOP));
+        }
+
         self.at(path, true, |located| {
             // The write check is on the resolved location, not the requested
             // one: a symlink from a writable mount into a read-only one must be
@@ -1271,6 +1284,40 @@ mod tests {
         let f = fixture();
         let err = read(&f.vfs, "/etc/passwd").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn nofollow_refuses_a_final_symlink_even_inside_the_namespace() {
+        // `uucore::safe_copy` opens with `O_NOFOLLOW` so an attacker who plants
+        // a symlink between the caller's lstat and the open cannot redirect the
+        // read -- or, at a destination, redirect a truncate onto any file the
+        // caller can write. Both ends of that link are *inside* the namespace
+        // here, so confinement alone does not answer it.
+        //
+        // It has to be enforced during resolution: passing O_NOFOLLOW down as a
+        // flag is inert, because the final link is followed before any
+        // descriptor exists and the flag lands on the target.
+        let fx = fixture();
+        fx.vfs
+            .symlink(&vp("/work/link.txt"), "hello.txt")
+            .expect("symlink");
+
+        // Following is the default and still works.
+        assert!(fx.vfs.open(&vp("/work/link.txt")).is_ok());
+
+        let err = fx
+            .vfs
+            .open_with(&vp("/work/link.txt"), OpenMode::read().with_nofollow(true))
+            .expect_err("a final symlink must be refused under nofollow");
+        assert_eq!(err.raw_os_error(), Some(ELOOP));
+
+        // A plain file is unaffected -- nofollow is about links, not about
+        // refusing everything.
+        assert!(
+            fx.vfs
+                .open_with(&vp("/work/hello.txt"), OpenMode::read().with_nofollow(true))
+                .is_ok()
+        );
     }
 
     #[test]

@@ -23,21 +23,14 @@
 
 use std::fs::File;
 use std::io;
-use std::os::fd::OwnedFd;
 use std::path::Path;
 
-use rustix::fs::{Mode, OFlags, open};
+use brush_vfs::OpenMode;
 
 /// Mode the destination file is created with, before the caller applies
 /// the final permissions via `set_permissions`. `0o600` ensures no other
 /// user can open the file during the copy — see issue #10011.
 pub const DEST_INITIAL_MODE: u32 = 0o600;
-
-const SOURCE_FLAGS: OFlags = OFlags::RDONLY.union(OFlags::CLOEXEC);
-const DEST_FLAGS: OFlags = OFlags::WRONLY
-    .union(OFlags::CREATE)
-    .union(OFlags::TRUNC)
-    .union(OFlags::CLOEXEC);
 
 /// Open `path` for reading, optionally with `O_NOFOLLOW`.
 ///
@@ -47,13 +40,13 @@ const DEST_FLAGS: OFlags = OFlags::WRONLY
 /// `-P`). With `O_NOFOLLOW` set, an attacker who swaps the path to a
 /// symlink between the metadata check and this open gets `ELOOP`
 /// instead of redirecting the read.
+// FLATLAND DIVERGENCE: `rustix::fs::open` on a caller-supplied path is
+// ambient authority the `std::fs`-shaped codemod cannot see. Routed by hand
+// through the facade, which carries the same `O_NOFOLLOW` intent -- see
+// `plans/2026-08-18-uucore-fork.md` step 7. `O_RDONLY|O_CLOEXEC` is what the
+// facade's read mode already opens with.
 pub fn open_source<P: AsRef<Path>>(path: P, nofollow: bool) -> io::Result<File> {
-    let mut flags = SOURCE_FLAGS;
-    if nofollow {
-        flags |= OFlags::NOFOLLOW;
-    }
-    let fd: OwnedFd = open(path.as_ref(), flags, Mode::empty())?;
-    Ok(File::from(fd))
+    brush_vfs::ambient::open_with(path, OpenMode::read().with_nofollow(nofollow))
 }
 
 /// Create `path` with the restrictive [`DEST_INITIAL_MODE`].
@@ -70,13 +63,17 @@ pub fn open_source<P: AsRef<Path>>(path: P, nofollow: bool) -> io::Result<File> 
 /// who plants `path` as a symlink between the caller's check and this
 /// open can redirect the truncate (and the subsequent write) to any file
 /// the caller has permission to write.
+// FLATLAND DIVERGENCE: as `open_source`. `DEST_INITIAL_MODE` is carried
+// through as the facade's create mode, so the 0o600 window this function
+// exists to close stays closed.
 pub fn create_dest_restrictive<P: AsRef<Path>>(path: P, nofollow: bool) -> io::Result<File> {
-    let mut flags = DEST_FLAGS;
-    if nofollow {
-        flags |= OFlags::NOFOLLOW;
-    }
-    let fd: OwnedFd = open(path.as_ref(), flags, Mode::RUSR.union(Mode::WUSR))?;
-    Ok(File::from(fd))
+    brush_vfs::ambient::open_with(
+        path,
+        OpenMode::write()
+            .with_read(false)
+            .with_nofollow(nofollow)
+            .with_mode(DEST_INITIAL_MODE),
+    )
 }
 
 #[cfg(test)]
