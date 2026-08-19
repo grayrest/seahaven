@@ -461,3 +461,79 @@ non-regenerable residual patch set.
 its own tests — stop. A baseline that already differs makes every later failure
 ambiguous, and the honest response is to fix the vendoring rather than route on
 top of it.
+
+## Where it landed
+
+Written after the fact. The plan above is left as written so the difference is
+visible.
+
+### Built as planned
+
+All nine steps. The measurements held: **24 production sites routed**, exactly
+as re-derived after the review, with `perms.rs:499` the single unrouted site and
+correctly so. `[patch]` did reach the `forks/`-excluded path dependency, closing
+the one unknown the plan flagged — `exclude` governs member discovery, not
+resolution.
+
+Gate 1 got the comparison arm the review said it lacked: the registry copy
+staged in a scratch directory alongside its 84 `uu_*-0.10.0` siblings,
+reproducing the layout its build script expects. That made the locale bug
+*measurable* rather than argued — fork 312/3 against registry 313/2 before the
+fix, identical 313/2 after.
+
+### Built differently
+
+**Step 4 vendors the catalogs rather than dual-scanning.** The plan preferred
+this and the preference was right, but for a sharper reason than it gave:
+upstream's registry scan was already embedding `cat`'s strings from a **stale
+copy of a crate the workspace no longer depends on**. Committing them makes the
+embedded strings a reviewable input.
+
+**Gate 4 was not written.** It was unnecessary. Upstream's own
+`test_setup_localization_fallback_to_embedded` asserts a utility about-string
+and receives the raw key, so the localization gate already existed inside the
+suite gate 2 runs. A separate `df`/`ls` assertion would have been a second,
+weaker copy of it.
+
+**Gates 5 and 8 were replaced as the plan directed**, and gate 2 grew teeth it
+was not specified to have — see below.
+
+### Built after the fact
+
+**An identity session for the fork's own test suite.** Routing broke 11
+upstream tests, all `no vfs session is installed`. The plan had deferred D13's
+expected-failure infrastructure on the grounds that "uucore has no deliberate
+divergence yet"; routing *is* the divergence. Muting 11 tests would have gone
+dark over every `create_dir_all_safe` case — the exact code step 7 then
+hand-routed. The hook is `#[cfg(test)]`, so it is absent from production builds
+rather than disabled in them.
+
+**`known-test-failures.txt`, so D13's expected-failure mechanism exists.** The
+plan listed it under "what stays behind". `check forks` needed it immediately:
+a fork inherits upstream's host-dependent failures, so the metric is "did *we*
+change the count". The mirror rule is enforced both ways.
+
+**A carve-out inside D3's amendment.** `DirFd` could not be ported onto the
+sealed capability in this milestone — it needs `chown`, which `cap-std` does not
+provide — so `Dir::into_owned_fd_for_at_traversal` surrenders the descriptor.
+`safe_traversal` is *rooted* in the namespace, not sealed inside it: a raw
+directory fd can still be walked upward with `openat(fd, "..")`. Recorded as a
+weakening in D3 and named in the gate that would otherwise fail, so a second one
+cannot appear quietly. Taken because what it replaces — `DirFd::open` accepting
+any host path outright — is worse by a wide margin.
+
+**A real bug, caught by gate 2 rather than by review.** `O_NOFOLLOW` passed down
+as a raw open flag is *inert* here: resolution follows a final symlink before
+any descriptor exists, so the flag lands on the target and never fires.
+Upstream's `open_source_rejects_symlink_with_nofollow` returned `Ok(File)`. It is
+answered during resolution now. Both ends of that link are inside the namespace,
+so confinement alone would never have caught it — which is the argument for
+having run upstream's suite instead of muting it.
+
+### Not built
+
+`DirFd`'s full port onto the sealed capability. The 77 unforked utilities
+remain unconfined except through `uucore`. `findutils`, `grep`, `sed`. D24's
+child-confinement wiring. Windows: `safe_traversal`, `safe_copy` and the
+directory capability are all Unix-only, so there this milestone confines what
+the codemod routed and nothing that was hand-routed.
