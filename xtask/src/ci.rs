@@ -120,6 +120,14 @@ fn run_quick(args: &QuickArgs, verbose: bool) -> Result<()> {
             Box::new(|| check::run(&CheckCommand::Ban, verbose)),
         ),
         (
+            "uucore patch check",
+            Box::new(|| check::run(&CheckCommand::UucorePatch, verbose)),
+        ),
+        (
+            "uucore feature-set check",
+            Box::new(|| check::run(&CheckCommand::UucoreFeatures, verbose)),
+        ),
+        (
             "Unit tests",
             Box::new(|| test::run(&make_unit_test_command(), verbose)),
         ),
@@ -148,6 +156,18 @@ fn run_pre_commit(args: &PreCommitArgs, verbose: bool) -> Result<()> {
         (
             "Filesystem ban check",
             Box::new(|| check::run(&CheckCommand::Ban, verbose)),
+        ),
+        (
+            "uucore patch check",
+            Box::new(|| check::run(&CheckCommand::UucorePatch, verbose)),
+        ),
+        (
+            "uucore feature-set check",
+            Box::new(|| check::run(&CheckCommand::UucoreFeatures, verbose)),
+        ),
+        (
+            "Fork suites (D13 health metric)",
+            Box::new(|| check::run(&CheckCommand::Forks, verbose)),
         ),
         (
             "Unit tests",

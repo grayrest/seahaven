@@ -24,6 +24,8 @@ pub enum GenCommand {
     /// Generate JSON schemas.
     #[clap(subcommand)]
     Schema(SchemaCommand),
+    /// Regenerate the frozen uucore feature list `check uucore-features` guards (D4).
+    UucoreFeatures,
 }
 
 /// Documentation generation commands.
@@ -102,6 +104,7 @@ pub struct GenerateSchemaArgs {
 /// Run a generation command.
 pub fn run(cmd: &GenCommand, verbose: bool) -> Result<()> {
     match cmd {
+        GenCommand::UucoreFeatures => gen_uucore_features(verbose),
         GenCommand::Docs(docs_cmd) => match docs_cmd {
             DocsCommand::Man(args) => gen_man(args, verbose),
             DocsCommand::Markdown(args) => gen_markdown_docs(args, verbose),
@@ -277,5 +280,33 @@ fn gen_docs_dist(args: &GenerateDistArgs, verbose: bool) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Rewrites `xtask/uucore-features.txt` from the current resolution, keeping
+/// the explanatory header that says why a change here is a decision.
+fn gen_uucore_features(verbose: bool) -> Result<()> {
+    let sh = xshell::Shell::new()?;
+    let root = crate::common::find_workspace_root()?;
+    let path = root.join("xtask/uucore-features.txt");
+
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut header = String::new();
+    for line in existing
+        .lines()
+        .take_while(|l| l.starts_with('#') || l.trim().is_empty())
+    {
+        header.push_str(line);
+        header.push('\n');
+    }
+
+    let features = crate::check::resolved_uucore_features(&sh, verbose)?;
+    std::fs::write(&path, format!("{header}{features}\n"))?;
+
+    eprintln!(
+        "wrote {} ({} features)",
+        path.display(),
+        features.lines().count()
+    );
     Ok(())
 }

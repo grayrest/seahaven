@@ -1,0 +1,90 @@
+# The uucore features `coreutils.all` resolves to, frozen (D4).
+#
+# Not a style check. The route/leave triage in
+# plans/2026-08-18-uucore-fork.md rests on which uucore modules actually
+# compile, and six modules with filesystem access are excluded from the codemod
+# *because they are not built*: benchmark, proc_info, selinux, smack,
+# systemd_logind, uptime. Enabling any of those features -- directly, or
+# transitively by adding a utility -- silently ships 29 unrouted sites that
+# read /proc, /sys and /etc/mtab.
+#
+# So a change here is a decision, not a diff to wave through. If a feature
+# appears, decide whether its module routes, leaves, or needs hand-routing,
+# record it in the plan's table, then run `cargo xtask gen uucore-features`.
+#
+backup-control
+base64-simd
+bigdecimal
+blake2b_simd
+blake3
+bstr
+buf-copy
+checksum
+colors
+crc-fast
+data-encoding
+data-encoding-macro
+default
+digest
+dunce
+encoding
+entries
+extendedbigdecimal
+fast-inc
+format
+fs
+fsext
+fsxattr
+glob
+hardware
+hex
+i18n-charmap
+i18n-collator
+i18n-common
+i18n-datetime
+i18n-decimal
+icu_calendar
+icu_collator
+icu_datetime
+icu_decimal
+icu_locale
+icu_provider
+itertools
+jiff
+jiff-icu
+libc
+lines
+md-5
+memchr
+mode
+num-traits
+parser
+parser-glob
+parser-num
+parser-size
+perms
+pipes
+process
+procfs
+quoting-style
+ranges
+ringbuffer
+safe-copy
+safe-traversal
+sha1
+sha2
+sha3
+shake
+signals
+sm3
+sum
+time
+unit-prefix
+update-control
+version-cmp
+walkdir
+wide
+winapi-util
+windows-sys
+xattr
+z85

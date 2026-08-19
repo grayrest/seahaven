@@ -1,0 +1,20 @@
+# Upstream tests that already fail in the *pristine* crate on some hosts, with
+# the reason. One test path per line.
+#
+# D13's rule, inherited from the compat harness: a case that starts *passing*
+# is itself a failure. Otherwise this list silently accumulates entries that no
+# longer describe anything, and the health metric it exists to protect stops
+# measuring.
+#
+# Nothing here is a flatland divergence. Both were verified against the
+# registry copy staged alongside its `uu_*-0.10.0` siblings, which fails them
+# identically -- so the routing changed neither. If a *routing* divergence ever
+# needs an entry, it names the decision that caused it, per D13.
+
+# macOS: the test asserts an ACL is absent, but the temp directory inherits one
+# from its parent, so `has_acl` is legitimately true.
+features::fsxattr::tests::test_file_has_acl
+
+# Needs a French locale bundle the crates.io package does not ship: the
+# assertion wants "erreur" and gets the en-US fallback "error".
+mods::clap_localization::tests::test_french_localization

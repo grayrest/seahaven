@@ -43,6 +43,10 @@ pub enum CheckCommand {
     Workflows,
     /// Check that exactly one `uucore` -- the fork -- is in the graph (D4).
     UucorePatch,
+    /// Check that `coreutils.all` still resolves to the frozen uucore features (D4).
+    UucoreFeatures,
+    /// Run each fork's own upstream test suite, its health metric (D13).
+    Forks,
 }
 
 /// Run a check command.
@@ -62,6 +66,8 @@ pub fn run(cmd: &CheckCommand, verbose: bool) -> Result<()> {
         CheckCommand::Workflows => check_workflows(&sh, verbose),
         CheckCommand::Links => check_links(&sh, verbose),
         CheckCommand::UucorePatch => check_uucore_patch(&sh, verbose),
+        CheckCommand::UucoreFeatures => check_uucore_features(&sh, verbose),
+        CheckCommand::Forks => check_forks(&sh, verbose),
     }
 }
 
@@ -256,6 +262,226 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
 /// warning on stderr and still exits 0, so a stale path or a version bump that
 /// no longer matches leaves every utility on the registry copy with nothing in
 /// the exit status to say so.
+/// Path of the frozen uucore feature list, relative to the workspace root.
+const UUCORE_FEATURES: &str = "xtask/uucore-features.txt";
+
+/// The features each fork's own suite is run under.
+///
+/// `uucore` needs an explicit list because its interesting modules are all
+/// feature-gated and `--all-features` would pull in `selinux` and `openssl`,
+/// which need system libraries CI does not have.
+const FORK_TEST_FEATURES: &[(&str, &str)] = &[(
+    "uucore",
+    "fs,safe-traversal,safe-copy,backup-control,fsxattr,perms,checksum,fsext,\
+     parser,format,mode,entries,pipes,buf-copy,process",
+)];
+
+/// Runs each fork's own upstream test suite (D13's health metric).
+///
+/// The forks are `exclude`d from the workspace, so `cargo test -p uucore` from
+/// the root fails with "cannot be tested because it requires dev-dependencies
+/// and is not a member of the workspace". Each is therefore tested as its own
+/// standalone workspace.
+///
+/// Two consequences worth stating rather than discovering. `[patch]` does not
+/// apply in that mode, so the dependency set under test is not exactly the
+/// shipped one. And a fork inherits upstream's own failures: on a given host
+/// some of these do not pass in the registry copy either, so the metric is
+/// "did *we* change the count", which needs the pristine comparison a rebase
+/// performs, not an absolute zero.
+fn check_forks(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Running the forks' own test suites...");
+    let root = crate::common::find_workspace_root()?;
+    let forks_dir = root.join("forks");
+
+    let mut names: Vec<String> = std::fs::read_dir(&forks_dir)
+        .with_context(|| format!("reading {}", forks_dir.display()))?
+        .flatten()
+        .filter(|e| e.path().join("Cargo.toml").is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    anyhow::ensure!(!names.is_empty(), "no forks found under {}", forks_dir.display());
+
+    for name in &names {
+        let dir = forks_dir.join(name);
+        let features = FORK_TEST_FEATURES
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, f)| *f);
+
+        if verbose {
+            eprintln!("Testing fork {name} ({})", features.unwrap_or("default features"));
+        }
+        let _guard = sh.push_dir(&dir);
+        let output = if let Some(features) = features {
+            cmd!(sh, "cargo test --features {features}")
+                .ignore_status()
+                .quiet()
+                .read()
+        } else {
+            cmd!(sh, "cargo test").ignore_status().quiet().read()
+        }
+        .with_context(|| format!("running fork {name}'s suite"))?;
+
+        let failed = parse_test_failures(&output);
+        let known = known_failures(&dir);
+
+        let unexpected: Vec<&String> = failed.iter().filter(|t| !known.contains(*t)).collect();
+        // D13's mirror rule: an entry that no longer fails is itself an error,
+        // or the list quietly stops describing anything.
+        let stale: Vec<&String> = known.iter().filter(|t| !failed.contains(*t)).collect();
+
+        anyhow::ensure!(
+            unexpected.is_empty(),
+            "fork {name} has {} unexpected test failure(s) -- D13's health metric:\n  {}",
+            unexpected.len(),
+            unexpected
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+        anyhow::ensure!(
+            stale.is_empty(),
+            "fork {name} lists {} known failure(s) that now pass; remove them from \
+             known-test-failures.txt:\n  {}",
+            stale.len(),
+            stale.iter().map(|t| t.as_str()).collect::<Vec<_>>().join("\n  ")
+        );
+        if verbose {
+            eprintln!("  {name}: {} known failure(s), no new ones", known.len());
+        }
+    }
+
+    eprintln!("Fork suites passed ({} forks).", names.len());
+    Ok(())
+}
+
+/// The test paths a `cargo test` run reported as failures.
+///
+/// Read from the summary block rather than counted, so the check can say *which*
+/// test is new rather than only that the number moved.
+fn parse_test_failures(output: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut in_block = false;
+    for line in output.lines() {
+        if line.trim() == "failures:" {
+            in_block = true;
+            continue;
+        }
+        if in_block {
+            let trimmed = line.trim();
+            // The block ends at the blank line or the `test result:` summary.
+            if trimmed.is_empty() || trimmed.starts_with("test result:") {
+                in_block = false;
+                continue;
+            }
+            // Skip the per-test stdout dumps, which are also under "failures:".
+            if !trimmed.contains(' ') {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// A fork's recorded known-failing upstream tests.
+fn known_failures(dir: &std::path::Path) -> Vec<String> {
+    let path = dir.join("known-test-failures.txt");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = parse_feature_list(&text)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Checks that `coreutils.all` still resolves to the uucore features the D4
+/// triage was decided against.
+///
+/// The plan's route/leave table is only correct for a particular set of
+/// compiled modules. Six modules with filesystem access -- `benchmark`,
+/// `proc_info`, `selinux`, `smack`, `systemd_logind`, `uptime` -- are left
+/// unrouted *because they are not built*, and they read `/proc`, `/sys` and
+/// `/etc/mtab`. Enabling one, directly or by adding a utility that pulls it in,
+/// would ship 29 unrouted sites with nothing else in the tree objecting.
+///
+/// This is a blunt instrument and is meant to be: it fires on any change,
+/// including a benign one, so that the triage is re-read rather than assumed.
+fn check_uucore_features(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Checking the resolved uucore feature set...");
+    let root = crate::common::find_workspace_root()?;
+    let expected_path = root.join(UUCORE_FEATURES);
+    let expected = std::fs::read_to_string(&expected_path)
+        .with_context(|| format!("reading {}", expected_path.display()))?;
+    let expected: Vec<&str> = parse_feature_list(&expected);
+    anyhow::ensure!(
+        !expected.is_empty(),
+        "{} lists no features; the guard would pass vacuously",
+        expected_path.display()
+    );
+
+    let actual = resolved_uucore_features(sh, verbose)?;
+    let actual: Vec<&str> = actual.lines().collect();
+
+    if actual != expected {
+        let added: Vec<&&str> = actual.iter().filter(|f| !expected.contains(f)).collect();
+        let removed: Vec<&&str> = expected.iter().filter(|f| !actual.contains(f)).collect();
+        anyhow::bail!(
+            "the uucore feature set changed.\n  added:   {added:?}\n  removed: {removed:?}\n\n             This is a decision, not a diff: re-read the route/leave table in \n             plans/2026-08-18-uucore-fork.md, decide whether any newly compiled \n             module routes, then run `cargo xtask gen uucore-features`."
+        );
+    }
+
+    eprintln!("uucore feature check passed ({} features).", expected.len());
+    Ok(())
+}
+
+/// The feature names in a frozen list, ignoring comments and blanks.
+fn parse_feature_list(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect()
+}
+
+/// The uucore features `coreutils.all` currently resolves to, newline-separated
+/// and sorted.
+pub(crate) fn resolved_uucore_features(sh: &Shell, verbose: bool) -> Result<String> {
+    let args = [
+        "tree",
+        "-p",
+        "brush-coreutils-builtins",
+        "--features",
+        "coreutils.all",
+        "-e",
+        "features",
+    ];
+    if verbose {
+        eprintln!("Running: cargo {}", args.join(" "));
+    }
+    let out = cmd!(sh, "cargo {args...}")
+        .read()
+        .context("running cargo tree to resolve uucore features")?;
+
+    let mut found: Vec<String> = out
+        .lines()
+        .filter_map(|line| {
+            let rest = line.split("uucore feature \"").nth(1)?;
+            rest.split('"').next().map(str::to_string)
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    Ok(found.join("\n"))
+}
+
 fn check_uucore_patch(sh: &Shell, verbose: bool) -> Result<()> {
     eprintln!("Checking the uucore patch...");
     let root = crate::common::find_workspace_root()?;

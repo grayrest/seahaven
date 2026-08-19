@@ -97,6 +97,44 @@ fn run_util(name: &str, path: &str) -> i32 {
     f(vec![OsString::from(name), OsString::from(path)])
 }
 
+/// A utility that has **no filesystem code of its own** must still be confined,
+/// because `uucore` is now routed (D4's uucore increment).
+///
+/// This is the case the milestone exists for, and it is the cleanest available
+/// isolation of what routing `uucore` bought. `cargo xtask codemod` over
+/// `uu_cksum`'s own sources reports `0 site(s) routed, 0 unrouted`: every byte
+/// it reads goes through `uucore::checksum`. So before `uucore` was forked this
+/// utility was completely unconfined no matter what the namespace said, and
+/// nothing in `uu_cksum` could have been changed to fix it.
+///
+/// `uu_cksum` is *not* one of the five forked leaves — it is still the stock
+/// crates.io crate. It is confined here purely because the `[patch]` repointed
+/// the `uucore` underneath it.
+#[cfg(feature = "coreutils.cksum")]
+#[test]
+fn a_utility_with_no_filesystem_code_of_its_own_is_confined_through_uucore() {
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside.txt");
+    std::fs::write(&outside, b"secret\n").unwrap();
+
+    let jail = tempfile::tempdir().unwrap();
+    std::fs::write(jail.path().join("inside.txt"), b"hello\n").unwrap();
+    confine_to(jail.path());
+
+    assert_eq!(
+        run_util("cksum", "/work/inside.txt"),
+        0,
+        "a file in the mount must be checksummable"
+    );
+    assert_ne!(
+        run_util("cksum", &outside.to_string_lossy()),
+        0,
+        "a host path outside the mount must not be reachable through uucore::checksum"
+    );
+    brush_vfs::ambient::uninstall();
+}
+
 /// Every routed utility, not just `cat`, must be confined: a host path outside
 /// the mount is unreachable, and a path inside it works. If any of these still
 /// used raw `std::fs`, the outside path would open.
