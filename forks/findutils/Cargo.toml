@@ -1,0 +1,111 @@
+# Fork of findutils, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.argmax]
+version = "0.4.0"
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.chrono]
+version = "0.4.45"
+
+[dependencies.clap]
+features = ["env"]
+version = "4.6"
+
+[dependencies.faccess]
+version = "0.2.4"
+
+[dependencies.itertools]
+version = "0.15.0"
+
+[dependencies.nix]
+features = [
+    "fs",
+    "user",
+]
+version = "0.31"
+
+[dependencies.onig]
+default-features = false
+version = "6.5"
+
+[dependencies.regex]
+version = "1.12"
+
+[dependencies.thiserror]
+version = "2.0.12"
+
+[dependencies.uucore]
+features = [
+    "entries",
+    "fs",
+    "fsext",
+    "mode",
+]
+version = "0.9.0"
+
+[dependencies.walkdir]
+version = "2.5"
+
+[dev-dependencies.assert_cmd]
+version = "2"
+
+[dev-dependencies.criterion]
+package = "codspeed-criterion-compat"
+version = "4.7.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.filetime]
+version = "0.2"
+
+[dev-dependencies.nix]
+features = ["fs"]
+version = "0.31"
+
+[dev-dependencies.rstest]
+version = "0.26.1"
+
+[dev-dependencies.tempfile]
+version = "3"
+
+[dev-dependencies.uutests]
+version = "0.9.0"
+
+[lib]
+name = "findutils"
+path = "src/lib.rs"
+
+[package]
+authors = ["uutils developers"]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+description = "Rust implementation of GNU findutils"
+edition = "2021"
+homepage = "https://github.com/uutils/findutils"
+license = "MIT"
+name = "findutils"
+repository = "https://github.com/uutils/findutils"
+version = "0.10.0"
+
+[profile.dist]
+inherits = "release"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+[profile.release-fast]
+inherits = "release"
+panic = "abort"

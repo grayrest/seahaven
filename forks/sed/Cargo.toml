@@ -1,0 +1,167 @@
+# Fork of sed, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[build-dependencies.phf_codegen]
+version = "0.13.0"
+
+[dependencies.assert_fs]
+version = "1.1.3"
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+]
+version = "4.4"
+
+[dependencies.clap_complete]
+version = "4.5"
+
+[dependencies.clap_mangen]
+version = "0.2"
+
+[dependencies.ctor]
+version = "0.6.0"
+
+[dependencies.fancy-regex]
+version = "0.17.0"
+
+[dependencies.memchr]
+version = "2.7.4"
+
+[dependencies.memmap2]
+version = "0.9"
+
+[dependencies.once_cell]
+version = "1.21.3"
+
+[dependencies.phf]
+version = "0.13.0"
+
+[dependencies.predicates]
+version = "3.1.3"
+
+[dependencies.regex]
+version = "1.10.4"
+
+[dependencies.sysinfo]
+version = "0.37"
+
+[dependencies.tempfile]
+version = "3.10.1"
+
+[dependencies.terminal_size]
+version = "0.4.2"
+
+[dependencies.textwrap]
+features = ["terminal_size"]
+version = "0.16.1"
+
+[dependencies.uucore]
+features = ["libc"]
+version = "0.5.0"
+
+[dev-dependencies.chrono]
+default-features = false
+features = ["clock"]
+version = "0.4.37"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.divan]
+package = "codspeed-divan-compat"
+version = "4.0.5"
+
+[dev-dependencies.libc]
+version = "0.2.153"
+
+[dev-dependencies.pretty_assertions]
+version = "1"
+
+[dev-dependencies.rand]
+features = ["small_rng"]
+version = "0.9"
+
+[dev-dependencies.regex]
+version = "1.10.4"
+
+[dev-dependencies.tempfile]
+version = "3.10.1"
+
+[dev-dependencies.uucore]
+features = [
+    "libc",
+    "entries",
+    "process",
+    "signals",
+    "benchmark",
+]
+version = "0.5.0"
+
+[dev-dependencies.uutests]
+version = "0.5.0"
+
+[features]
+default = ["feat_common_core"]
+feat_common_core = ["sed"]
+sed = []
+
+[lib]
+name = "sed"
+path = "src/lib.rs"
+
+[package]
+authors = ["uutils developers"]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = "build.rs"
+categories = ["command-line-utilities"]
+description = "sed ~ implemented as universal (cross-platform) utils, written in Rust"
+edition = "2024"
+homepage = "https://github.com/uutils/sed"
+keywords = [
+    "sed",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "sed"
+repository = "https://github.com/uutils/sed"
+rust-version = "1.88"
+version = "0.1.1"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[profile.release]
+lto = true
+
+[profile.release-fast]
+codegen-units = 1
+inherits = "release"
+panic = "abort"
+
+[profile.release-small]
+inherits = "release-fast"
+opt-level = "z"
+strip = true
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dev-dependencies.rlimit]
+version = "0.10.1"
+
+[target."cfg(unix)".dev-dependencies.xattr]
+version = "1.3.1"

@@ -1,0 +1,75 @@
+# Fork of uu_grep, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.glob]
+version = "0.3.1"
+
+[dependencies.memchr]
+version = "2.7.2"
+
+[dependencies.onig]
+default-features = false
+version = "~6.5.1"
+
+[dependencies.onig_sys]
+default-features = false
+version = "69"
+
+[dependencies.uucore]
+version = "0.8.0"
+
+[dependencies.walkdir]
+version = "2.5"
+
+[dev-dependencies.criterion]
+package = "codspeed-criterion-compat"
+version = "4.7.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.uutests]
+version = "0.8.0"
+
+[lib]
+name = "uu_grep"
+path = "src/lib.rs"
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "A Rust implementation of GNU Grep"
+edition = "2024"
+homepage = "https://github.com/uutils/grep"
+keywords = [
+    "grep",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_grep"
+repository = "https://github.com/uutils/grep"
+rust-version = "1.88.0"
+version = "0.1.0"

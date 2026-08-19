@@ -471,6 +471,15 @@ impl EditCollector<'_> {
             [s, f, a, m] if s == "std" && f == "fs" && a == "File" => {
                 (Some("File".to_string()), Some(m.clone()))
             }
+            // `fs::File::open(p)` through a module alias -- the form `use
+            // std::{fs, io}` produces. Missed until `findutils`' xargs was
+            // surveyed, where it was the crate's only filesystem site and went
+            // silently unrouted: the two arms above cover the four-segment
+            // `std::fs::File::open` and the two-segment `File::open`, and
+            // nothing covered the three-segment middle.
+            [module, a, m] if a == "File" && self.bindings.module_aliases.contains(module) => {
+                (Some("File".to_string()), Some(m.clone()))
+            }
             _ => (None, None),
         };
         if let (Some(base), Some(assoc)) = (file_base, assoc) {
@@ -1083,6 +1092,16 @@ mod tests {
         let link = routed("fn f(p: &str, q: &str) { let _ = std::fs::hard_link(p, q); }\n");
         assert!(link.source.contains("brush_vfs::ambient::hard_link(p, q)"));
         assert!(link.unhandled.is_empty());
+    }
+
+    #[test]
+    fn file_open_is_routed_through_a_module_alias_too() {
+        // `use std::{fs, io}` then `fs::File::open(p)` -- three segments, which
+        // sat between the two forms the visitor handled. It was `findutils`
+        // xargs's only filesystem site, so the whole utility read as routed
+        // while being entirely unrouted.
+        let out = routed("use std::{fs, io};\nfn f(p: &str) { let _ = fs::File::open(p); }\n");
+        assert!(out.source.contains("brush_vfs::ambient::open(p)"));
     }
 
     #[test]

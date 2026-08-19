@@ -106,6 +106,63 @@ macro_rules! register {
     };
 }
 
+/// Like [`register!`], but for a crate whose `uumain` is not at the crate root.
+///
+/// `uutils/sed` puts it at `sed::sed::uumain`. The localization name is given
+/// separately because it is derived from the *utility*, not the module path.
+macro_rules! register_at {
+    ($map:expr, $feature:literal, $name:literal, $localization:literal, $($path:tt)*) => {
+        #[cfg(feature = $feature)]
+        {
+            fn adapter<I>(args: I) -> i32
+            where
+                I: IntoIterator<Item = OsString>,
+            {
+                $crate::prepare_uutil_runtime($localization);
+                let code = $($path)*(args.into_iter());
+                $crate::finalize_uutil_runtime();
+                code
+            }
+            $map.insert($name.to_string(), adapter as fn(Vec<OsString>) -> i32);
+        }
+    };
+}
+
+/// Registers a `findutils` entry point.
+///
+/// `findutils` predates uutils' `uumain` convention -- it descends from Google's
+/// original Rust rewrite -- and its entry points take `&[&str]` and return
+/// `i32` directly. So argv is converted rather than passed through, and there is
+/// no `uucore` localization bundle to initialize: the crate does not use
+/// `translate!`.
+///
+/// Non-UTF-8 argv is the one behavioural difference worth naming. `&str`
+/// cannot carry it, so an argument that is not valid UTF-8 is lossily converted
+/// rather than passed through intact, exactly as upstream's own `find` binary
+/// does (`std::env::args`, which panics on invalid UTF-8, versus our lossy
+/// conversion, which is strictly more forgiving).
+macro_rules! register_findutils {
+    ($map:expr, $feature:literal, $name:literal, $call:expr) => {
+        #[cfg(feature = $feature)]
+        {
+            fn adapter<I>(args: I) -> i32
+            where
+                I: IntoIterator<Item = OsString>,
+            {
+                let owned: Vec<String> = args
+                    .into_iter()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect();
+                let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+                let code = ($call)(&refs);
+                $crate::finalize_uutil_runtime();
+                code
+            }
+            $map.insert($name.to_string(), adapter as fn(Vec<OsString>) -> i32);
+        }
+    };
+}
+
 /// Returns the set of bundled coreutils commands enabled by feature flags.
 ///
 /// Keyed by utility name (e.g., `"cat"`); values are `uumain`-shaped entry
@@ -202,6 +259,15 @@ pub fn bundled_commands() -> HashMap<String, fn(Vec<OsString>) -> i32> {
     register!(m, "coreutils.wc", "wc", uu_wc);
     register!(m, "coreutils.whoami", "whoami", uu_whoami);
     register!(m, "coreutils.yes", "yes", uu_yes);
+
+    // The other three uutils projects (D4). Each has its own entry shape.
+    register_at!(m, "textutils.grep", "grep", "grep", uu_grep::uumain);
+    register_at!(m, "textutils.sed", "sed", "sed", sed::sed::uumain);
+    // `find` is not registered; see the note on `findutils.all` in Cargo.toml.
+    // The fork exists and is routed, but its walk is `walkdir` and is not
+    // confined, and `find` is the one utility whose whole purpose is
+    // enumerating the filesystem.
+    register_findutils!(m, "findutils.xargs", "xargs", findutils::xargs::xargs_main);
 
     m
 }

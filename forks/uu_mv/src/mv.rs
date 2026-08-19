@@ -1055,7 +1055,7 @@ fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
         Mode::empty(),
     )?;
 
-    let mut urandom = fs::File::open("/dev/urandom")?;
+    let mut urandom = brush_vfs::ambient::open("/dev/urandom")?;
 
     for _ in 0..32 {
         let mut tmp_bytes = *b"Cu------";

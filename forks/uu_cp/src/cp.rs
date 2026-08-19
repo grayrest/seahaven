@@ -2728,7 +2728,7 @@ fn copy_file(
 
     // GNU cp truncates the destination when a required attribute cannot be preserved
     copy_attributes_result.inspect_err(|_| {
-        fs::File::create(dest).map(|f| f.set_len(0)).ok();
+        brush_vfs::ambient::create(dest).map(|f| f.set_len(0)).ok();
     })?;
 
     #[cfg(all(feature = "selinux", any(target_os = "linux", target_os = "android")))]

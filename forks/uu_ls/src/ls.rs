@@ -34,10 +34,8 @@ use std::{
 };
 // FLATLAND DIVERGENCE (D13 residual patch): `ReadDir` and `DirEntry` are the
 // only two types the facade cannot hand back as `std`'s own -- neither has a
-// public constructor, so `brush-vfs` returns its own. Every other routed call
-// keeps its `std` type, which is what makes the codemod an identifier swap
-// rather than a type swap (D34). `uu_ls` is the one utility that *names* these
-// in signatures, so the names follow the calls.
+// public constructor. `uu_ls` names them in signatures, so the names follow the
+// calls. Everything else keeps its `std` type (D34).
 use brush_vfs::ambient::{DirEntry, ReadDir};
 use thiserror::Error;
 

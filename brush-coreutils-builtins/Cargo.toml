@@ -104,6 +104,24 @@ default = []
     'coreutils.yes',
 ]
 
+# The other three uutils projects D4 names. Separate from `coreutils.all`
+# because they are separate upstreams on their own release cadences -- grep is
+# at 0.1.0 while coreutils is at 0.10.0 -- and a recipe runner may want the
+# coreutils set without them.
+# `find` is deliberately absent. It is forked and its 19 std::fs sites are
+# routed, but its traversal is `walkdir`, which reads directories itself and
+# cannot be routed -- `deny.toml` bans the crate for exactly that reason. An
+# unconfined `find` is worse than no `find`: enumerating the filesystem is its
+# entire job, so it would report the host tree under a restrictive policy.
+# Confining it needs a vfs-backed walker that yields *virtual* paths; rooting
+# walkdir at a resolved host path instead would make find half-virtual, since
+# its matchers then hand host paths back to routed calls.
+'findutils.all' = ['findutils.xargs']
+'findutils.xargs' = ["dep:findutils"]
+'textutils.all' = ['textutils.grep', 'textutils.sed']
+'textutils.grep' = ["dep:uu_grep"]
+'textutils.sed' = ["dep:sed"]
+
 'coreutils.arch' = ["dep:uu_arch"]
 'coreutils.base32' = ["dep:uu_base32"]
 'coreutils.base64' = ["dep:uu_base64"]
@@ -192,6 +210,10 @@ workspace = true
 
 [dependencies]
 uucore = { version = "0.10.0", default-features = false }
+
+findutils = { path = "../forks/findutils", optional = true }
+uu_grep = { path = "../forks/uu_grep", optional = true }
+sed = { path = "../forks/sed", optional = true }
 
 uu_arch = { version = "0.10.0", optional = true }
 uu_base32 = { path = "../forks/uu_base32", optional = true }

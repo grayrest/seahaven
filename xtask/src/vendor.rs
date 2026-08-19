@@ -308,6 +308,17 @@ fn copy_lib_sources(src: &Path, dest: &Path, build_script: Option<String>) -> Re
     if locales.is_dir() {
         copy_tree(&locales, &dest.join("locales"), &|_| false)?;
     }
+    // Test fixtures. Upstream's own suite is D13's health metric, and a suite
+    // whose fixtures are missing reports failures that say nothing about the
+    // routing -- `findutils` reads `test_data/` from the crate root and every
+    // one of its filesystem tests fails without it.
+    for fixtures in ["test_data", "testdata", "fixtures"] {
+        let from = src.join(fixtures);
+        if from.is_dir() {
+            copy_tree(&from, &dest.join(fixtures), &|_| false)?;
+        }
+    }
+
     for aux in ["LICENSE", "LICENSE-MIT", "COPYING"] {
         let from = src.join(aux);
         if from.is_file() {
@@ -383,6 +394,10 @@ fn write_manifest(src: &Path, dest: &Path, name: &str) -> Result<()> {
     if let Some(toml::Value::Table(package)) = manifest.get_mut("package") {
         // The README is not vendored, so a reference to it would fail to package.
         package.remove("readme");
+        // `default-run` names a `[[bin]]` that has just been dropped, and cargo
+        // refuses to parse a manifest whose default-run target does not exist.
+        // `uutils/sed` sets it.
+        package.remove("default-run");
         package.insert("autobins".into(), toml::Value::Boolean(false));
         package.insert("autobenches".into(), toml::Value::Boolean(false));
         package.insert("autoexamples".into(), toml::Value::Boolean(false));

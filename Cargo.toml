@@ -41,6 +41,8 @@ default-members = ["brush-shell"]
 # the localizer thread-local and `uucore::error::EXIT_CODE`. A patch repoints
 # the whole graph at once; `cargo xtask check uucore-patch` proves it did.
 [patch.crates-io]
+findutils = { path = "forks/findutils" }
+sed = { path = "forks/sed" }
 uu_base32 = { path = "forks/uu_base32" }
 uu_cat = { path = "forks/uu_cat" }
 uu_comm = { path = "forks/uu_comm" }
@@ -54,6 +56,7 @@ uu_du = { path = "forks/uu_du" }
 uu_expand = { path = "forks/uu_expand" }
 uu_fmt = { path = "forks/uu_fmt" }
 uu_fold = { path = "forks/uu_fold" }
+uu_grep = { path = "forks/uu_grep" }
 uu_head = { path = "forks/uu_head" }
 uu_join = { path = "forks/uu_join" }
 uu_link = { path = "forks/uu_link" }

@@ -240,3 +240,62 @@ fn the_whole_fork_set_refuses_a_path_outside_the_mount() {
     );
     brush_vfs::ambient::uninstall();
 }
+
+/// The other three uutils projects D4 names: `find`, `xargs`, `grep`, `sed`.
+///
+/// Separate from the coreutils sweep because they are separate upstreams with
+/// separate entry shapes -- `findutils` predates the `uumain` convention and
+/// takes `&[&str]` -- so a regression in one says nothing about the others.
+///
+/// `find` is the interesting case. It is a *traversal*, not a single open: it
+/// walks from a root and reports what it sees, so an unrouted `find` would
+/// enumerate the host tree rather than merely read one file outside the mount.
+#[cfg(all(feature = "findutils.all", feature = "textutils.all"))]
+#[test]
+fn findutils_and_textutils_are_confined() {
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside.txt");
+    std::fs::write(&outside, b"secret\n").unwrap();
+    let outside = outside.to_string_lossy().into_owned();
+
+    let jail = tempfile::tempdir().unwrap();
+    std::fs::write(jail.path().join("inside.txt"), b"needle\n").unwrap();
+    confine_to(jail.path());
+
+    let cmds = brush_coreutils_builtins::bundled_commands();
+    let run = |name: &str, args: &[&str]| -> i32 {
+        uucore::error::set_exit_code(0);
+        let f = cmds.get(name).expect("bundled under its feature");
+        let mut argv = vec![OsString::from(name)];
+        argv.extend(args.iter().map(OsString::from));
+        f(argv)
+    };
+
+    // Inside the mount, each works.
+    assert_eq!(run("grep", &["needle", "/work/inside.txt"]), 0, "grep in-mount");
+    assert_eq!(run("sed", &["s/needle/x/", "/work/inside.txt"]), 0, "sed in-mount");
+
+    // Outside it, none can reach the file.
+    assert_ne!(run("grep", &["secret", &outside]), 0, "grep must not read outside");
+    assert_ne!(run("sed", &["s/secret/x/", &outside]), 0, "sed must not read outside");
+
+    // `xargs` reads its argument file through the facade -- its only filesystem
+    // site, and one the codemod missed until this survey, since `fs::File::open`
+    // through a module alias sat between the two forms the visitor handled.
+    assert_ne!(
+        run("xargs", &["-a", &outside, "echo"]),
+        0,
+        "xargs must not read an argument file outside the mount"
+    );
+
+    // `find` is deliberately not registered -- its walk is walkdir and is not
+    // confined. If it ever appears here without a vfs-backed walker, that is
+    // the regression this asserts.
+    assert!(
+        !cmds.contains_key("find"),
+        "find must not be bundled until its traversal is confined"
+    );
+
+    brush_vfs::ambient::uninstall();
+}
