@@ -127,6 +127,10 @@ const FACADE_FREE_FNS: &[&str] = &[
     "rename",
     "exists",
     "try_exists",
+    "create_dir",
+    "set_permissions",
+    "copy",
+    "hard_link",
 ];
 
 /// Inherent `Path`/`PathBuf` methods the visitor rewrites to a facade call.
@@ -152,20 +156,18 @@ const REWRITTEN_PATH_METHODS: &[&str] = &[
 /// Filesystem functions the facade does not provide, reported when seen as a
 /// free call or a distinctive method so the residual work is visible.
 ///
-/// These are capabilities D4 has not built (copy, hard links, permission and
-/// non-recursive-dir-create). Deliberately absent are `metadata` / `is_dir` /
+/// Down to one: `copy`, `hard_link`, `set_permissions` and `create_dir` all
+/// moved into the facade once the survey showed they were 25 of the 26
+/// unrouted sites across the unforked utilities, and `cap_std::fs::Dir`
+/// provides all four. `soft_link` is deprecated in `std` itself in favour of
+/// `os::unix::fs::symlink`, so a call to it is worth reporting rather than
+/// quietly routing. Deliberately absent are `metadata` / `is_dir` /
 /// `is_file` / `is_symlink`, which also exist on non-`Path` types (`File`,
 /// `FileType`) where they need no routing — flagging them without type inference
 /// reports pure calls as unrouted, which is `uu_cat`'s `filetype.is_dir()` false
 /// positive. The ban and Landlock test are the backstop for any genuinely
 /// unrouted `path.metadata()`.
-const CARVE_OUT_FNS: &[&str] = &[
-    "set_permissions",
-    "hard_link",
-    "soft_link",
-    "copy",
-    "create_dir",
-];
+const CARVE_OUT_FNS: &[&str] = &["soft_link"];
 
 /// The facade path a rewrite points at.
 const FACADE: &str = "brush_vfs::ambient";
@@ -983,10 +985,38 @@ mod tests {
 
     #[test]
     fn a_carve_out_free_fn_is_reported_not_rewritten() {
-        // copy is a capability the facade does not provide.
-        let out = routed("fn f(p: &str, q: &str) { let _ = std::fs::copy(p, q); }\n");
-        assert!(!out.source.contains("ambient::copy"));
-        assert!(out.unhandled.iter().any(|u| u.contains("copy")));
+        // `soft_link` is the last one. `std` deprecated it in favour of
+        // `os::unix::fs::symlink`, so a call is worth surfacing rather than
+        // quietly routing.
+        let out = routed("fn f(p: &str, q: &str) { let _ = std::fs::soft_link(p, q); }\n");
+        assert!(!out.source.contains("ambient::soft_link"));
+        assert!(out.unhandled.iter().any(|u| u.contains("soft_link")));
+    }
+
+    #[test]
+    fn the_two_path_operations_are_routed() {
+        // `copy` and `hard_link` were 15 of the 26 unrouted sites across the
+        // unforked utilities, and `cap_std::fs::Dir` provides both, so they
+        // stopped being carve-outs.
+        let copy = routed("fn f(p: &str, q: &str) { let _ = std::fs::copy(p, q); }\n");
+        assert!(copy.source.contains("brush_vfs::ambient::copy(p, q)"));
+        assert!(copy.unhandled.is_empty());
+
+        let link = routed("fn f(p: &str, q: &str) { let _ = std::fs::hard_link(p, q); }\n");
+        assert!(link.source.contains("brush_vfs::ambient::hard_link(p, q)"));
+        assert!(link.unhandled.is_empty());
+    }
+
+    #[test]
+    fn create_dir_and_set_permissions_are_routed() {
+        let mkdir = routed("fn f(p: &str) { let _ = std::fs::create_dir(p); }\n");
+        assert!(mkdir.source.contains("brush_vfs::ambient::create_dir(p)"));
+        // Still distinct from create_dir_all: `mkdir` without -p must fail on a
+        // missing parent, so the two must not collapse into one.
+        assert!(!mkdir.source.contains("create_dir_all"));
+
+        let perms = routed("fn f(p: &str, m: std::fs::Permissions) { let _ = std::fs::set_permissions(p, m); }\n");
+        assert!(perms.source.contains("brush_vfs::ambient::set_permissions(p, m)"));
     }
 
     #[test]
@@ -1069,8 +1099,8 @@ mod tests {
 
     #[test]
     fn a_carve_out_free_call_is_still_reported() {
-        let out = routed("fn f(p: &str) { let _ = std::fs::hard_link(p, p); }\n");
-        assert!(!out.source.contains("ambient::hard_link"));
-        assert!(out.unhandled.iter().any(|u| u.contains("hard_link")));
+        let out = routed("fn f(p: &str) { let _ = std::fs::soft_link(p, p); }\n");
+        assert!(!out.source.contains("ambient::soft_link"));
+        assert!(out.unhandled.iter().any(|u| u.contains("soft_link")));
     }
 }

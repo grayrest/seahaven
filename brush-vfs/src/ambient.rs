@@ -365,6 +365,56 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let to = resolve(&session, to)?;
     session.vfs().rename(&from, &to)
 }
+/// Creates a single directory. Mirrors `std::fs::create_dir`.
+///
+/// # Errors
+/// As [`open`], and if the parent does not exist -- which is the point of it
+/// being separate from [`create_dir_all`].
+pub fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
+    with(path, Vfs::create_dir)
+}
+
+/// Sets a path's permissions. Mirrors `std::fs::set_permissions`.
+///
+/// # Errors
+/// As [`open`], and if the mount is read-only.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "D34: the rewrite is an identifier swap, so this must accept exactly what \
+              `std::fs::set_permissions` accepts -- taking a reference would make every \
+              call site need editing, which is the property the codemod exists to avoid"
+)]
+pub fn set_permissions(path: impl AsRef<Path>, perm: std::fs::Permissions) -> io::Result<()> {
+    with(path, |vfs, p| vfs.set_permissions(p, &perm))
+}
+
+/// Copies a file's contents, returning the bytes written. Mirrors
+/// `std::fs::copy`.
+///
+/// Both ends resolve through the namespace, so copying *out* of it is not
+/// expressible.
+///
+/// # Errors
+/// As [`open`] for either path, and if the destination mount is read-only.
+pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
+    let session = current()?;
+    let from = resolve(&session, from)?;
+    let to = resolve(&session, to)?;
+    session.vfs().copy(&from, &to)
+}
+
+/// Creates a hard link. Mirrors `std::fs::hard_link`.
+///
+/// # Errors
+/// As [`open`] for either path, and `CrossesDevices` if the two paths are on
+/// different mounts.
+pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    let session = current()?;
+    let original = resolve(&session, original)?;
+    let link = resolve(&session, link)?;
+    session.vfs().hard_link(&original, &link)
+}
+
 
 /// The entries of a directory. The rewrite target for `std::fs::read_dir`.
 ///

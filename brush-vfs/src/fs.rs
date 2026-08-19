@@ -1007,6 +1007,99 @@ impl Vfs {
             .rename(&from.relative, to.mount.dir(), &to.relative)
     }
 
+    /// Creates a single directory. Mirrors `std::fs::create_dir`.
+    ///
+    /// Non-recursive on purpose: `create_dir_all` stays a separate call because
+    /// the difference is observable -- `mkdir` without `-p` must fail on a
+    /// missing parent, and collapsing the two would make it silently succeed.
+    ///
+    /// # Errors
+    ///
+    /// If the path is unmounted, the mount is read-only, the parent does not
+    /// exist, or the create fails.
+    pub fn create_dir(&self, path: &VirtualPath) -> std::io::Result<()> {
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            located.mount.dir().create_dir(&located.relative)
+        })
+    }
+
+    /// Sets a path's permissions. Mirrors `std::fs::set_permissions`.
+    ///
+    /// Takes `std::fs::Permissions` so the rewrite stays a signature-preserving
+    /// identifier swap (D34); `cap-std` wants its own wrapper, which is a
+    /// lossless conversion of the same bits.
+    ///
+    /// # Errors
+    ///
+    /// If the path is unmounted, the mount is read-only, or the change fails.
+    pub fn set_permissions(
+        &self,
+        path: &VirtualPath,
+        perm: &std::fs::Permissions,
+    ) -> std::io::Result<()> {
+        self.at(path, true, |located| {
+            Self::require_writable(located)?;
+            located.mount.dir().set_permissions(
+                &located.relative,
+                cap_std::fs::Permissions::from_std(perm.clone()),
+            )
+        })
+    }
+
+    /// Copies a file's contents, returning the bytes written. Mirrors
+    /// `std::fs::copy`.
+    ///
+    /// Both ends are resolved, so a copy *out* of the namespace is not
+    /// expressible: the destination has to name a mounted location like any
+    /// other write. Unlike [`Vfs::rename`], crossing a mount boundary is fine --
+    /// this reads and writes bytes rather than relinking an inode.
+    ///
+    /// # Errors
+    ///
+    /// If either path is unmounted, the destination mount is read-only, or the
+    /// copy fails.
+    pub fn copy(&self, from: &VirtualPath, to: &VirtualPath) -> std::io::Result<u64> {
+        let from = self.locate_follow(from)?;
+        let to = self.locate(to, false)?;
+        Self::require_writable(&to)?;
+        from.mount
+            .dir()
+            .copy(&from.relative, to.mount.dir(), &to.relative)
+    }
+
+    /// Creates a hard link. Mirrors `std::fs::hard_link`.
+    ///
+    /// Refused across mounts: a hard link is a second name for one inode, so
+    /// both names must live in the same filesystem. Two mounts may in fact share
+    /// one, but the namespace's answer is the one that governs -- the same rule
+    /// [`Vfs::rename`] applies, and for the same reason. `ln` falls back to a
+    /// copy, as it already does for `rename`.
+    ///
+    /// # Errors
+    ///
+    /// If either path is unmounted, they are on different mounts, the
+    /// destination mount is read-only, or the link fails.
+    pub fn hard_link(&self, original: &VirtualPath, link: &VirtualPath) -> std::io::Result<()> {
+        let original = self.locate(original, false)?;
+        let link = self.locate(link, false)?;
+
+        if !std::ptr::eq(original.mount, link.mount) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::CrossesDevices,
+                format!(
+                    "hard link across a mount boundary: {original} to {link}",
+                    original = original.virtual_path,
+                    link = link.virtual_path
+                ),
+            ));
+        }
+        Self::require_writable(&link)?;
+        original
+            .mount
+            .dir()
+            .hard_link(&original.relative, link.mount.dir(), &link.relative)
+    }
     /// Creates a symbolic link at `path` pointing at `target`.
     ///
     /// The target is validated, and rewritten when it has to be. An absolute
@@ -1317,6 +1410,83 @@ mod tests {
             fx.vfs
                 .open_with(&vp("/work/hello.txt"), OpenMode::read().with_nofollow(true))
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn copy_resolves_both_ends_and_may_cross_mounts() {
+        let fx = fixture();
+        // Unlike rename, copy moves bytes rather than relinking an inode, so a
+        // mount boundary is not a barrier.
+        let n = fx
+            .vfs
+            .copy(&vp("/ro/readme.txt"), &vp("/work/copied.txt"))
+            .expect("cross-mount copy");
+        assert_eq!(n, 6);
+        assert_eq!(
+            std::io::read_to_string(fx.vfs.open(&vp("/work/copied.txt")).unwrap()).unwrap(),
+            "readme"
+        );
+
+        // The destination is a namespace path like any other write, so copying
+        // *out* of the namespace is not expressible.
+        assert!(fx.vfs.copy(&vp("/work/hello.txt"), &vp("/etc/passwd")).is_err());
+        // And a read-only destination is refused.
+        assert_eq!(
+            fx.vfs
+                .copy(&vp("/work/hello.txt"), &vp("/ro/nope.txt"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn a_hard_link_may_not_cross_a_mount() {
+        let fx = fixture();
+        fx.vfs
+            .hard_link(&vp("/work/hello.txt"), &vp("/work/same.txt"))
+            .expect("same-mount hard link");
+        assert!(fx.vfs.exists(&vp("/work/same.txt")));
+
+        // A hard link is a second name for one inode, so both names must be in
+        // one filesystem. Two mounts might share one, but the namespace's answer
+        // governs -- the rule rename already applies.
+        assert_eq!(
+            fx.vfs
+                .hard_link(&vp("/work/hello.txt"), &vp("/ro/linked.txt"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::CrossesDevices
+        );
+    }
+
+    #[test]
+    fn create_dir_does_not_silently_become_create_dir_all() {
+        let fx = fixture();
+        fx.vfs.create_dir(&vp("/work/made")).expect("one level");
+        assert!(fx.vfs.metadata(&vp("/work/made")).unwrap().is_dir());
+
+        // `mkdir` without `-p` must fail on a missing parent. If this call ever
+        // starts succeeding, the two operations have been collapsed and mkdir's
+        // observable behaviour has changed.
+        assert!(fx.vfs.create_dir(&vp("/work/absent/child")).is_err());
+        assert!(fx.vfs.create_dir(&vp("/ro/nope")).is_err());
+    }
+
+    #[test]
+    fn set_permissions_is_refused_on_a_read_only_mount() {
+        let fx = fixture();
+        let perms = fx.vfs.metadata(&vp("/work/hello.txt")).unwrap().permissions();
+        fx.vfs
+            .set_permissions(&vp("/work/hello.txt"), &perms)
+            .expect("writable mount");
+        assert_eq!(
+            fx.vfs
+                .set_permissions(&vp("/ro/readme.txt"), &perms)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
         );
     }
 
