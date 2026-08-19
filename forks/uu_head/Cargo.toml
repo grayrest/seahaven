@@ -35,6 +35,9 @@ features = [
 ]
 version = "0.10.0"
 
+[dev-dependencies.ctor]
+version = "0.8"
+
 [lib]
 doctest = false
 name = "uu_head"

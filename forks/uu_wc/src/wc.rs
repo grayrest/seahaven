@@ -5,6 +5,10 @@
 
 // cSpell:ignore ilog wc wc's
 
+
+// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+#[cfg(test)]
+mod flatland_test_session;
 mod count_fast;
 mod countable;
 mod utf8;

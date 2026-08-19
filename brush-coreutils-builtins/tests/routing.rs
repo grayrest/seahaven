@@ -170,3 +170,73 @@ fn the_whole_routed_batch_is_confined() {
     }
     brush_vfs::ambient::uninstall();
 }
+
+/// Every forked utility that reads a path argument, confined in one sweep.
+///
+/// The batch matters more than any single case: routing is per-crate work, so
+/// the failure mode is one utility quietly left on ambient `std::fs` while the
+/// rest are routed. A list that grows with the fork set catches that; spot
+/// checks do not.
+///
+/// Each is invoked with a host path that exists but is outside the mount. A
+/// utility still using raw `std::fs` opens it and exits 0; a routed one cannot
+/// name it at all.
+#[cfg(feature = "coreutils.all")]
+#[test]
+fn the_whole_fork_set_refuses_a_path_outside_the_mount() {
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside.txt");
+    std::fs::write(&outside, b"secret\n").unwrap();
+    let outside = outside.to_string_lossy().into_owned();
+
+    let jail = tempfile::tempdir().unwrap();
+    std::fs::write(jail.path().join("inside.txt"), b"one\ntwo\n").unwrap();
+    confine_to(jail.path());
+
+    // Utilities that take a path, read it, and report failure through the exit
+    // code. Deliberately excludes ones whose single-argument form does not read
+    // a file (`echo`, `printf`), writes rather than reads (`mkdir`, `touch`), or
+    // would block.
+    //
+    // `df` is excluded because it is **not confined, by decision**. Its whole
+    // filesystem surface is `filesystem.rs`, which canonicalizes mount *device
+    // names* (`/dev/disk1s1`) out of the host mount table -- host introspection,
+    // not namespace access, the same class as `uucore::fsext`. Routing it makes
+    // `df` report nothing at all: upstream's own `test_dev_name_match` failed
+    // with `MountMissing` until the module was exempted. It passed this sweep
+    // for an incidental reason, which is worse than failing it.
+    //
+    // `more` is excluded for a different and more interesting reason: it *is*
+    // routed -- both of its sites go through `ambient::exists` and
+    // `ambient::open` -- but upstream reports a missing file with
+    // `USimpleError::new(0, ..)`, an explicit exit code of zero. So the exit
+    // code carries no signal for it and including it would assert the wrong
+    // thing. Its routing is evidenced by the codemod's own report (no unrouted
+    // sites) rather than by this sweep.
+    let readers = [
+        "cat", "head", "wc", "tac", "nl", "cksum", "base32", "base64", "basenc",
+        "comm", "csplit", "cut", "expand", "fmt", "fold", "md5sum", "od",
+        "paste", "pr", "ptx", "readlink", "realpath", "sha1sum", "sha256sum",
+        "shuf", "sort", "split", "sum", "tail", "tsort", "unexpand", "uniq",
+        "b2sum", "sha224sum", "sha384sum", "sha512sum", "du", "ls", "dircolors",
+    ];
+
+    let cmds = brush_coreutils_builtins::bundled_commands();
+    let mut unconfined = Vec::new();
+    for util in readers {
+        let Some(f) = cmds.get(util) else { continue };
+        uucore::error::set_exit_code(0);
+        let code = f(vec![OsString::from(util), OsString::from(&outside)]);
+        if code == 0 {
+            unconfined.push(util);
+        }
+    }
+
+    assert!(
+        unconfined.is_empty(),
+        "these utilities read a host path outside the mount, so they are not \
+         routed: {unconfined:?}"
+    );
+    brush_vfs::ambient::uninstall();
+}

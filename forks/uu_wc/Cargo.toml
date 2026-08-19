@@ -38,6 +38,20 @@ features = [
 ]
 version = "0.10.0"
 
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.divan]
+package = "codspeed-divan-compat"
+version = "5.0.0"
+
+[dev-dependencies.tempfile]
+version = "3.15.0"
+
+[dev-dependencies.uucore]
+features = ["benchmark"]
+version = "0.10.0"
+
 [lib]
 doctest = false
 name = "uu_wc"

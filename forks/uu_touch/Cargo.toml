@@ -1,0 +1,94 @@
+# Fork of uu_touch, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.filetime]
+version = "0.2.29"
+
+[dependencies.fluent]
+version = "0.17.0"
+
+[dependencies.jiff]
+version = "0.2.18"
+
+[dependencies.parse_datetime]
+version = "0.15.0"
+
+[dependencies.thiserror]
+version = "2.0.3"
+
+[dependencies.uucore]
+features = [
+    "libc",
+    "parser",
+]
+version = "0.10.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.tempfile]
+version = "3.15.0"
+
+[lib]
+doctest = false
+name = "uu_touch"
+path = "src/touch.rs"
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "touch ~ (uutils) change FILE timestamps"
+edition = "2024"
+homepage = "https://github.com/uutils/coreutils"
+keywords = [
+    "coreutils",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_touch"
+repository = "https://github.com/uutils/coreutils/tree/main/src/uu/touch"
+rust-version = "1.88.0"
+version = "0.10.0"
+
+[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
+default-features = false
+features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+]
+version = "0.61.0"
+
+[target."cfg(unix)".dependencies.libc]
+version = "0.2.186"
+
+[target."cfg(unix)".dependencies.rustix]
+features = [
+    "param",
+    "use-libc-auxv",
+    "time",
+    "fs",
+]
+version = "1.1.4"

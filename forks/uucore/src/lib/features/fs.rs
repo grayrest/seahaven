@@ -51,14 +51,7 @@ macro_rules! has {
 /// Information to uniquely identify a file
 #[derive(Clone)]
 pub struct FileInformation(
-    // FLATLAND DIVERGENCE: `std::fs::Metadata` on Unix too, rather than
-    // `rustix::fs::Stat`. `from_path` took a caller-supplied path straight to
-    // `rustix::fs::stat`, which the `std::fs`-shaped codemod cannot see, and
-    // there is no way to build a `Stat` from a routed result. The type already
-    // carried a `Metadata` representation for WASI; this uses it everywhere,
-    // which also collapses the per-target `st_nlink` maze into `nlink()`.
-    // See `plans/2026-08-18-uucore-fork.md` step 7.
-    #[cfg(unix)] fs::Metadata,
+    #[cfg(unix)] rustix::fs::Stat,
     #[cfg(windows)] winapi_util::file::Information,
     // WASI does not have nix::sys::stat, so we store std::fs::Metadata instead.
     #[cfg(target_os = "wasi")] fs::Metadata,
@@ -68,11 +61,8 @@ impl FileInformation {
     /// Get information from a currently open file
     #[cfg(unix)]
     pub fn from_file(file: &impl AsFd) -> IOResult<Self> {
-        // Already-open descriptor: no path is resolved, so this is confined by
-        // construction and needs no routing. Duplicated rather than borrowed so
-        // the `File` wrapper can own something without closing the caller's fd.
-        let owned = file.as_fd().try_clone_to_owned()?;
-        Ok(Self(fs::File::from(owned).metadata()?))
+        let stat = rustix::fs::fstat(file)?;
+        Ok(Self(stat))
     }
 
     /// Get information from a currently open file
@@ -89,15 +79,12 @@ impl FileInformation {
     pub fn from_path(path: impl AsRef<Path>, dereference: bool) -> IOResult<Self> {
         #[cfg(unix)]
         {
-            // FLATLAND DIVERGENCE: was `rustix::fs::{stat,lstat}` on the
-            // caller's path -- the dedup/identity entry point for cp, du, ls
-            // and cmp, and ambient authority the codemod cannot see.
-            let metadata = if dereference {
-                brush_vfs::ambient::metadata(path.as_ref())
+            let stat = if dereference {
+                rustix::fs::stat(path.as_ref())
             } else {
-                brush_vfs::ambient::symlink_metadata(path.as_ref())
+                rustix::fs::lstat(path.as_ref())
             };
-            Ok(Self(metadata?))
+            Ok(Self(stat?))
         }
         #[cfg(target_os = "windows")]
         {
@@ -129,7 +116,8 @@ impl FileInformation {
     pub fn file_size(&self) -> u64 {
         #[cfg(unix)]
         {
-            self.0.size()
+            assert!(self.0.st_size >= 0, "File size is negative");
+            self.0.st_size.try_into().unwrap()
         }
         #[cfg(target_os = "windows")]
         {
@@ -147,11 +135,46 @@ impl FileInformation {
     }
 
     pub fn number_of_links(&self) -> u64 {
-        // FLATLAND DIVERGENCE: `MetadataExt::nlink()` is `u64` on every Unix
-        // target, so the per-target `st_nlink` width maze this replaced is no
-        // longer needed.
-        #[cfg(unix)]
-        return self.0.nlink();
+        #[cfg(all(
+            unix,
+            not(target_vendor = "apple"),
+            not(target_os = "aix"),
+            not(target_os = "android"),
+            not(target_os = "freebsd"),
+            not(target_os = "netbsd"),
+            not(target_os = "openbsd"),
+            not(target_os = "illumos"),
+            not(target_os = "solaris"),
+            not(target_os = "cygwin"),
+            not(target_arch = "aarch64"),
+            not(target_arch = "riscv64"),
+            not(target_arch = "loongarch64"),
+            not(target_arch = "sparc64"),
+            target_pointer_width = "64"
+        ))]
+        return self.0.st_nlink;
+        #[cfg(all(
+            unix,
+            any(
+                target_vendor = "apple",
+                target_os = "android",
+                target_os = "netbsd",
+                target_os = "openbsd",
+                target_os = "illumos",
+                target_os = "solaris",
+                target_os = "cygwin",
+                target_arch = "aarch64",
+                target_arch = "riscv64",
+                target_arch = "loongarch64",
+                target_arch = "sparc64",
+                not(target_pointer_width = "64")
+            )
+        ))]
+        return self.0.st_nlink.into();
+        #[cfg(target_os = "freebsd")]
+        return self.0.st_nlink;
+        #[cfg(target_os = "aix")]
+        return self.0.st_nlink.try_into().unwrap();
         #[cfg(windows)]
         return self.0.number_of_links();
         // WASI: nlink is not available in std::fs::Metadata, return 1
@@ -161,14 +184,18 @@ impl FileInformation {
 
     #[cfg(unix)]
     pub fn inode(&self) -> u64 {
-        self.0.ino()
+        #[cfg(all(not(any(target_os = "netbsd")), target_pointer_width = "64"))]
+        return self.0.st_ino;
+        #[cfg(any(target_os = "netbsd", not(target_pointer_width = "64")))]
+        #[allow(clippy::useless_conversion)]
+        return self.0.st_ino.into();
     }
 }
 
 #[cfg(unix)]
 impl PartialEq for FileInformation {
     fn eq(&self, other: &Self) -> bool {
-        self.0.dev() == other.0.dev() && self.0.ino() == other.0.ino()
+        self.0.st_dev == other.0.st_dev && self.0.st_ino == other.0.st_ino
     }
 }
 
@@ -195,8 +222,8 @@ impl Hash for FileInformation {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         #[cfg(unix)]
         {
-            self.0.dev().hash(state);
-            self.0.ino().hash(state);
+            self.0.st_dev.hash(state);
+            self.0.st_ino.hash(state);
         }
         #[cfg(target_os = "windows")]
         {
@@ -379,15 +406,8 @@ pub fn canonicalize<P: AsRef<Path>>(
     let original = if original.is_absolute() {
         original.to_path_buf()
     } else {
-        // FLATLAND DIVERGENCE: was `env::current_dir()` plus
-        // `dunce::canonicalize`, i.e. the *host* process cwd. Every existence
-        // check below this point goes through the namespace, so a host-derived
-        // prefix made the function half-virtual: the prefix from one
-        // filesystem, the answers from another. A `Session` carries its own cwd
-        // precisely so a subshell can differ from its parent, and it is already
-        // canonical within the namespace, so no second canonicalization is
-        // needed. See `plans/2026-08-18-uucore-fork.md` step 7.
-        brush_vfs::ambient::current_dir()?.join(original)
+        let current_dir = env::current_dir()?;
+        dunce::canonicalize(current_dir)?.join(original)
     };
     let path = if res_mode == ResolveMode::Logical {
         normalize_path(&original)

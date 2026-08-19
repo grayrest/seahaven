@@ -22,6 +22,13 @@ members = [
 exclude = ["forks"]
 default-members = ["brush-shell"]
 
+# Every fork is patched, not just the ones `brush-coreutils-builtins` names.
+# A utility crate may depend on another: `uu_base64` is a thin wrapper over
+# `uu_base32::base_common`, so repointing only the manifest above left `base64`
+# reading through an *unforked* `uu_base32` and opening host paths outside the
+# mount. The batch confinement test caught it. A patch reaches transitive
+# dependents too, which is the only way to be sure no such pair is missed.
+#
 # `uucore` is the filesystem boundary for most bundled utilities -- `cksum`
 # routes to zero sites of its own because every byte it reads goes through
 # `uucore::checksum` -- so the fork has to reach every consumer, not just the
@@ -34,6 +41,54 @@ default-members = ["brush-shell"]
 # the localizer thread-local and `uucore::error::EXIT_CODE`. A patch repoints
 # the whole graph at once; `cargo xtask check uucore-patch` proves it did.
 [patch.crates-io]
+uu_base32 = { path = "forks/uu_base32" }
+uu_cat = { path = "forks/uu_cat" }
+uu_comm = { path = "forks/uu_comm" }
+uu_cp = { path = "forks/uu_cp" }
+uu_csplit = { path = "forks/uu_csplit" }
+uu_date = { path = "forks/uu_date" }
+uu_dd = { path = "forks/uu_dd" }
+uu_df = { path = "forks/uu_df" }
+uu_dircolors = { path = "forks/uu_dircolors" }
+uu_du = { path = "forks/uu_du" }
+uu_expand = { path = "forks/uu_expand" }
+uu_fmt = { path = "forks/uu_fmt" }
+uu_fold = { path = "forks/uu_fold" }
+uu_head = { path = "forks/uu_head" }
+uu_join = { path = "forks/uu_join" }
+uu_link = { path = "forks/uu_link" }
+uu_ln = { path = "forks/uu_ln" }
+uu_ls = { path = "forks/uu_ls" }
+uu_mkdir = { path = "forks/uu_mkdir" }
+uu_more = { path = "forks/uu_more" }
+uu_mv = { path = "forks/uu_mv" }
+uu_nl = { path = "forks/uu_nl" }
+uu_nproc = { path = "forks/uu_nproc" }
+uu_od = { path = "forks/uu_od" }
+uu_paste = { path = "forks/uu_paste" }
+uu_pr = { path = "forks/uu_pr" }
+uu_ptx = { path = "forks/uu_ptx" }
+uu_pwd = { path = "forks/uu_pwd" }
+uu_readlink = { path = "forks/uu_readlink" }
+uu_realpath = { path = "forks/uu_realpath" }
+uu_rm = { path = "forks/uu_rm" }
+uu_rmdir = { path = "forks/uu_rmdir" }
+uu_shred = { path = "forks/uu_shred" }
+uu_shuf = { path = "forks/uu_shuf" }
+uu_sort = { path = "forks/uu_sort" }
+uu_split = { path = "forks/uu_split" }
+uu_sum = { path = "forks/uu_sum" }
+uu_sync = { path = "forks/uu_sync" }
+uu_tac = { path = "forks/uu_tac" }
+uu_tail = { path = "forks/uu_tail" }
+uu_test = { path = "forks/uu_test" }
+uu_touch = { path = "forks/uu_touch" }
+uu_truncate = { path = "forks/uu_truncate" }
+uu_tsort = { path = "forks/uu_tsort" }
+uu_unexpand = { path = "forks/uu_unexpand" }
+uu_uniq = { path = "forks/uu_uniq" }
+uu_unlink = { path = "forks/uu_unlink" }
+uu_wc = { path = "forks/uu_wc" }
 uucore = { path = "forks/uucore" }
 
 [workspace.package]

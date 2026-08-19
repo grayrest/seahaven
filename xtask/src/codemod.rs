@@ -133,6 +133,18 @@ const FACADE_FREE_FNS: &[&str] = &[
     "hard_link",
 ];
 
+/// Free functions whose facade equivalent has a *different name*, because
+/// `std` gives the same name two different signatures.
+///
+/// `std::fs::exists(p)` returns `io::Result<bool>`; `Path::exists()` returns a
+/// bare `bool`. The facade mirrors both -- `try_exists` and `exists`
+/// respectively -- so the free call has to be pointed at `try_exists` or the
+/// rewrite silently changes the type. `uu_cp` caught this: it writes
+/// `std::fs::exists(t).is_ok_and(identity)`, which stops compiling when the
+/// call starts returning `bool`. Signature preservation (D34) is about the
+/// *call site* being unchanged, and that includes what it evaluates to.
+const FREE_FN_RENAMES: &[(&str, &str)] = &[("exists", "try_exists")];
+
 /// Inherent `Path`/`PathBuf` methods the visitor rewrites to a facade call.
 ///
 /// Each is named *distinctively* — the name appears only on `Path`, not on
@@ -362,6 +374,35 @@ impl<'ast> Visit<'ast> for EditCollector<'_> {
         self.non_path.pop();
     }
 
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        if let syn::Pat::Ident(pat) = &local.pat {
+            let declared_non_path = match &local.pat {
+                syn::Pat::Type(t) => named_base_type(&t.ty)
+                    .is_some_and(|b| !PATH_LIKE_TYPES.contains(&b.as_str())),
+                _ => false,
+            };
+            // Transitive, because the binding is usually several hops from the
+            // constructor: `uu_du` writes `let open_result = ... DirFd::open(..)`
+            // and then `let dir_fd = match open_result { Ok(fd) => fd, .. }`, so
+            // only the *first* let mentions the type at all.
+            let init_mentions_descriptor = local.init.as_ref().is_some_and(|i| {
+                let text = quote_tokens(&i.expr);
+                DESCRIPTOR_TYPES.iter().any(|t| text.contains(t))
+                    || self
+                        .non_path
+                        .iter()
+                        .flatten()
+                        .any(|known| mentions_ident(&text, known))
+            });
+            if (declared_non_path || init_mentions_descriptor)
+                && let Some(scope) = self.non_path.last_mut()
+            {
+                scope.insert(pat.ident.to_string());
+            }
+        }
+        syn::visit::visit_local(self, local);
+    }
+
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*call.func {
             self.try_rewrite_call(&p.path);
@@ -459,11 +500,16 @@ impl EditCollector<'_> {
             return;
         }
         if FACADE_FREE_FNS.contains(&real.as_str()) {
-            self.push_call_edit(path, &format!("{FACADE}::{real}"));
+            let target = FREE_FN_RENAMES
+                .iter()
+                .find(|(from, _)| *from == real)
+                .map_or(real.as_str(), |(_, to)| *to);
+            self.push_call_edit(path, &format!("{FACADE}::{target}"));
             if let Some(b) = binding {
                 *self.consumed.entry(b).or_default() += 1;
             }
-            self.rewrites.push(format!("{real}() -> {FACADE}::{real}()"));
+            self.rewrites
+                .push(format!("{real}() -> {FACADE}::{target}()"));
         } else if CARVE_OUT_FNS.contains(&real.as_str()) {
             // A known fs function the facade does not provide (carve-out).
             let line = span.map_or(0, |s| s.start().line);
@@ -787,6 +833,23 @@ const PATH_LIKE_TYPES: &[&str] = &[
     "Path", "PathBuf", "OsStr", "OsString", "str", "String", "Cow",
 ];
 
+/// Types that are `*at`-anchored directory descriptors and share method names
+/// with `Path` without being path-like.
+///
+/// A local bound from one of these must not have `.read_dir()` rewritten. Unlike
+/// [`non_path_params`], which reads a declared type, a local's type is usually
+/// inferred -- `uu_du` writes `let dir_fd = match open_result { Ok(fd) => fd, .. }`
+/// where `open_result` came from `DirFd::open` several statements earlier, and
+/// following that properly means real type inference.
+///
+/// So the heuristic is deliberately crude: a `let` whose initializer *mentions*
+/// one of these type names binds a non-path local. It over-approximates, and the
+/// direction of that error is the safe one -- a missed rewrite is reported as
+/// unrouted, whereas a wrong rewrite would be a mis-route. In practice even a
+/// wrong rewrite fails to compile against the facade's `AsRef<Path>` bound,
+/// which is how `uu_du` surfaced this in the first place.
+const DESCRIPTOR_TYPES: &[&str] = &["DirFd"];
+
 /// The parameter names of `sig` whose declared type is definitely not path-like.
 ///
 /// Partial type inference on purpose: it reads only what the signature states.
@@ -831,6 +894,21 @@ fn named_base_type(ty: &syn::Type) -> Option<String> {
         syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
         _ => None,
     }
+}
+
+/// Whether tokenized text uses `ident` as a whole identifier.
+///
+/// Whole-token rather than substring, so a local named `dir` does not make every
+/// later binding whose initializer mentions `directory` look descriptor-shaped.
+fn mentions_ident(text: &str, ident: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|t| t == ident)
+}
+
+/// An expression's tokens as text, for the descriptor heuristic.
+fn quote_tokens(expr: &syn::Expr) -> String {
+    use quote::ToTokens as _;
+    expr.to_token_stream().to_string()
 }
 
 /// An item's attributes, for the variants that can carry a `cfg`.
@@ -1005,6 +1083,19 @@ mod tests {
         let link = routed("fn f(p: &str, q: &str) { let _ = std::fs::hard_link(p, q); }\n");
         assert!(link.source.contains("brush_vfs::ambient::hard_link(p, q)"));
         assert!(link.unhandled.is_empty());
+    }
+
+    #[test]
+    fn the_free_exists_keeps_its_result_type() {
+        // std::fs::exists returns io::Result<bool>; Path::exists() returns bool.
+        // Pointing both at the same facade name silently changes what the call
+        // evaluates to, which uu_cp's `.is_ok_and(identity)` caught by failing
+        // to compile.
+        let free = routed("fn f(p: &str) -> bool { std::fs::exists(p).is_ok_and(|b| b) }\n");
+        assert!(free.source.contains("brush_vfs::ambient::try_exists(p)"));
+
+        let method = routed("fn f(p: &std::path::Path) -> bool { p.exists() }\n");
+        assert!(method.source.contains("brush_vfs::ambient::exists(&(p))"));
     }
 
     #[test]

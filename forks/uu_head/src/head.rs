@@ -5,6 +5,10 @@
 
 // spell-checker:ignore (vars) memrchr
 
+
+// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+#[cfg(test)]
+mod flatland_test_session;
 use clap::ArgMatches;
 use memchr::memrchr_iter;
 use std::ffi::OsString;

@@ -1,0 +1,78 @@
+# Fork of uu_sync, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.fluent]
+version = "0.17.0"
+
+[dependencies.uucore]
+features = ["wide"]
+version = "0.10.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[lib]
+doctest = false
+name = "uu_sync"
+path = "src/sync.rs"
+test = false
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "sync ~ (uutils) synchronize cache writes to storage"
+edition = "2024"
+homepage = "https://github.com/uutils/coreutils"
+keywords = [
+    "coreutils",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_sync"
+repository = "https://github.com/uutils/coreutils/tree/main/src/uu/sync"
+rust-version = "1.88.0"
+version = "0.10.0"
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["uucore_procs"]
+
+[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
+default-features = false
+features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_WindowsProgramming",
+    "Win32_Foundation",
+]
+version = "0.61.0"
+
+[target."cfg(unix)".dependencies.rustix]
+features = [
+    "param",
+    "use-libc-auxv",
+    "time",
+    "fs",
+]
+version = "1.1.4"

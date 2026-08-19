@@ -436,6 +436,7 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
 /// back; this stands in for it. Each item is an [`io::Result`] of a
 /// [`DirEntry`], matching `std::fs::ReadDir`'s item type so a `for entry in
 /// read_dir(p)? { let entry = entry?; ... }` loop is unchanged.
+#[derive(Debug)]
 pub struct ReadDir {
     dir: VirtualPath,
     names: std::vec::IntoIter<String>,
@@ -461,6 +462,7 @@ impl Iterator for ReadDir {
 /// It carries the entry's virtual path so `file_type` and `metadata` can ask
 /// the namespace, rather than a `cap_std` handle that would not survive the
 /// std-typed contract.
+#[derive(Debug)]
 pub struct DirEntry {
     path: VirtualPath,
     name: String,
@@ -493,50 +495,25 @@ impl DirEntry {
         session.vfs().metadata(&self.path)
     }
 
-    /// The entry's file type without following symlinks. Mirrors
-    /// `std::fs::DirEntry::file_type`.
+    /// The entry's file type, not following a final symlink. Mirrors
+    /// `std::fs::DirEntry::file_type`, **including its return type**.
+    ///
+    /// This returns `std::fs::FileType` rather than a lookalike, which matters
+    /// out of proportion to its size: `uu_ls` puts the type in a trait method's
+    /// signature and threads it through its colouring code, so a substitute type
+    /// stops being a rewrite and becomes a restructure -- exactly what D34
+    /// forbids. `std::fs::FileType` has no public constructor, but
+    /// `Metadata::file_type()` is one, and the facade can produce a real
+    /// `Metadata`, so the type never has to be replaced.
     ///
     /// # Errors
     /// As [`open`].
-    pub fn file_type(&self) -> io::Result<FileType> {
+    pub fn file_type(&self) -> io::Result<std::fs::FileType> {
         let session = current()?;
-        session
-            .vfs()
-            .facts(&self.path, false)
-            .map(|facts| FileType {
-                is_dir: facts.is_dir,
-                is_file: facts.is_file,
-                is_symlink: facts.is_symlink,
-            })
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
-    }
-}
-
-/// A file's type, shaped like `std::fs::FileType`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileType {
-    is_dir: bool,
-    is_file: bool,
-    is_symlink: bool,
-}
-
-impl FileType {
-    /// Whether this is a directory. Mirrors `std::fs::FileType::is_dir`.
-    #[must_use]
-    pub const fn is_dir(self) -> bool {
-        self.is_dir
-    }
-
-    /// Whether this is a regular file. Mirrors `std::fs::FileType::is_file`.
-    #[must_use]
-    pub const fn is_file(self) -> bool {
-        self.is_file
-    }
-
-    /// Whether this is a symlink. Mirrors `std::fs::FileType::is_symlink`.
-    #[must_use]
-    pub const fn is_symlink(self) -> bool {
-        self.is_symlink
+        // `symlink_metadata`, not `metadata`: std's `DirEntry::file_type` does
+        // not follow the final link, and reporting a symlink as its target is
+        // how `ls -l` loses the `l` in its mode column.
+        Ok(session.vfs().symlink_metadata(&self.path)?.file_type())
     }
 }
 

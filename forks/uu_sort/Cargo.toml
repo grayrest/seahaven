@@ -1,0 +1,136 @@
+# Fork of uu_sort, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.bigdecimal]
+version = "0.4"
+
+[dependencies.binary-heap-plus]
+version = "0.5.0"
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.compare]
+version = "0.1.0"
+
+[dependencies.fluent]
+version = "0.17.0"
+
+[dependencies.foldhash]
+version = "0.2.0"
+
+[dependencies.itertools]
+version = "0.15.0"
+
+[dependencies.memchr]
+version = "2.7.2"
+
+[dependencies.rand]
+features = ["std_rng"]
+version = "0.10.1"
+
+[dependencies.rayon]
+version = "1.10"
+
+[dependencies.self_cell]
+version = "1.0.4"
+
+[dependencies.tempfile]
+version = "3.15.0"
+
+[dependencies.thiserror]
+version = "2.0.3"
+
+[dependencies.uucore]
+features = [
+    "fs",
+    "parser-size",
+    "version-cmp",
+    "i18n-decimal",
+    "i18n-collator",
+    "i18n-datetime",
+]
+version = "0.10.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.divan]
+package = "codspeed-divan-compat"
+version = "5.0.0"
+
+[dev-dependencies.tempfile]
+version = "3.15.0"
+
+[dev-dependencies.uucore]
+features = [
+    "benchmark",
+    "fs",
+    "parser-size",
+    "version-cmp",
+    "i18n-collator",
+    "i18n-datetime",
+]
+version = "0.10.0"
+
+[features]
+default = ["i18n-collator"]
+i18n-collator = ["uucore/i18n-collator"]
+
+[lib]
+doctest = false
+name = "uu_sort"
+path = "src/sort.rs"
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "sort ~ (uutils) sort input lines"
+edition = "2024"
+homepage = "https://github.com/uutils/coreutils"
+keywords = [
+    "coreutils",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_sort"
+repository = "https://github.com/uutils/coreutils/tree/main/src/uu/sort"
+rust-version = "1.88.0"
+version = "0.10.0"
+
+[target.'cfg(all(unix, not(any(target_os = "redox", target_os = "fuchsia", target_os = "haiku", target_os = "solaris", target_os = "illumos"))))'.dependencies.rustix]
+features = [
+    "param",
+    "use-libc-auxv",
+    "time",
+    "system",
+    "process",
+]
+version = "1.1.4"
+
+[target.'cfg(not(any(target_os = "redox", target_os = "wasi")))'.dependencies.ctrlc]
+features = ["termination"]
+version = "3.5.2"
+
+[target."cfg(unix)".dependencies.libc]
+version = "0.2.186"

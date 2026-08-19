@@ -4846,9 +4846,8 @@ dependencies = [
 [[package]]
 name = "uu_base32"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521fc6f4279b07e954f2715721042ac4ba0e0b6486d387069c9a5d6d3ead01eb"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -4931,9 +4930,8 @@ dependencies = [
 [[package]]
 name = "uu_comm"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15d8eb0c4be2d2af80412bd2be509166ada5eb7941189eaa506d6b34020c6cbf"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -4942,9 +4940,8 @@ dependencies = [
 [[package]]
 name = "uu_cp"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67e57a51d8d01dd8c2d3393f5db03f8b1725df46dd2885348717c8e087395d3f"
 dependencies = [
+ "brush-vfs",
  "clap",
  "filetime",
  "fluent",
@@ -4961,9 +4958,8 @@ dependencies = [
 [[package]]
 name = "uu_csplit"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ab435ad92c9cbb44419f4c5101a408c141cbbae0223bef6358d958e8598fc89"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "regex",
@@ -4987,9 +4983,8 @@ dependencies = [
 [[package]]
 name = "uu_date"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754e21c801cd5523552d447dfa480f197bc1892ee5b3989e8eb104a5ebce8230"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "icu_calendar",
@@ -5006,9 +5001,8 @@ dependencies = [
 [[package]]
 name = "uu_dd"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42811e28ad6bf3c313bf054be2950a7026925482cbd0ecdd0c4cf52728066c1a"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "gcd",
@@ -5021,9 +5015,8 @@ dependencies = [
 [[package]]
 name = "uu_df"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9870499c875a2b9b1d4b94ced328287e97d21f815be6da9ae3672f019fbe35b9"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5046,9 +5039,8 @@ dependencies = [
 [[package]]
 name = "uu_dircolors"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "746d83605773e45bc64f68e3ec663ea70feac3d534880987d79165b2e2ae8a84"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5068,9 +5060,8 @@ dependencies = [
 [[package]]
 name = "uu_du"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e974e16769fd590bceb9158665e07102b1b3b0dc5192a8a6a932b5a1f07beae"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "glob",
@@ -5108,9 +5099,8 @@ dependencies = [
 [[package]]
 name = "uu_expand"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ade7270a1fd02374d8d18b99ac2cd361772ea9bdec9ee101e6b7af0e87ca1fe3"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5161,9 +5151,8 @@ dependencies = [
 [[package]]
 name = "uu_fmt"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44625cf12e6afd5ca6a2ecc37700b2191059789be0e204274fe363d021d730f1"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "thiserror 2.0.20",
@@ -5173,9 +5162,8 @@ dependencies = [
 [[package]]
 name = "uu_fold"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ead4e067f47617b35799a1eae9be64bcab91e7feab8c8bec648ff80a832585"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "unicode-width 0.2.2",
@@ -5211,9 +5199,8 @@ dependencies = [
 [[package]]
 name = "uu_join"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dd530d72b1f67366caae6edc37c6080210f48d54440934ac593da92bc7dd162"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "memchr",
@@ -5224,9 +5211,8 @@ dependencies = [
 [[package]]
 name = "uu_link"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de109f041c86b0319641c1b8c1c7aff375e902e5d7991169638b879dc49aad0d"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5235,9 +5221,8 @@ dependencies = [
 [[package]]
 name = "uu_ln"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6058620786aba711fcad6b4ed70f58c79cf4b1d4bfb587c45e2621fa240164a6"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5248,10 +5233,9 @@ dependencies = [
 [[package]]
 name = "uu_ls"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8eec753ce95d26070b2648e322d0e1532b849b8dd32288bc1939ea1bb0875e"
 dependencies = [
  "ansi-width",
+ "brush-vfs",
  "clap",
  "fluent",
  "glob",
@@ -5279,9 +5263,8 @@ dependencies = [
 [[package]]
 name = "uu_mkdir"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8608a596fcbd52d290caa7eb3c356b2fc88a3c6e42f658bbcc574204c5f986e7"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5305,9 +5288,8 @@ dependencies = [
 [[package]]
 name = "uu_more"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d6e86ed640268f07f977f7a082145ce6b9d63749d250d43ec0313a3a832b1d1"
 dependencies = [
+ "brush-vfs",
  "clap",
  "crossterm",
  "fluent",
@@ -5317,9 +5299,8 @@ dependencies = [
 [[package]]
 name = "uu_mv"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1db4df79d561a4e03385c017a7cd13ddc26b31ad442ae01bf52af1f6036c01ed"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "fs_extra",
@@ -5348,9 +5329,8 @@ dependencies = [
 [[package]]
 name = "uu_nproc"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ef661edbef99d60a8ae64f02629a60f0b7309f1867019f8c55fea6fde8212db"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "libc",
@@ -5374,9 +5354,8 @@ dependencies = [
 [[package]]
 name = "uu_od"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23594fde53508817c393a452d20e749356616d075b31fa242dc47e53b4707059"
 dependencies = [
+ "brush-vfs",
  "byteorder",
  "clap",
  "fluent",
@@ -5389,9 +5368,8 @@ dependencies = [
 [[package]]
 name = "uu_paste"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "895d7aa867f9741e75ac1a6e7ab3cf8c5aaafbba68b15ba7cf8a024dd56ebd2b"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5400,9 +5378,8 @@ dependencies = [
 [[package]]
 name = "uu_pr"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f381cf984647adb55f75613eeca6a431cc697357be6d37b19e239980e9a372d5"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "itertools 0.15.0",
@@ -5437,9 +5414,8 @@ dependencies = [
 [[package]]
 name = "uu_ptx"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "861256f6571dfb5829f1c8d621d7eb7d614908a56fbc2682e6ee655f0c32d215"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "regex",
@@ -5450,9 +5426,8 @@ dependencies = [
 [[package]]
 name = "uu_pwd"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad357150e4461eff764957a11d9a7d20265f591b2c9c7828060f23562af05baa"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5461,9 +5436,8 @@ dependencies = [
 [[package]]
 name = "uu_readlink"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f75a291ca61ee319f126997970d77235fc782bcdcc7539f83b02795f47c9a2d"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5472,9 +5446,8 @@ dependencies = [
 [[package]]
 name = "uu_realpath"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e61d3e385e44152ddaeda239fe14a196825f5caf5c65a1c1757e18635abcf55c"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5483,9 +5456,8 @@ dependencies = [
 [[package]]
 name = "uu_rm"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de94313433ff87636fedfa7b40013cea909933e96b601973d0a4d8fc1ebf08b5"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "indicatif",
@@ -5498,9 +5470,8 @@ dependencies = [
 [[package]]
 name = "uu_rmdir"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b919f77934e6ebdbc267dc4b791c571d9a736d3c8da9e01acc96ba30b0c4aca"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "libc",
@@ -5585,9 +5556,8 @@ dependencies = [
 [[package]]
 name = "uu_shred"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cc82b1f44db360bbadf5cf9da45171b44eda786b12d04ed1e022f152bba331e"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "libc",
@@ -5598,9 +5568,8 @@ dependencies = [
 [[package]]
 name = "uu_shuf"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e14cfda68a50ff6a12331512edfc08c16518ffd250b3f7a29fbcde031ddf9239"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "itoa",
@@ -5625,11 +5594,10 @@ dependencies = [
 [[package]]
 name = "uu_sort"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf9323d0197137df8734b40bc15445f9c4a17d77639ba3492d3d75b947d1acf9"
 dependencies = [
  "bigdecimal",
  "binary-heap-plus",
+ "brush-vfs",
  "clap",
  "compare",
  "ctrlc",
@@ -5650,9 +5618,8 @@ dependencies = [
 [[package]]
 name = "uu_split"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c153e335a2bcd38709f0a2cc4166129ce28db9d8fd9f3a8d5c88fc40bb4517d2"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "memchr",
@@ -5664,9 +5631,8 @@ dependencies = [
 [[package]]
 name = "uu_sum"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "969d42d06fda3175a02c3efcd69cae856ac0965bd9951da9deaa95d866b68afa"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5676,9 +5642,8 @@ dependencies = [
 [[package]]
 name = "uu_sync"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bad74299d6bce02dfd4f86015e59a240d38069ae43c8daa0d70e82e2aca7261"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5705,9 +5670,8 @@ dependencies = [
 [[package]]
 name = "uu_tail"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b6b317b567581abc6ff30705219ecb148ccddffb75255f6d1df64037d56cfb2"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "libc",
@@ -5734,9 +5698,8 @@ dependencies = [
 [[package]]
 name = "uu_test"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a1751d4f9d886c25a152650e5e5c7300894ca89730ad3157567929724e69656"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "libc",
@@ -5747,9 +5710,8 @@ dependencies = [
 [[package]]
 name = "uu_touch"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77f9295bcdc148b03ca3209b7dccd5bf1a2a39b73205b2b66eacb269b0e68ab3"
 dependencies = [
+ "brush-vfs",
  "clap",
  "filetime",
  "fluent",
@@ -5789,9 +5751,8 @@ dependencies = [
 [[package]]
 name = "uu_truncate"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9da6c369608439d420995e91443943f463cbdfcdef6d024559267ec5d50aaa0b"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5800,9 +5761,8 @@ dependencies = [
 [[package]]
 name = "uu_tsort"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90ff34d7cb054ce2d6405b2c5b3c194e752b845d4d63f680d53f2f80a2fb430b"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustc-hash",
@@ -5827,9 +5787,8 @@ dependencies = [
 [[package]]
 name = "uu_unexpand"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cd0c72cd78530c512d678c5075da5c87cd9f57e5d715bf75f6be999b6c92301"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "rustix",
@@ -5840,9 +5799,8 @@ dependencies = [
 [[package]]
 name = "uu_uniq"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "708de11bf4e867307ab25c319a4ed95a54c1704e4a38236df9060493fa40761a"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -5851,9 +5809,8 @@ dependencies = [
 [[package]]
 name = "uu_unlink"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6976f4c933fb5fcd42c99d59a66810907e77ae52b0cc33d477af8c1f0e9a212c"
 dependencies = [
+ "brush-vfs",
  "clap",
  "fluent",
  "uucore",
@@ -6721,6 +6678,7 @@ dependencies = [
  "num_cpus",
  "proc-macro2",
  "pty-process",
+ "quote",
  "schemars",
  "serde",
  "serde_json",

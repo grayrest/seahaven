@@ -1,0 +1,79 @@
+# Fork of uu_shuf, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.fluent]
+version = "0.17.0"
+
+[dependencies.itoa]
+version = "1.0.15"
+
+[dependencies.rand]
+features = ["std_rng"]
+version = "0.10.1"
+
+[dependencies.rand_chacha]
+version = "0.10.0"
+
+[dependencies.rustc-hash]
+version = "2.1.1"
+
+[dependencies.sha3]
+version = "0.12.0"
+
+[dependencies.uucore]
+version = "0.10.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.divan]
+package = "codspeed-divan-compat"
+version = "5.0.0"
+
+[dev-dependencies.uucore]
+features = ["benchmark"]
+version = "0.10.0"
+
+[lib]
+doctest = false
+name = "uu_shuf"
+path = "src/shuf.rs"
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "shuf ~ (uutils) display random permutations of input lines"
+edition = "2024"
+homepage = "https://github.com/uutils/coreutils"
+keywords = [
+    "coreutils",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_shuf"
+repository = "https://github.com/uutils/coreutils/tree/main/src/uu/shuf"
+rust-version = "1.88.0"
+version = "0.10.0"

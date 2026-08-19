@@ -1,0 +1,72 @@
+# Fork of uu_pr, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.fluent]
+version = "0.17.0"
+
+[dependencies.itertools]
+version = "0.15.0"
+
+[dependencies.memchr]
+version = "2.7.2"
+
+[dependencies.regex]
+version = "1.10.4"
+
+[dependencies.thiserror]
+version = "2.0.3"
+
+[dependencies.uucore]
+features = [
+    "entries",
+    "time",
+]
+version = "0.10.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[lib]
+doctest = false
+name = "uu_pr"
+path = "src/pr.rs"
+test = false
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "pr ~ (uutils) convert text files for printing"
+edition = "2024"
+homepage = "https://github.com/uutils/coreutils"
+keywords = [
+    "coreutils",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_pr"
+repository = "https://github.com/uutils/coreutils/tree/main/src/uu/pr"
+rust-version = "1.88.0"
+version = "0.10.0"

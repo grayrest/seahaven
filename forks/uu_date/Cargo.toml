@@ -1,0 +1,124 @@
+# Fork of uu_date, vendored from crates.io by `cargo xtask vendor-fork`.
+#
+# Generated, not maintained (D13): pristine upstream is the baseline and the
+# filesystem-routing diff is applied by the codemod. Not a workspace member
+# (see the root `[workspace] exclude`); its routing is proven by the Landlock
+# test (D41), not the ban (D3).
+
+[dependencies.brush-vfs]
+path = "../../brush-vfs"
+
+[dependencies.clap]
+features = [
+    "wrap_help",
+    "cargo",
+    "color",
+]
+version = "4.5"
+
+[dependencies.fluent]
+version = "0.17.0"
+
+[dependencies.icu_calendar]
+default-features = false
+optional = true
+version = "2.0.0"
+
+[dependencies.icu_locale]
+default-features = false
+optional = true
+version = "2.0.0"
+
+[dependencies.jiff]
+features = [
+    "tzdb-bundle-platform",
+    "tzdb-zoneinfo",
+    "tzdb-concatenated",
+]
+version = "0.2.18"
+
+[dependencies.jiff-icu]
+optional = true
+version = "0.2.2"
+
+[dependencies.parse_datetime]
+version = "0.15.0"
+
+[dependencies.uucore]
+features = [
+    "parser",
+    "i18n-datetime",
+]
+version = "0.10.0"
+
+[dev-dependencies.ctor]
+version = "0.8"
+
+[dev-dependencies.divan]
+package = "codspeed-divan-compat"
+version = "5.0.0"
+
+[dev-dependencies.tempfile]
+version = "3.15.0"
+
+[dev-dependencies.uucore]
+features = ["benchmark"]
+version = "0.10.0"
+
+[features]
+default = ["i18n-datetime"]
+i18n-datetime = [
+    "uucore/i18n-datetime",
+    "dep:icu_calendar",
+    "dep:icu_locale",
+    "dep:jiff-icu",
+]
+
+[lib]
+doctest = false
+name = "uu_date"
+path = "src/date.rs"
+
+[package]
+autobenches = false
+autobins = false
+autoexamples = false
+autolib = false
+autotests = false
+build = false
+categories = ["command-line-utilities"]
+description = "date ~ (uutils) display or set the current time"
+edition = "2024"
+homepage = "https://github.com/uutils/coreutils"
+keywords = [
+    "coreutils",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+license = "MIT"
+name = "uu_date"
+repository = "https://github.com/uutils/coreutils/tree/main/src/date"
+rust-version = "1.88.0"
+version = "0.10.0"
+
+[target."cfg(unix)".dependencies.libc]
+version = "0.2.186"
+
+[target."cfg(unix)".dependencies.rustix]
+features = [
+    "param",
+    "use-libc-auxv",
+    "time",
+    "time",
+]
+version = "1.1.4"
+
+[target."cfg(windows)".dependencies.windows-sys]
+default-features = false
+features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+]
+version = "0.61.0"

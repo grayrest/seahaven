@@ -5,6 +5,10 @@
 
 // spell-checker:ignore (ToDO) nonprint nonblank nonprinting ELOOP
 
+
+// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+#[cfg(test)]
+mod flatland_test_session;
 mod platform;
 
 use crate::platform::is_safe_overwrite;

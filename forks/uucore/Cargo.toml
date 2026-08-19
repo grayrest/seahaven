@@ -220,11 +220,6 @@ version = "0.10.0"
 optional = true
 version = "3.0.5"
 
-# FLATLAND DIVERGENCE: runs `flatland_test_session` before this crate's own
-# test binary, so upstream's tests exercise the routed code under an identity
-# session rather than failing closed. Dev-only, so it never enters a shipped
-# graph; the module it runs is `#[cfg(test)]`, so it is absent from production
-# builds entirely.
 [dev-dependencies.ctor]
 version = "0.8"
 
