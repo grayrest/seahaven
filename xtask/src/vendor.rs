@@ -66,7 +66,7 @@ pub struct VendorLocalesCommand {
 
 /// Refreshes `forks/uucore/locales/utils` from the registry cache.
 pub fn run_locales(cmd: &VendorLocalesCommand, _verbose: bool) -> Result<()> {
-    let sources = locate_utility_locales(&cmd.version)?;
+    let sources = locate_utility_locales(&cmd.version);
     anyhow::ensure!(
         !sources.is_empty(),
         "no uu_*-{} crates with locales in the registry cache; build with \
@@ -76,7 +76,7 @@ pub fn run_locales(cmd: &VendorLocalesCommand, _verbose: bool) -> Result<()> {
 
     let dest_root = PathBuf::from(VENDORED_LOCALES);
     if cmd.check {
-        let have = existing_locale_utils(&dest_root)?;
+        let have = existing_locale_utils(&dest_root);
         let want: Vec<String> = sources.iter().map(|(n, _)| n.clone()).collect();
         anyhow::ensure!(
             have == want,
@@ -124,13 +124,13 @@ pub fn run_locales(cmd: &VendorLocalesCommand, _verbose: bool) -> Result<()> {
 
 /// Every `uu_<util>-<version>` in the registry cache that ships a `locales/`
 /// directory, as `(utility name, locales dir)` sorted by name.
-fn locate_utility_locales(version: &str) -> Result<Vec<(String, PathBuf)>> {
+fn locate_utility_locales(version: &str) -> Vec<(String, PathBuf)> {
     let home =
         std::env::var_os("CARGO_HOME").map_or_else(|| dirs_home().join(".cargo"), PathBuf::from);
     let registry_src = home.join("registry/src");
     let mut out: Vec<(String, PathBuf)> = Vec::new();
     let Ok(roots) = std::fs::read_dir(&registry_src) else {
-        return Ok(out);
+        return out;
     };
     for root in roots.flatten() {
         let Ok(entries) = std::fs::read_dir(root.path()) else {
@@ -153,11 +153,11 @@ fn locate_utility_locales(version: &str) -> Result<Vec<(String, PathBuf)>> {
     }
     out.sort();
     out.dedup_by(|a, b| a.0 == b.0);
-    Ok(out)
+    out
 }
 
 /// The utility names currently vendored under `dest_root`, sorted.
-fn existing_locale_utils(dest_root: &Path) -> Result<Vec<String>> {
+fn existing_locale_utils(dest_root: &Path) -> Vec<String> {
     let mut have: Vec<String> = match std::fs::read_dir(dest_root) {
         Ok(entries) => entries
             .flatten()
@@ -167,7 +167,7 @@ fn existing_locale_utils(dest_root: &Path) -> Result<Vec<String>> {
         Err(_) => Vec::new(),
     };
     have.sort();
-    Ok(have)
+    have
 }
 
 /// Runs the vendor-fork command.

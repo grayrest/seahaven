@@ -72,6 +72,7 @@ pub enum ExternalExecution {
 }
 
 /// How a permitted external spawn obtains the host program to run.
+#[derive(Debug)]
 pub(crate) enum ExecPermit {
     /// Resolve the program through the namespace, as an open world does. The
     /// caller translates the virtual name into a host path via the vfs.
@@ -150,10 +151,11 @@ mod tests {
 
     #[test]
     fn the_closed_world_runs_the_launchers_dispatch_by_its_host_path() {
-        match bundled().permit(LAUNCHER, Some(FLAG)) {
-            Some(ExecPermit::TrustedLauncher(host)) => assert_eq!(host, Path::new(LAUNCHER)),
-            _ => panic!("the bundled dispatch must be permitted"),
-        }
+        let permit = bundled().permit(LAUNCHER, Some(FLAG));
+        assert!(
+            matches!(permit, Some(ExecPermit::TrustedLauncher(ref host)) if host == Path::new(LAUNCHER)),
+            "the bundled dispatch must be permitted, and by the launcher's host path: {permit:?}"
+        );
     }
 
     #[test]
