@@ -178,7 +178,9 @@ impl Dir {
             self.inner.open_dir(name)?.into_std_file()
         } else {
             self.inner
-                .open_with(name, &OpenMode::read().to_cap_std())?
+                // Opened only to `fstat`; without O_NONBLOCK a FIFO entry
+                // would wait for a writer that never comes.
+                .open_with(name, &OpenMode::read().with_nonblock(true).to_cap_std())?
                 .into_std()
         };
         file.metadata()

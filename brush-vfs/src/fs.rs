@@ -99,6 +99,8 @@ pub struct OpenMode {
     truncate: bool,
     /// Refuse a final symlink (`O_NOFOLLOW`).
     nofollow: bool,
+    /// Do not wait for a peer when opening a FIFO (`O_NONBLOCK`).
+    nonblock: bool,
     /// Permission bits for a newly created inode.
     mode: Option<u32>,
 }
@@ -115,6 +117,7 @@ impl OpenMode {
             create_new: false,
             truncate: false,
             nofollow: false,
+            nonblock: false,
             mode: None,
         }
     }
@@ -130,6 +133,7 @@ impl OpenMode {
             create_new: false,
             truncate: true,
             nofollow: false,
+            nonblock: false,
             mode: None,
         }
     }
@@ -145,6 +149,7 @@ impl OpenMode {
             create_new: false,
             truncate: false,
             nofollow: false,
+            nonblock: false,
             mode: None,
         }
     }
@@ -206,6 +211,17 @@ impl OpenMode {
         self
     }
 
+    /// Opens without waiting for a FIFO's peer (`O_NONBLOCK`).
+    ///
+    /// For opens that exist only to `fstat` the descriptor. An ordinary
+    /// `cat fifo` must still block until a writer appears, so this is *not* set
+    /// on the general read path -- only where the file is never read.
+    #[must_use]
+    pub(crate) const fn with_nonblock(mut self, yes: bool) -> Self {
+        self.nonblock = yes;
+        self
+    }
+
     /// Sets the permission bits a *newly created* file is given.
     ///
     /// Only applies when the open creates the inode; an existing file keeps its
@@ -244,6 +260,9 @@ impl OpenMode {
             // `nofollow` is deliberately *not* forwarded as a flag: see
             // `Vfs::open_with`, which answers it during resolution because a
             // final symlink is followed before any descriptor exists.
+            if self.nonblock {
+                options.custom_flags(libc::O_NONBLOCK);
+            }
             if let Some(mode) = self.mode {
                 options.mode(mode);
             }
@@ -704,7 +723,13 @@ impl Vfs {
                 located
                     .mount
                     .dir()
-                    .open_with(&located.relative, &OpenMode::read().to_cap_std())?
+                    .open_with(
+                        &located.relative,
+                        // Opened only to `fstat`; a FIFO would otherwise wait
+                        // for a writer that never comes. See
+                        // `symlink_metadata_at` for the same hazard.
+                        &OpenMode::read().with_nonblock(true).to_cap_std(),
+                    )?
                     .into_std()
             };
 
@@ -1274,9 +1299,9 @@ fn symlink_metadata_at(
     })?;
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    let flags = libc::O_SYMLINK | libc::O_CLOEXEC;
+    let flags = libc::O_SYMLINK | libc::O_CLOEXEC | libc::O_NONBLOCK;
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
 
     #[expect(
         clippy::disallowed_methods,
@@ -1377,6 +1402,52 @@ mod tests {
         let f = fixture();
         let err = read(&f.vfs, "/etc/passwd").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stating_a_fifo_does_not_block() {
+        // Opening a FIFO waits for a writer. `symlink_metadata` opens the entry
+        // to `fstat` it, so without `O_NONBLOCK` this hangs forever -- no error,
+        // no timeout, just a wedged shell on `[[ -e fifo ]]` or an `ls` of a
+        // directory containing one. `findutils`' own suite hung here.
+        //
+        // A hang cannot be asserted against directly, so the guard is that this
+        // test returns at all: a regression wedges the suite rather than
+        // reddening it, which is itself the signal.
+        let fx = fixture();
+        let host = fx.vfs.host_path(&vp("/work")).expect("host path").join("pipe");
+        let cpath = std::ffi::CString::new(host.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: `cpath` is a valid NUL-terminated path for the lifetime of the
+        // call, and 0o644 is a valid mode.
+        let rc = unsafe { libc::mkfifo(cpath.as_ptr(), 0o644) };
+        assert_eq!(rc, 0, "could not create the fifo fixture");
+
+        let md = fx
+            .vfs
+            .symlink_metadata(&vp("/work/pipe"))
+            .expect("stat of a fifo must return");
+        assert!(!md.is_file() && !md.is_dir(), "a fifo is neither");
+        // And `metadata`, which follows, must not block either.
+        assert!(fx.vfs.metadata(&vp("/work/pipe")).is_ok());
+
+        // A unix socket is the other special type, and on macOS it cannot be
+        // `open`ed at all -- which this implementation must do, since
+        // `std::fs::Metadata` has no public constructor and `fstatat` cannot
+        // produce one. Recorded as a test rather than a comment so the platform
+        // difference is visible.
+        let sock = fx.vfs.host_path(&vp("/work")).expect("host path").join("sock");
+        drop(std::os::unix::net::UnixListener::bind(&sock).expect("bind"));
+        let stat = fx.vfs.symlink_metadata(&vp("/work/sock"));
+        if cfg!(any(target_os = "macos", target_os = "ios")) {
+            assert!(
+                stat.is_err(),
+                "macOS cannot open a socket, so this is expected to fail -- see \
+                 the note on `symlink_metadata_at`"
+            );
+        } else {
+            assert!(stat.is_ok(), "O_PATH stats a socket without opening it");
+        }
     }
 
     #[test]

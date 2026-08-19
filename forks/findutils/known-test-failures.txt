@@ -1,0 +1,16 @@
+# Upstream tests that diverge under routing, with the decision responsible.
+#
+# D13's rule: a case that starts *passing* is itself a failure, so an entry
+# whose cause is fixed must be removed rather than left to rot.
+
+# macOS only. `%y` on a unix socket reports `U` (unknown) instead of `s`.
+#
+# brush-vfs's `symlink_metadata` opens the entry and `fstat`s the descriptor,
+# because `std::fs::Metadata` has no public constructor and `fstatat` therefore
+# cannot produce one. macOS refuses to `open` a socket at all, so the stat
+# fails and `find` falls back to `U`. Linux is unaffected: `O_PATH` does not
+# really open the file, and this test passes there.
+#
+# Fails closed -- an error about something *inside* the namespace, not a wrong
+# answer about something outside it. See the note on `symlink_metadata_at`.
+find::matchers::printf::tests::test_printf_special_types

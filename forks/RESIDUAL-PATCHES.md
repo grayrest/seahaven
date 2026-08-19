@@ -52,6 +52,14 @@ them in signatures, so the names follow the calls. Everything else the codemod
 touches keeps its `std` type, which is what makes it an identifier swap rather
 than a type swap (D34).
 
+## `findutils` — an exemption and a known divergence, not a patch
+
+`find` is **not registered** in the bundled command set. Its `std::fs` sites are
+routed, but its traversal is `walkdir`, which reads directories itself and is
+banned in `deny.toml` for that reason. An unconfined `find` is worse than no
+`find`. `known-test-failures.txt` records the one upstream test that diverges
+under routing, macOS only.
+
 ## `uu_df` — an exemption, not a patch
 
 Vendored with `--skip src/filesystem.rs`. That module canonicalizes mount
