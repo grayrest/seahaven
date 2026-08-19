@@ -19,6 +19,13 @@ mod features; // feature-gated code modules
 mod macros; // crate macros (macro_rules-type; exported to `crate::...`)
 mod mods; // core cross-platform modules
 
+// FLATLAND DIVERGENCE: installs an identity vfs session for this crate's own
+// test binary, so upstream's tests keep exercising the routed code instead of
+// failing closed. `cfg(test)` means it is absent from every production build --
+// see the module for the full reasoning.
+#[cfg(test)]
+mod flatland_test_session;
+
 pub use uucore_procs::*;
 
 // * cross-platform modules
