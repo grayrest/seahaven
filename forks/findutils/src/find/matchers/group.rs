@@ -63,7 +63,7 @@ impl Matcher for NoGroupMatcher {
     fn matches(&self, file_info: &WalkEntry, _: &mut MatcherIO) -> bool {
         use nix::unistd::Gid;
 
-        if file_info.path().is_symlink() {
+        if brush_vfs::ambient::is_symlink(file_info.path()) {
             return false;
         }
 

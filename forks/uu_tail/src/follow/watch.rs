@@ -146,11 +146,11 @@ impl Observer {
     ) -> UResult<()> {
         if self.follow.is_some() {
             let path = if path.is_relative() {
-                std::env::current_dir()?.join(path)
+                brush_vfs::ambient::current_dir()?.join(path)
             } else {
                 path.to_owned()
             };
-            let metadata = path.metadata().ok();
+            let metadata = brush_vfs::ambient::metadata(&path).ok();
             self.files.insert(
                 &path,
                 PathData::new(reader, metadata, display_name),
@@ -262,22 +262,22 @@ impl Observer {
                     InputKind::Stdin => (),
                     InputKind::File(path) => {
                         #[cfg(all(unix, not(target_os = "linux")))]
-                        if !path.is_file() {
+                        if !brush_vfs::ambient::is_file(path) {
                             continue;
                         }
                         let mut path = path.clone();
                         if path.is_relative() {
-                            path = std::env::current_dir()?.join(path);
+                            path = brush_vfs::ambient::current_dir()?.join(path);
                         }
 
                         if path.is_tailable() {
                             // Add existing regular files to `Watcher` (InotifyWatcher).
                             watcher_rx.watch_with_parent(&path)?;
-                        } else if let Some(active_parent) = path.parent().filter(|p| p.is_dir()) {
+                        } else if let Some(active_parent) = path.parent().filter(|p| brush_vfs::ambient::is_dir(p)) {
                             // If `path` is not a tailable file, add its parent to `Watcher`.
                             watcher_rx.watch(active_parent, RecursiveMode::NonRecursive)?;
                             // Add symlinks to orphans for retry polling (target may not exist)
-                            if path.is_symlink() {
+                            if brush_vfs::ambient::is_symlink(&path) {
                                 self.orphans.push(path);
                             }
                         } else {
@@ -314,7 +314,7 @@ impl Observer {
             // `Modify(Data(..))`/`Modify(Metadata(..))` instead, so this is a no-op there.
             EventKind::Modify(ModifyKind::Any | ModifyKind::Metadata(MetadataKind::Any | MetadataKind::WriteTime) | ModifyKind::Data(DataChange::Any) | ModifyKind::Name(RenameMode::To)) |
             EventKind::Create(CreateKind::File | CreateKind::Folder | CreateKind::Any) => {
-                if let Ok(new_md) = event_path.metadata() {
+                if let Ok(new_md) = brush_vfs::ambient::metadata(event_path) {
                     // `metadata()` follows symlinks, so under --follow=name a
                     // watched file swapped for a symlink would otherwise be
                     // silently followed to its target. GNU treats such a
@@ -399,7 +399,7 @@ impl Observer {
                         }
                     }
                     self.files.update_metadata(event_path, Some(new_md));
-                } else if event_path.is_symlink() && settings.retry {
+                } else if brush_vfs::ambient::is_symlink(event_path) && settings.retry {
                     self.files.reset_reader(event_path);
                     self.orphans.push(event_path.clone());
                 }
@@ -523,7 +523,7 @@ pub fn follow(mut observer: Observer, settings: &Settings) -> UResult<()> {
             for new_path in &observer.orphans {
                 // Use metadata() directly instead of exists() + metadata().unwrap()
                 // to avoid a TOCTOU race where the file is removed between the two calls.
-                if let Ok(md) = new_path.metadata() {
+                if let Ok(md) = brush_vfs::ambient::metadata(new_path) {
                     let pd = observer.files.get(new_path);
                     if md.is_tailable() && pd.reader.is_none() {
                         show_error!(

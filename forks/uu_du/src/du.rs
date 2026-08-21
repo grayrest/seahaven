@@ -938,7 +938,7 @@ fn read_files_from(file_name: &OsStr) -> Result<Vec<PathBuf>, std::io::Error> {
     } else {
         // First, check if the file_name is a directory
         let path = PathBuf::from(file_name);
-        if path.is_dir() {
+        if brush_vfs::ambient::is_dir(path) {
             return Err(std::io::Error::other(
                 translate!("du-error-read-error-is-directory", "file" => file_name.maybe_quote()),
             ));

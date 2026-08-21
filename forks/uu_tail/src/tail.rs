@@ -139,7 +139,7 @@ fn tail_file(
         return Ok(());
     }
 
-    if path.is_dir() {
+    if brush_vfs::ambient::is_dir(path) {
         set_exit_code(1);
 
         header_printer.print_input(input);
@@ -229,7 +229,7 @@ fn open_file(path: &Path, use_nonblock_for_fifo: bool) -> io::Result<File> {
     use std::fs::OpenOptions;
     use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 
-    let is_fifo = path.metadata().is_ok_and(|m| m.file_type().is_fifo());
+    let is_fifo = brush_vfs::ambient::metadata(path).is_ok_and(|m| m.file_type().is_fifo());
 
     if is_fifo && use_nonblock_for_fifo {
         let file = OpenOptions::new()

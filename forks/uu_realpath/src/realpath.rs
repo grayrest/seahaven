@@ -271,8 +271,8 @@ fn canonicalize_relative(
     resolve: ResolveMode,
 ) -> std::io::Result<PathBuf> {
     let abs = canonicalize(r, can_mode, resolve)?;
-    if can_mode == MissingHandling::Existing && !abs.is_dir() {
-        abs.read_dir()?; // raise not a directory error
+    if can_mode == MissingHandling::Existing && !brush_vfs::ambient::is_dir(&abs) {
+        brush_vfs::ambient::read_dir(&abs)?; // raise not a directory error
     }
     Ok(abs)
 }
@@ -302,7 +302,7 @@ fn resolve_path(
     if can_mode == MissingHandling::Normal {
         let path_bytes = p.as_os_str().as_encoded_bytes();
         if path_bytes.ends_with(b"/.") || path_bytes.ends_with(b"/./") {
-            abs.metadata()?; // raise no such file or directory error
+            brush_vfs::ambient::metadata(&abs)?; // raise no such file or directory error
         }
     }
 

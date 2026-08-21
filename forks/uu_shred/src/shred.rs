@@ -614,7 +614,7 @@ fn wipe_file(
     let path = Path::new(path_str);
 
     if path_str.as_encoded_bytes().ends_with(b"/") {
-        if path.is_dir() {
+        if brush_vfs::ambient::is_dir(path) {
             return Err(USimpleError::new(
                 1,
                 translate!("shred-failed-to-open-for-writing-is-a-directory", "file" => path.maybe_quote()),

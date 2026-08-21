@@ -1101,7 +1101,7 @@ impl Options {
             .cloned();
 
         if let Some(dir) = &target_dir
-            && !dir.is_dir()
+            && !brush_vfs::ambient::is_dir(dir)
         {
             return Err(CpError::NotADirectory(dir.clone()));
         }
@@ -1319,7 +1319,7 @@ impl TargetType {
     /// Treat target as a dir if we have multiple sources or the target
     /// exists and already is a directory
     fn determine(sources: &[PathBuf], target: &Path) -> Self {
-        if sources.len() > 1 || target.is_dir() {
+        if sources.len() > 1 || brush_vfs::ambient::is_dir(target) {
             Self::Directory
         } else {
             Self::File
@@ -1530,7 +1530,7 @@ fn construct_dest_path(
     target_type: TargetType,
     options: &Options,
 ) -> CopyResult<PathBuf> {
-    if options.no_target_dir && target.is_dir() {
+    if options.no_target_dir && brush_vfs::ambient::is_dir(target) {
         return Err(
             translate!("cp-error-cannot-overwrite-directory-with-non-directory",
                               "dir" => target.quote())
@@ -1538,7 +1538,7 @@ fn construct_dest_path(
         );
     }
 
-    if options.parents && !target.is_dir() {
+    if options.parents && !brush_vfs::ambient::is_dir(target) {
         return Err(translate!("cp-error-with-parents-dest-must-be-dir").into());
     }
 
@@ -1551,7 +1551,7 @@ fn construct_dest_path(
                     Path::new("")
                 }
             } else {
-                if source_path == Path::new(".") && target.is_dir() {
+                if source_path == Path::new(".") && brush_vfs::ambient::is_dir(target) {
                     // Special case: when copying current directory (.) to an existing directory,
                     // return the target path directly instead of trying to construct a path
                     // relative to the source's parent. This ensures we copy the contents of
@@ -1578,7 +1578,7 @@ fn copy_source(
     created_parent_dirs: &mut HashSet<PathBuf>,
 ) -> CopyResult<()> {
     let source_path = Path::new(&source);
-    if source_path.is_dir() && (options.dereference || !source_path.is_symlink()) {
+    if brush_vfs::ambient::is_dir(source_path) && (options.dereference || !brush_vfs::ambient::is_symlink(source_path)) {
         // Copy as directory
         copy_directory(
             progress_bar,
@@ -1639,7 +1639,7 @@ fn file_mode_for_interactive_overwrite(path: &Path) -> Option<(String, String)> 
     use libc::{S_IWUSR, mode_t};
     use std::os::unix::prelude::MetadataExt;
 
-    match path.metadata() {
+    match brush_vfs::ambient::metadata(path) {
         Ok(me) => {
             // Cast is necessary on some platforms
             #[allow(clippy::unnecessary_cast)]
@@ -1862,7 +1862,7 @@ pub(crate) fn copy_attributes(
         // permissions of a symbolic link. In that case, we just
         // do nothing, since every symbolic link has the same
         // permissions.
-        if !dest.is_symlink() {
+        if !brush_vfs::ambient::is_symlink(dest) {
             #[cfg(unix)]
             let source_perms = {
                 use std::os::unix::fs::PermissionsExt;
@@ -1905,7 +1905,7 @@ pub(crate) fn copy_attributes(
         #[cfg(unix)]
         let no_open = {
             let ft = source_metadata.file_type();
-            dest.is_symlink()
+            brush_vfs::ambient::is_symlink(dest)
                 || ft.is_fifo()
                 || ft.is_socket()
                 || ft.is_char_device()
@@ -1979,7 +1979,7 @@ fn symlink_file(
     }
     #[cfg(not(any(windows, target_os = "wasi")))]
     {
-        std::os::unix::fs::symlink(source, dest).map_err(|e| {
+        brush_vfs::ambient::symlink(source, dest).map_err(|e| {
             CpError::IoErrContext(
                 e,
                 translate!("cp-error-cannot-create-symlink",
@@ -2051,8 +2051,8 @@ fn is_forbidden_to_copy_to_same_file(
 ) -> bool {
     // TODO To match the behavior of GNU cp, we also need to check
     // that the file is a regular file.
-    let source_is_symlink = source.is_symlink();
-    let dest_is_symlink = dest.is_symlink();
+    let source_is_symlink = brush_vfs::ambient::is_symlink(source);
+    let dest_is_symlink = brush_vfs::ambient::is_symlink(dest);
     // only disable dereference if both source and dest is symlink and dereference flag is disabled
     let dereference_to_compare =
         options.dereference(source_in_command_line) || (!source_is_symlink || !dest_is_symlink);
@@ -2122,7 +2122,7 @@ fn handle_existing_dest(
             return Err(translate!("cp-error-backing-up-destroy-source", "dest" => dest.quote(), "source" => source.quote())
             .into());
         }
-        is_dest_removed = dest.is_symlink();
+        is_dest_removed = brush_vfs::ambient::is_symlink(dest);
         backup_dest(dest, &backup_path, is_dest_removed)?;
     }
     if !is_dest_removed {
@@ -2332,14 +2332,14 @@ fn handle_copy_mode(
                 let backup_path =
                     backup_control::get_backup_path(options.backup, dest, &options.backup_suffix);
                 if let Some(backup_path) = backup_path {
-                    backup_dest(dest, &backup_path, dest.is_symlink())?;
+                    backup_dest(dest, &backup_path, brush_vfs::ambient::is_symlink(dest))?;
                     brush_vfs::ambient::remove_file(dest)?;
                 }
                 if options.overwrite == OverwriteMode::Clobber(ClobberMode::Force) {
                     brush_vfs::ambient::remove_file(dest)?;
                 }
             }
-            if options.dereference(source_in_command_line) && source.is_symlink() {
+            if options.dereference(source_in_command_line) && brush_vfs::ambient::is_symlink(source) {
                 let resolved =
                     canonicalize(source, MissingHandling::Missing, ResolveMode::Physical).unwrap();
                 brush_vfs::ambient::hard_link(resolved, dest)
@@ -2516,7 +2516,7 @@ fn copy_file(
     created_parent_dirs: &mut HashSet<PathBuf>,
     source_in_command_line: bool,
 ) -> CopyResult<()> {
-    let source_is_symlink = source.is_symlink();
+    let source_is_symlink = brush_vfs::ambient::is_symlink(source);
     let initial_dest_metadata = brush_vfs::ambient::symlink_metadata(&(dest)).ok();
     let dest_is_symlink = initial_dest_metadata
         .as_ref()
@@ -2835,7 +2835,7 @@ fn copy_helper(
         }
     }
 
-    if path_ends_with_terminator(dest) && !dest.is_dir() {
+    if path_ends_with_terminator(dest) && !brush_vfs::ambient::is_dir(dest) {
         return Err(CpError::NotADirectory(dest.to_path_buf()));
     }
 
@@ -2940,7 +2940,7 @@ fn copy_link(
     let link = brush_vfs::ambient::read_link(source)?;
     // we always need to remove the file to be able to create a symlink,
     // even if it is writeable.
-    if dest.is_symlink() || dest.is_file() {
+    if brush_vfs::ambient::is_symlink(dest) || brush_vfs::ambient::is_file(dest) {
         delete_path(dest, options)?;
     }
     symlink_file(&link, dest, symlinked_files)?;
@@ -2955,7 +2955,7 @@ fn copy_link(
 
 /// Generate an error message if `target` is not the correct `target_type`
 pub fn verify_target_type(target: &Path, target_type: TargetType) -> CopyResult<()> {
-    match (target_type, target.is_dir()) {
+    match (target_type, brush_vfs::ambient::is_dir(target)) {
         (TargetType::Directory, false) => Err(translate!("cp-error-target-not-directory", "target" => target.quote())
         .into()),
         (TargetType::File, true) => Err(translate!("cp-error-cannot-overwrite-directory-with-non-directory", "dir" => target.quote())

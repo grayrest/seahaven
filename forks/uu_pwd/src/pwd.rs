@@ -25,7 +25,7 @@ const ARG_OPERANDS: &str = "operands";
 
 fn physical_path() -> io::Result<PathBuf> {
     // std::env::current_dir() is a thin wrapper around libc::getcwd().
-    let path = env::current_dir()?;
+    let path = brush_vfs::ambient::current_dir()?;
 
     // On Unix, getcwd() must return the physical path:
     // https://pubs.opengroup.org/onlinepubs/9699919799/functions/getcwd.html
@@ -107,7 +107,7 @@ fn logical_path() -> io::Result<PathBuf> {
 
         match env::var_os("PWD").map(PathBuf::from) {
             Some(value) if looks_reasonable(&value) => Ok(value),
-            _ => env::current_dir(),
+            _ => brush_vfs::ambient::current_dir(),
         }
     }
 }

@@ -163,7 +163,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         let mut files_iter = files.peekable();
         while let (Some(file_os), next_file) = (files_iter.next(), files_iter.peek()) {
             let file = Path::new(file_os);
-            if file.is_dir() {
+            if brush_vfs::ambient::is_dir(file) {
                 show!(UUsageError::new(
                     0,
                     MoreError::IsDirectory(file.into()).to_string(),

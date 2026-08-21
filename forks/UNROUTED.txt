@@ -25,24 +25,31 @@
 # Build scripts run at build time on the host, before any namespace exists;
 # they are not sandboxed code.
 #
-# `uu_df/src/filesystem.rs` canonicalizes mount *device names* out of the host
-# mount table, and `uucore`'s `fsext` is the same class: host introspection,
-# not namespace access. `df` is not confined, by decision -- see
-# RESIDUAL-PATCHES.md.
+# `uu_df` reads the *host mount table* -- `filesystem.rs` canonicalizes mount
+# device names and `df.rs` resolves those same names -- which is host
+# introspection, not namespace access. `uucore`'s `fsext` is the same class.
+# `df` is not confined, by decision; see RESIDUAL-PATCHES.md.
 #
-# `uucore::perms` is deliberately left on `walkdir`; it is unreachable from
-# anything bundled and porting it needs a routed `chown` that does not exist.
+# `uucore::perms` is deliberately left on `walkdir`: unreachable from anything
+# bundled, and porting it needs a routed `chown` that does not exist.
 #
-# The `rustix` `*at` calls in `uu_mv` and the ones in `safe_traversal` sit below
-# a descriptor that was already rooted through the namespace, and inherit its
-# confinement -- rooting is the patch, and the `*at` calls under it are meant to
-# be unchanged.
+# The `rustix` `*at` calls in `uu_mv` and `uucore::safe_traversal` sit below a
+# descriptor that was already rooted through the namespace and inherit its
+# confinement. Rooting is the patch; the `*at` calls under it are meant to be
+# unchanged.
 #
-# `nix::unistd::mkfifo` has no facade equivalent; the ban list says "not
-# expressible in the namespace yet" and means it. Both sites sit behind an
-# `EXDEV` cross-device fallback a single mount cannot reach.
+# `mkfifo`, `mknod`, `utimensat`, `UnixListener::bind` and a child's
+# `Command::current_dir` have no facade equivalent. The ban list says "not
+# expressible in the namespace yet" for each, and means it.
+#
+# `tempfile` and `env::temp_dir` are scratch space, which D38 places outside
+# the namespace on purpose.
 # ---------------------------------------------------------------------------
+findutils/src/find/matchers/exec.rs std::process::Command::current_dir 2
+uu_cp/src/cp.rs nix::sys::stat::mknod 1
 uu_cp/src/cp.rs nix::unistd::mkfifo 1
+uu_cp/src/cp.rs std::os::unix::net::UnixListener::bind 1
+uu_df/src/df.rs std::path::Path::is_symlink 1
 uu_df/src/filesystem.rs std::fs::canonicalize 1
 uu_df/src/filesystem.rs std::path::Path::canonicalize 3
 uu_df/src/filesystem.rs std::path::Path::metadata 2
@@ -50,88 +57,43 @@ uu_mv/src/mv.rs nix::unistd::mkfifo 2
 uu_mv/src/mv.rs rustix::fs::renameat 1
 uu_mv/src/mv.rs rustix::fs::symlinkat 1
 uu_mv/src/mv.rs rustix::fs::unlinkat 1
+uu_sort/src/sort.rs std::env::temp_dir 1
+uu_sort/src/tmp_dir.rs tempfile::Builder::tempdir_in 1
+uu_tac/src/tac.rs tempfile::tempfile 1
+uu_touch/src/touch.rs rustix::fs::utimensat 1
 
 # ---------------------------------------------------------------------------
 # The backlog. Each of these is a call that should go through
 # `brush_vfs::ambient` and does not yet.
 # ---------------------------------------------------------------------------
-findutils/src/find/matchers/exec.rs std::process::Command::current_dir 2
-findutils/src/find/matchers/group.rs std::path::Path::is_symlink 1
-findutils/src/find/matchers/mod.rs std::path::Path::metadata 1
-findutils/src/find/matchers/printf.rs std::path::Path::metadata 1
-findutils/src/find/matchers/user.rs std::path::Path::is_symlink 1
 findutils/src/updatedb/mod.rs std::fs::OpenOptions::new 1
 findutils/src/updatedb/mod.rs std::fs::OpenOptions::open 1
 sed/build.rs std::fs::File::create 1
-uu_cp/src/copydir.rs std::env::current_dir 1
 uu_cp/src/copydir.rs std::fs::DirBuilder::create 1
 uu_cp/src/copydir.rs std::fs::DirBuilder::new 1
-uu_cp/src/copydir.rs std::path::Path::is_dir 5
-uu_cp/src/copydir.rs std::path::Path::is_file 1
-uu_cp/src/copydir.rs std::path::Path::is_symlink 2
-uu_cp/src/cp.rs nix::sys::stat::mknod 1
 uu_cp/src/cp.rs std::fs::OpenOptions::new 1
 uu_cp/src/cp.rs std::fs::OpenOptions::open 1
-uu_cp/src/cp.rs std::os::unix::fs::symlink 1
-uu_cp/src/cp.rs std::os::unix::net::UnixListener::bind 1
-uu_cp/src/cp.rs std::path::Path::is_dir 8
-uu_cp/src/cp.rs std::path::Path::is_file 1
-uu_cp/src/cp.rs std::path::Path::is_symlink 10
-uu_cp/src/cp.rs std::path::Path::metadata 1
 uu_cp/src/platform/macos.rs std::fs::OpenOptions::new 1
 uu_cp/src/platform/macos.rs std::fs::OpenOptions::open 1
-uu_date/src/date.rs std::path::Path::is_dir 1
 uu_dd/src/dd.rs std::fs::OpenOptions::new 4
 uu_dd/src/dd.rs std::fs::OpenOptions::open 4
-uu_df/src/df.rs std::path::Path::is_symlink 1
-uu_dircolors/src/dircolors.rs std::path::Path::is_dir 1
-uu_du/src/du.rs std::path::Path::is_dir 1
-uu_expand/src/expand.rs std::path::Path::is_dir 1
-uu_ls/src/ls.rs std::path::Path::is_dir 1
 uu_mkdir/src/mkdir.rs std::fs::DirBuilder::create 1
 uu_mkdir/src/mkdir.rs std::fs::DirBuilder::new 1
-uu_mkdir/src/mkdir.rs std::path::Path::is_dir 1
-uu_more/src/more.rs std::path::Path::is_dir 1
-uu_nl/src/nl.rs std::path::Path::is_dir 1
-uu_pwd/src/pwd.rs std::env::current_dir 2
-uu_realpath/src/realpath.rs std::path::Path::is_dir 1
-uu_realpath/src/realpath.rs std::path::Path::metadata 1
-uu_realpath/src/realpath.rs std::path::Path::read_dir 1
-uu_rm/src/rm.rs std::path::Path::is_dir 1
-uu_rm/src/rm.rs std::path::Path::is_symlink 1
-uu_rmdir/src/rmdir.rs std::path::Path::is_symlink 1
-uu_rmdir/src/rmdir.rs std::path::Path::metadata 1
 uu_shred/src/shred.rs std::fs::OpenOptions::new 2
 uu_shred/src/shred.rs std::fs::OpenOptions::open 2
-uu_shred/src/shred.rs std::path::Path::is_dir 1
-uu_sort/src/sort.rs std::env::temp_dir 1
 uu_sort/src/sort.rs std::fs::OpenOptions::new 1
 uu_sort/src/sort.rs std::fs::OpenOptions::open 1
-uu_sort/src/tmp_dir.rs tempfile::Builder::tempdir_in 1
 uu_split/src/platform/unix.rs std::fs::OpenOptions::new 3
 uu_split/src/platform/unix.rs std::fs::OpenOptions::open 3
-uu_tac/src/tac.rs tempfile::tempfile 1
-uu_tail/src/follow/files.rs std::path::Path::metadata 2
-uu_tail/src/follow/watch.rs std::env::current_dir 2
-uu_tail/src/follow/watch.rs std::path::Path::is_dir 1
-uu_tail/src/follow/watch.rs std::path::Path::is_file 1
-uu_tail/src/follow/watch.rs std::path::Path::is_symlink 2
-uu_tail/src/follow/watch.rs std::path::Path::metadata 3
 uu_tail/src/follow/watch.rs std::path::Path::symlink_metadata 1
 uu_tail/src/paths.rs std::path::Path::is_dir 1
-uu_tail/src/paths.rs std::path::Path::is_file 1
-uu_tail/src/paths.rs std::path::Path::metadata 1
 uu_tail/src/tail.rs std::fs::OpenOptions::new 1
 uu_tail/src/tail.rs std::fs::OpenOptions::open 1
-uu_tail/src/tail.rs std::path::Path::is_dir 1
-uu_tail/src/tail.rs std::path::Path::metadata 2
-uu_touch/src/touch.rs rustix::fs::utimensat 1
+uu_tail/src/tail.rs std::path::Path::metadata 1
 uu_touch/src/touch.rs std::fs::OpenOptions::new 2
 uu_touch/src/touch.rs std::fs::OpenOptions::open 2
-uu_touch/src/touch.rs std::path::Path::metadata 1
 uu_truncate/src/truncate.rs std::fs::OpenOptions::new 1
 uu_truncate/src/truncate.rs std::fs::OpenOptions::open 1
-uu_unexpand/src/unexpand.rs std::path::Path::is_dir 1
 uucore/build.rs std::fs::File::create 1
 uucore/build.rs std::fs::read_dir 3
 uucore/build.rs std::fs::read_to_string 3

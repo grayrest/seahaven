@@ -123,13 +123,13 @@ struct Context<'a> {
 
 impl<'a> Context<'a> {
     fn new(root: &'a Path, target: &'a Path) -> io::Result<Self> {
-        let current_dir = env::current_dir()?;
+        let current_dir = brush_vfs::ambient::current_dir()?;
         let root_path = current_dir.join(root);
-        let target_is_file = target.is_file();
+        let target_is_file = brush_vfs::ambient::is_file(target);
         let root_parent =
             if brush_vfs::ambient::exists(&(target)) && !root.as_os_str().as_encoded_bytes().ends_with(b"/.") {
                 root_path.parent().map(ToOwned::to_owned)
-            } else if root == Path::new(".") && target.is_dir() {
+            } else if root == Path::new(".") && brush_vfs::ambient::is_dir(target) {
                 // Special case: when copying current directory (.) to an existing directory,
                 // we don't want to use the parent path as root_parent because we want to
                 // copy the contents of the current directory directly into the target directory,
@@ -209,7 +209,7 @@ impl Entry {
         let mut descendant =
             get_local_to_root_parent(&source_absolute, context.root_parent.as_deref())?;
         if no_target_dir {
-            let source_is_dir = source.is_dir();
+            let source_is_dir = brush_vfs::ambient::is_dir(source);
             if path_ends_with_terminator(context.target)
                 && source_is_dir
                 && !brush_vfs::ambient::try_exists(context.target).is_ok_and(identity)
@@ -228,7 +228,7 @@ impl Entry {
             {
                 descendant = stripped.to_path_buf();
             }
-        } else if context.root == Path::new(".") && context.target.is_dir() {
+        } else if context.root == Path::new(".") && brush_vfs::ambient::is_dir(context.target) {
             // Special case: when copying current directory (.) to an existing directory,
             // strip the current directory name from the descendant path to avoid creating
             // an extra level of nesting. For example, if we're in /home/user/source_dir
@@ -276,7 +276,7 @@ fn copy_direntry(
     let source_is_dir = if source_is_symlink && !options.dereference {
         false
     } else if source_is_symlink {
-        entry.source_absolute.is_dir()
+        brush_vfs::ambient::is_dir(&entry.source_absolute)
     } else {
         entry_is_dir_no_follow
     };
@@ -287,7 +287,7 @@ fn copy_direntry(
     // of the destination tree. GNU refuses this ("cannot overwrite
     // non-directory ... with directory"), so treat a symlink at the destination
     // as the non-directory it is.
-    let dest_is_symlink = entry.local_to_target.is_symlink();
+    let dest_is_symlink = brush_vfs::ambient::is_symlink(&entry.local_to_target);
 
     // If the source is a directory and the destination does not
     // exist, ...
@@ -378,7 +378,7 @@ pub(crate) fn copy_directory(
     source_in_command_line: bool,
 ) -> CopyResult<()> {
     // if no-dereference is enabled and this is a symlink, copy it as a file
-    if !options.dereference(source_in_command_line) && root.is_symlink() {
+    if !options.dereference(source_in_command_line) && brush_vfs::ambient::is_symlink(root) {
         return copy_file(
             progress_bar,
             root,
@@ -512,7 +512,7 @@ pub(crate) fn copy_directory(
                 // `./a/b/c` into `./a/`, in which case we'll need to fix the
                 // permissions of both `./a/b/c` and `./a/b`, in that order.)
                 let is_dir_for_permissions =
-                    entry_is_dir_no_follow || (options.dereference && direntry_path.is_dir());
+                    entry_is_dir_no_follow || (options.dereference && brush_vfs::ambient::is_dir(direntry_path));
                 if is_dir_for_permissions {
                     // For --link mode, copy attributes immediately to avoid O(n) memory
                     if options.copy_mode == CopyMode::Link {

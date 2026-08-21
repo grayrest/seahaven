@@ -232,7 +232,7 @@ impl PathExtTail for Path {
 }
 
 pub fn path_is_tailable(path: &Path) -> bool {
-    path.is_file() || brush_vfs::ambient::exists(&(path)) && path.metadata().is_ok_and(|meta| meta.is_tailable())
+    brush_vfs::ambient::is_file(path) || brush_vfs::ambient::exists(&(path)) && brush_vfs::ambient::metadata(path).is_ok_and(|meta| meta.is_tailable())
 }
 
 #[inline]

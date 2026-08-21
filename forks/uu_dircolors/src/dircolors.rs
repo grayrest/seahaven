@@ -182,7 +182,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
                 parse(fin.lines().map_while(Result::ok), &out_format, "-")
             } else {
                 let path = Path::new(&file_arg);
-                if path.is_dir() {
+                if brush_vfs::ambient::is_dir(path) {
                     return Err(USimpleError::new(
                         2,
                         translate!("dircolors-error-expected-file-got-directory", "path" => path.quote()),

@@ -476,7 +476,7 @@ fn touch_file(
     let metadata_result = if opts.no_deref {
         brush_vfs::ambient::symlink_metadata(&(path))
     } else {
-        path.metadata()
+        brush_vfs::ambient::metadata(path)
     };
 
     if let Err(e) = metadata_result {

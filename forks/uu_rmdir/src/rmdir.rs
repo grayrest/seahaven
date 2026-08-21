@@ -66,7 +66,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
                 use std::os::unix::ffi::OsStrExt;
 
                 fn points_to_directory(path: &Path) -> io::Result<bool> {
-                    Ok(path.metadata()?.file_type().is_dir())
+                    Ok(brush_vfs::ambient::metadata(path)?.file_type().is_dir())
                 }
 
                 let mut bytes = path.as_os_str().as_bytes();
@@ -74,7 +74,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
                     // Strip the trailing slash or .symlink_metadata() will follow the symlink
                     bytes = strip_trailing_slashes_from_path(bytes);
                     let no_slash: &Path = OsStr::from_bytes(bytes).as_ref();
-                    if no_slash.is_symlink() && points_to_directory(no_slash).unwrap_or(true) {
+                    if brush_vfs::ambient::is_symlink(no_slash) && points_to_directory(no_slash).unwrap_or(true) {
                         show_error!(
                             "{}",
                             translate!("rmdir-error-symbolic-link-not-followed", "path" => path.quote())

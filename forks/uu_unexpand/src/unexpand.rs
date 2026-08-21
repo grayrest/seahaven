@@ -301,7 +301,7 @@ impl Read for Input {
 
 fn open(path: &OsString) -> UResult<BufReader<Input>> {
     let filename = Path::new(path);
-    if filename.is_dir() {
+    if brush_vfs::ambient::is_dir(filename) {
         Err(USimpleError::new(
             1,
             translate!("unexpand-error-is-directory", "path" => filename.maybe_quote()),

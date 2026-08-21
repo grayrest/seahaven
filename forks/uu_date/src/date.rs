@@ -526,7 +526,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
             allow_extended,
         ),
         DateSource::File(ref path) => {
-            if path.is_dir() {
+            if brush_vfs::ambient::is_dir(path) {
                 return Err(USimpleError::new(
                     2,
                     translate!("date-error-expected-file-got-directory", "path" => path.quote()),

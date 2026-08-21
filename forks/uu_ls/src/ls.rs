@@ -85,7 +85,7 @@ enum LsError {
         ErrorKind::NotFound => translate!("ls-error-cannot-access-no-such-file", "path" => .0.quote()),
         ErrorKind::PermissionDenied => match .1.raw_os_error().unwrap_or(1) {
             1 => translate!("ls-error-cannot-access-operation-not-permitted", "path" => .0.quote()),
-            _ => if .0.is_dir() {
+            _ => if brush_vfs::ambient::is_dir(.0) {
                 translate!("ls-error-cannot-open-directory-permission-denied", "path" => .0.quote())
             } else {
                 translate!("ls-error-cannot-open-file-permission-denied", "path" => .0.quote())

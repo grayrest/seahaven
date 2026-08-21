@@ -250,7 +250,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         } else {
             let path = Path::new(file);
 
-            if path.is_dir() {
+            if brush_vfs::ambient::is_dir(path) {
                 show_error!(
                     "{}",
                     translate!("nl-error-is-directory", "path" => path.maybe_quote())

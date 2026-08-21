@@ -678,7 +678,7 @@ fn remove_dir_recursive(
     // a directory and we don't want to recurse. In particular, this
     // avoids an infinite recursion in the case of a link to the current
     // directory, like `ln -s . link`.
-    if !path.is_dir() || path.is_symlink() {
+    if !brush_vfs::ambient::is_dir(path) || brush_vfs::ambient::is_symlink(path) {
         return remove_file(path, options, progress_bar);
     }
 

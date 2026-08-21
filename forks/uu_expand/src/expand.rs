@@ -283,7 +283,7 @@ fn open(path: &OsString) -> UResult<BufReader<Box<dyn Read>>> {
         Ok(BufReader::new(Box::new(stdin()) as Box<dyn Read>))
     } else {
         let path_ref = Path::new(path);
-        if path_ref.is_dir() {
+        if brush_vfs::ambient::is_dir(path_ref) {
             return Err(USimpleError::new(
                 1,
                 translate!("expand-error-is-directory", "file" => path.maybe_quote()),
