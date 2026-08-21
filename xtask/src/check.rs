@@ -153,7 +153,8 @@ fn check_lint(sh: &Shell, verbose: bool) -> Result<()> {
         .run()
         .context("Clippy check failed")?;
     eprintln!("Clippy check passed.");
-    Ok(())
+
+    check_fork_lint(sh, verbose)
 }
 
 /// The exact argv the workspace lint runs, and the only place it is assembled.
@@ -173,6 +174,234 @@ fn lint_args(verbose: bool) -> Vec<&'static str> {
     }
     args.extend_from_slice(&["--", "-D", "warnings"]);
     args
+}
+
+/// Every fork under `forks/`, sorted. Shared so the two passes over them
+/// cannot drift apart about which forks exist.
+fn fork_names(root: &std::path::Path) -> Result<Vec<String>> {
+    let forks_dir = root.join("forks");
+    let mut names: Vec<String> = std::fs::read_dir(&forks_dir)
+        .with_context(|| format!("reading {}", forks_dir.display()))?
+        .flatten()
+        .filter(|e| e.path().join("Cargo.toml").is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    anyhow::ensure!(
+        !names.is_empty(),
+        "no forks found under {}",
+        forks_dir.display()
+    );
+    Ok(names)
+}
+
+/// The record of fork call sites that still reach the host, at `forks/`.
+const UNROUTED_RECORD: &str = "forks/UNROUTED.txt";
+
+/// Lints every fork for ambient filesystem authority, against a recorded
+/// baseline.
+///
+/// The forks are `exclude`d from the workspace, so the workspace lint above has
+/// never seen them -- and they are the code that most needs it, because D34
+/// bounds the codemod to free functions and every inherent `Path::metadata` it
+/// cannot see is a call that asks the host. The ban list already named
+/// `std::os::unix::fs::symlink`, clippy would have flagged `uu_ln` on sight,
+/// and nobody looked: `ln -s` wrote outside the namespace until someone noticed
+/// a stray file. The ban was working and unread.
+///
+/// Two deliberate narrowings. Only `clippy::disallowed_methods` is denied,
+/// because upstream's own lint level is not ours to enforce -- `write_manifest`
+/// drops the `lints` table for the same reason -- and `--lib` only, because a
+/// fork's `#[cfg(test)]` modules build fixtures on the host on purpose, as
+/// `tests/routing.rs` does, and a build script runs at build time on the host
+/// and is not sandboxed code at all.
+///
+/// The baseline exists because there are 165 such sites today. Some are
+/// deliberate and must stay -- `uu_df`'s host mount table, `uucore::perms`, the
+/// `*at` calls below a descriptor that was already rooted -- and the rest are a
+/// backlog. Recording them turns "invisible" into "listed and no new ones",
+/// which is what `known-test-failures.txt` does for the suites. D13's mirror
+/// rule applies here too: a site that stops firing is itself a failure, or the
+/// record quietly stops describing anything.
+fn check_fork_lint(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Linting the forks for ambient filesystem authority...");
+    let root = crate::common::find_workspace_root()?;
+    let record_path = root.join(UNROUTED_RECORD);
+    let recorded = read_unrouted(&record_path)?;
+
+    let mut found: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for name in fork_names(&root)? {
+        let dir = root.join("forks").join(&name);
+        let features = FORK_TEST_FEATURES
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, f)| *f);
+        let args = fork_lint_args(features);
+        // Same reasoning as `assert_denies_warnings`: checked on the argv that
+        // is about to run, not on some other assembly of it.
+        assert_denies_ban(&args)?;
+        if verbose {
+            eprintln!("Linting fork {name}: cargo {}", args.join(" "));
+        }
+
+        let _guard = sh.push_dir(&dir);
+        let output = cmd!(sh, "cargo {args...}")
+            .ignore_status()
+            .quiet()
+            .output()
+            .with_context(|| format!("linting fork {name}"))?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // A fork that does not compile is `check forks`' business, not this
+        // pass's -- but a half-linted crate must not be read here as "no
+        // unrouted calls". A ban diagnostic is `error: use of a disallowed
+        // method`, never a coded `error[EXXXX]`, so a coded error means the
+        // analysis stopped early and whatever this run found is not the answer.
+        anyhow::ensure!(
+            !stderr.contains("error[E"),
+            "fork {name} does not compile, so its lint is not an answer:\n{}",
+            tail(&stderr, 40)
+        );
+
+        for (file, method) in parse_unrouted(&stderr) {
+            *found.entry(format!("{name}/{file} {method}")).or_default() += 1;
+        }
+    }
+
+    let mut added = Vec::new();
+    for (key, count) in &found {
+        match recorded.get(key) {
+            Some(was) if was >= count => {}
+            Some(was) => added.push(format!("{key} {count}  (recorded {was})")),
+            None => added.push(format!("{key} {count}  (not recorded)")),
+        }
+    }
+    let mut removed = Vec::new();
+    for (key, was) in &recorded {
+        match found.get(key) {
+            Some(count) if count == was => {}
+            Some(count) => removed.push(format!("{key} {count}  (recorded {was})")),
+            None => removed.push(format!("{key} 0  (recorded {was})")),
+        }
+    }
+
+    anyhow::ensure!(
+        added.is_empty(),
+        "these fork call sites reach the host and are not recorded in {UNROUTED_RECORD} -- \
+         route them through `brush_vfs::ambient`, or record them there with the reason they \
+         must stay:\n  {}",
+        added.join("\n  ")
+    );
+    // D13's mirror rule, as `check forks` applies it to known test failures.
+    anyhow::ensure!(
+        removed.is_empty(),
+        "{UNROUTED_RECORD} records call sites that no longer reach the host; update it to \
+         match, so the record keeps describing something:\n  {}",
+        removed.join("\n  ")
+    );
+
+    eprintln!(
+        "Fork lint passed ({} recorded call site(s) over {} file/method pair(s), no new ones).",
+        found.values().sum::<usize>(),
+        found.len()
+    );
+    Ok(())
+}
+
+/// The exact argv a fork lint runs, and the only place it is assembled.
+///
+/// `-A warnings` first so upstream's own warnings stay upstream's business,
+/// then `-D clippy::disallowed_methods` -- later flags win, so the ban is the
+/// one thing denied.
+fn fork_lint_args(features: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = ["clippy", "--lib", "--message-format", "short"]
+        .iter()
+        .map(|a| (*a).to_owned())
+        .collect();
+    if let Some(features) = features {
+        args.push("--features".to_owned());
+        args.push(features.to_owned());
+    }
+    args.extend(
+        ["--", "-A", "warnings", "-D", "clippy::disallowed_methods"]
+            .iter()
+            .map(|a| (*a).to_owned()),
+    );
+    args
+}
+
+/// The fork argv must deny the ban, and must not take the denial back.
+fn assert_denies_ban(args: &[String]) -> Result<()> {
+    let Some(separator) = args.iter().position(|a| a == "--") else {
+        anyhow::bail!("the fork lint argv has no `--` separator: {args:?}");
+    };
+    let rustc_args = &args[separator + 1..];
+
+    let Some(deny) = rustc_args
+        .windows(2)
+        .position(|w| w == ["-D", "clippy::disallowed_methods"])
+    else {
+        anyhow::bail!(
+            "the fork lint argv does not deny the ban: {args:?}; every fork would lint clean \
+             while reaching the host"
+        );
+    };
+
+    // A later allow overrides an earlier deny, so anything after it that
+    // re-allows the ban -- by name or by group -- silently undoes the pass.
+    if let Some(allow) = rustc_args[deny..]
+        .iter()
+        .position(|a| a == "-A" || a.starts_with("--allow") || a == "-W" || a.starts_with("--warn"))
+    {
+        anyhow::bail!(
+            "the fork lint argv relaxes the ban at position {} after denying it: {args:?}",
+            deny + allow
+        );
+    }
+    Ok(())
+}
+
+/// The `(file, method)` pair of every ban diagnostic in a `--message-format
+/// short` run.
+fn parse_unrouted(output: &str) -> Vec<(String, String)> {
+    const MARKER: &str = ": error: use of a disallowed method `";
+    let mut out = Vec::new();
+    for line in output.lines() {
+        let Some((location, rest)) = line.split_once(MARKER) else {
+            continue;
+        };
+        let Some(method) = rest.split('`').next() else {
+            continue;
+        };
+        // `src/ls.rs:88:24` -- keep the file, drop line and column, which move
+        // for reasons that have nothing to do with confinement.
+        let file = location.split(':').next().unwrap_or(location);
+        out.push((file.to_owned(), method.to_owned()));
+    }
+    out
+}
+
+/// Reads `forks/UNROUTED.txt` into `"<fork>/<file> <method>" -> count`.
+fn read_unrouted(path: &std::path::Path) -> Result<std::collections::BTreeMap<String, usize>> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut out = std::collections::BTreeMap::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut fields = line.rsplitn(2, ' ');
+        let count: usize = fields
+            .next()
+            .and_then(|c| c.parse().ok())
+            .with_context(|| format!("{}:{}: no trailing count: {line}", path.display(), n + 1))?;
+        let key = fields
+            .next()
+            .with_context(|| format!("{}:{}: no key: {line}", path.display(), n + 1))?;
+        out.insert(key.trim().to_owned(), count);
+    }
+    Ok(out)
 }
 
 /// Fails when `deny.toml`'s `wrappers` lists no longer describe the tree.
@@ -313,6 +542,10 @@ fn check_ban(sh: &Shell, verbose: bool) -> Result<()> {
     }
 
     check_lint_denies_warnings()?;
+    // The fork pass has its own argv and its own way of being switched off.
+    for features in [None, Some("fs")] {
+        assert_denies_ban(&fork_lint_args(features))?;
+    }
 
     eprintln!("Ban check passed ({} entries, all firing).", counts.len());
     Ok(())
@@ -373,19 +606,7 @@ fn check_forks(sh: &Shell, verbose: bool) -> Result<()> {
     eprintln!("Running the forks' own test suites...");
     let root = crate::common::find_workspace_root()?;
     let forks_dir = root.join("forks");
-
-    let mut names: Vec<String> = std::fs::read_dir(&forks_dir)
-        .with_context(|| format!("reading {}", forks_dir.display()))?
-        .flatten()
-        .filter(|e| e.path().join("Cargo.toml").is_file())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
-    anyhow::ensure!(
-        !names.is_empty(),
-        "no forks found under {}",
-        forks_dir.display()
-    );
+    let names = fork_names(&root)?;
 
     for name in &names {
         let dir = forks_dir.join(name);
@@ -1087,4 +1308,65 @@ fn check_links(sh: &Shell, verbose: bool) -> Result<()> {
         .context("Link check failed. Install lychee with: cargo install lychee")?;
     eprintln!("Link check passed.");
     Ok(())
+}
+
+#[cfg(test)]
+mod fork_lint_tests {
+    use super::{assert_denies_ban, fork_lint_args, parse_unrouted};
+
+    fn argv(extra: &[&str]) -> Vec<String> {
+        let mut args = fork_lint_args(None);
+        args.extend(extra.iter().map(|a| (*a).to_owned()));
+        args
+    }
+
+    #[test]
+    fn the_default_fork_argv_denies_the_ban() {
+        assert!(assert_denies_ban(&fork_lint_args(None)).is_ok());
+        assert!(assert_denies_ban(&fork_lint_args(Some("fs"))).is_ok());
+    }
+
+    #[test]
+    fn an_argv_that_never_denies_the_ban_is_refused() {
+        let args: Vec<String> = ["clippy", "--lib", "--", "-A", "warnings"]
+            .iter()
+            .map(|a| (*a).to_owned())
+            .collect();
+        assert!(assert_denies_ban(&args).is_err());
+    }
+
+    #[test]
+    fn an_argv_that_allows_the_ban_back_is_refused() {
+        // A later `-A` overrides the earlier `-D`, which would leave every fork
+        // linting clean while reaching the host.
+        assert!(assert_denies_ban(&argv(&["-A", "clippy::disallowed_methods"])).is_err());
+        assert!(assert_denies_ban(&argv(&["--allow", "clippy::all"])).is_err());
+        // Downgrading to a warning is the same defeat, quieter.
+        assert!(assert_denies_ban(&argv(&["-W", "clippy::disallowed_methods"])).is_err());
+    }
+
+    #[test]
+    fn diagnostics_parse_to_file_and_method_without_line_or_column() {
+        let output = "\
+src/ls.rs:88:24: error: use of a disallowed method `std::path::Path::is_dir`
+src/mv.rs:990:5: error: use of a disallowed method `nix::unistd::mkfifo`
+src/mv.rs:1365:9: error: use of a disallowed method `nix::unistd::mkfifo`
+warning: unrelated chatter that mentions a disallowed method in prose
+error: could not compile `uu_ls` (lib) due to 1 previous error
+";
+        let found = parse_unrouted(output);
+        assert_eq!(
+            found,
+            vec![
+                ("src/ls.rs".to_owned(), "std::path::Path::is_dir".to_owned()),
+                ("src/mv.rs".to_owned(), "nix::unistd::mkfifo".to_owned()),
+                ("src/mv.rs".to_owned(), "nix::unistd::mkfifo".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_diagnostics_parses_to_nothing() {
+        assert!(parse_unrouted("    Finished `dev` profile in 0.02s\n").is_empty());
+    }
 }

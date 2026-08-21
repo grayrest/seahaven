@@ -9,6 +9,10 @@ reproduced by re-running the tooling, and is therefore **lost by a re-vendor** â
 which happened twice during this milestone. Re-apply from git after regenerating
 a fork, and treat growth in this list as the signal it is meant to be.
 
+The forks are linted by `cargo xtask check lint`, against the record in
+`UNROUTED.txt`; the entries below that describe a *deliberate* unrouted call are
+listed there too, so the gate and this file cannot disagree about them.
+
 Only the first loss was caught by `cargo xtask check forks`. The second took all
 three `uucore` entries below with it and that gate stayed green, because it runs
 each fork's *upstream* suite on the host under an identity session â€” where
