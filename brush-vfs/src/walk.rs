@@ -40,6 +40,13 @@ use crate::path::VirtualPath;
 #[derive(Debug)]
 pub struct DirEntry {
     path: VirtualPath,
+    /// The path as the *caller* would spell it: the root exactly as given, with
+    /// each component joined onto it.
+    ///
+    /// Separate from `path` because `find ./x` must print `./x/y`, not the
+    /// absolute path `./x` resolved to. `walkdir` keeps the caller's spelling
+    /// for the same reason, and `find`'s entire output is these strings.
+    display: PathBuf,
     name: String,
     depth: usize,
     metadata: std::fs::Metadata,
@@ -54,16 +61,16 @@ pub struct DirEntry {
 }
 
 impl DirEntry {
-    /// The entry's path, in the namespace.
+    /// The entry's path, spelled as the caller spelled the root.
     #[must_use]
     pub fn path(&self) -> &Path {
-        Path::new(self.path.as_str())
+        &self.display
     }
 
     /// The entry's path, consuming it. Mirrors `walkdir::DirEntry::into_path`.
     #[must_use]
     pub fn into_path(self) -> PathBuf {
-        PathBuf::from(self.path.as_str())
+        self.display
     }
 
     /// The entry's path as a [`VirtualPath`], for callers already inside the vfs.
@@ -138,20 +145,26 @@ enum ErrorKind {
 }
 
 impl Error {
-    fn io(depth: usize, path: Option<&VirtualPath>, error: std::io::Error) -> Self {
+    /// `path` is the caller's spelling, not the resolved one.
+    ///
+    /// An error is output too: `find -L` reports a broken link by the path it
+    /// was asked about, and findutils turns a not-found error back into an entry
+    /// using exactly this path. Handing back the resolved form there printed
+    /// absolute paths in the middle of relative ones.
+    fn io(depth: usize, path: Option<&Path>, error: std::io::Error) -> Self {
         Self {
             depth,
-            path: path.map(|p| PathBuf::from(p.as_str())),
+            path: path.map(Path::to_path_buf),
             kind: ErrorKind::Io(error),
         }
     }
 
-    fn symlink_loop(depth: usize, ancestor: &VirtualPath, child: &VirtualPath) -> Self {
+    fn symlink_loop(depth: usize, ancestor: &Path, child: &Path) -> Self {
         Self {
             depth,
-            path: Some(PathBuf::from(child.as_str())),
+            path: Some(child.to_path_buf()),
             kind: ErrorKind::Loop {
-                ancestor: PathBuf::from(ancestor.as_str()),
+                ancestor: ancestor.to_path_buf(),
             },
         }
     }
@@ -257,6 +270,8 @@ impl Default for Options {
 pub struct Walk {
     vfs: Option<Arc<Vfs>>,
     root: Option<VirtualPath>,
+    /// The root as the caller spelled it; see [`DirEntry::path`].
+    display: Option<PathBuf>,
     /// A failure to resolve the root, held until the iterator can yield it.
     ///
     /// `walkdir::WalkDir::new` is infallible and reports through the iterator,
@@ -274,10 +289,11 @@ impl std::fmt::Debug for Walk {
 
 impl Walk {
     /// A walk rooted at an already-resolved path.
-    pub(crate) fn rooted(vfs: Arc<Vfs>, root: VirtualPath) -> Self {
+    pub(crate) fn rooted(vfs: Arc<Vfs>, root: VirtualPath, display: PathBuf) -> Self {
         Self {
             vfs: Some(vfs),
             root: Some(root),
+            display: Some(display),
             deferred: None,
             opts: Options::default(),
         }
@@ -288,6 +304,7 @@ impl Walk {
         Self {
             vfs: None,
             root: None,
+            display: None,
             deferred: Some(error),
             opts: Options::default(),
         }
@@ -366,7 +383,7 @@ impl IntoIterator for Walk {
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
             vfs: self.vfs,
-            start: self.root,
+            start: self.root.zip(self.display),
             deferred: self.deferred,
             opts: self.opts,
             stack: Vec::new(),
@@ -382,6 +399,7 @@ impl IntoIterator for Walk {
 struct Frame {
     dir: Dir,
     path: VirtualPath,
+    display: PathBuf,
     entries: std::vec::IntoIter<String>,
     /// Present only when following links, which is the only time a loop is
     /// possible and so the only time the ancestry is worth keeping.
@@ -391,7 +409,7 @@ struct Frame {
 /// A walk in progress.
 pub struct IntoIter {
     vfs: Option<Arc<Vfs>>,
-    start: Option<VirtualPath>,
+    start: Option<(VirtualPath, PathBuf)>,
     deferred: Option<std::io::Error>,
     opts: Options,
     stack: Vec<Frame>,
@@ -444,15 +462,15 @@ impl Iterator for IntoIter {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(error) = self.deferred.take() {
             self.done = true;
-            return Some(Err(Error::io(0, self.start.as_ref(), error)));
+            return Some(Err(Error::io(0, self.start.as_ref().map(|(_, d)| d.as_path()), error)));
         }
         if self.done {
             return None;
         }
         let vfs = self.vfs.clone()?;
 
-        if let Some(root) = self.start.take() {
-            match self.root_entry(&vfs, root) {
+        if let Some((root, display)) = self.start.take() {
+            match self.root_entry(&vfs, root, display) {
                 Err(e) => {
                     self.done = true;
                     return Some(Err(e));
@@ -502,14 +520,20 @@ impl Iterator for IntoIter {
 impl IntoIter {
     /// Stats the walk's root, which has no parent handle to be relative to.
     #[expect(clippy::unused_self, reason = "reads as a method alongside child_entry")]
-    fn root_entry(&self, vfs: &Vfs, root: VirtualPath) -> Result<DirEntry, Error> {
+    fn root_entry(
+        &self,
+        vfs: &Vfs,
+        root: VirtualPath,
+        display: PathBuf,
+    ) -> Result<DirEntry, Error> {
         let metadata = vfs
             .symlink_metadata(&root)
-            .map_err(|e| Error::io(0, Some(&root), e))?;
+            .map_err(|e| Error::io(0, Some(&display), e))?;
         let name = root.as_str().rsplit('/').next().unwrap_or_default().to_string();
         Ok(DirEntry {
             is_symlink: metadata.is_symlink(),
             path: root,
+            display,
             name,
             depth: 0,
             metadata,
@@ -534,14 +558,16 @@ impl IntoIter {
         let path = frame
             .path
             .resolve(name)
-            .map_err(|e| Error::io(depth, Some(&frame.path), std::io::Error::other(e.to_string())))?;
+            .map_err(|e| Error::io(depth, Some(&frame.display), std::io::Error::other(e.to_string())))?;
+        let display = frame.display.join(name);
         let metadata = frame
             .dir
             .symlink_metadata(name)
-            .map_err(|e| Error::io(depth, Some(&path), e))?;
+            .map_err(|e| Error::io(depth, Some(&display), e))?;
         Ok(DirEntry {
             is_symlink: metadata.is_symlink(),
             path,
+            display,
             name: name.to_string(),
             depth,
             metadata,
@@ -579,7 +605,7 @@ impl IntoIter {
                     }
                 }
                 Ok(_) => {}
-                Err(e) => return Some(Err(Error::io(dent.depth, Some(&dent.path), e))),
+                Err(e) => return Some(Err(Error::io(dent.depth, Some(&dent.display), e))),
             }
         }
 
@@ -598,7 +624,7 @@ impl IntoIter {
     fn follow(&self, vfs: &Vfs, dent: DirEntry) -> Result<DirEntry, Error> {
         let metadata = vfs
             .metadata(&dent.path)
-            .map_err(|e| Error::io(dent.depth, Some(&dent.path), e))?;
+            .map_err(|e| Error::io(dent.depth, Some(&dent.display), e))?;
         Ok(DirEntry {
             metadata,
             is_symlink: false,
@@ -620,7 +646,7 @@ impl IntoIter {
         let identity = if self.opts.follow_links || self.opts.same_file_system {
             Some(
                 dir.identity()
-                    .map_err(|e| Error::io(dent.depth, Some(&dent.path), e))?,
+                    .map_err(|e| Error::io(dent.depth, Some(&dent.display), e))?,
             )
         } else {
             None
@@ -644,12 +670,12 @@ impl IntoIter {
                 .rev()
                 .find(|f| f.identity == Some(id))
         {
-            return Err(Error::symlink_loop(dent.depth, &ancestor.path, &dent.path));
+            return Err(Error::symlink_loop(dent.depth, &ancestor.display, &dent.display));
         }
 
         let mut entries = dir
             .entry_names()
-            .map_err(|e| Error::io(dent.depth, Some(&dent.path), e))?;
+            .map_err(|e| Error::io(dent.depth, Some(&dent.display), e))?;
 
         if let Some(cmp) = self.opts.sorter.as_mut() {
             // Sorting wants entries, but reading every child's metadata to build
@@ -662,6 +688,7 @@ impl IntoIter {
                 .map(|name| {
                     let entry = DirEntry {
                         path: path.clone(),
+                        display: PathBuf::from(&name),
                         name: name.clone(),
                         depth: dent.depth + 1,
                         metadata: dent.metadata.clone(),
@@ -678,6 +705,7 @@ impl IntoIter {
         self.stack.push(Frame {
             dir,
             path: dent.path.clone(),
+            display: dent.display.clone(),
             entries: entries.into_iter(),
             identity,
         });
@@ -699,6 +727,6 @@ impl IntoIter {
             Some(frame) => frame.dir.open_dir(&dent.name),
             None => vfs.open_dir(&dent.path),
         };
-        opened.map_err(|e| Error::io(dent.depth, Some(&dent.path), e))
+        opened.map_err(|e| Error::io(dent.depth, Some(&dent.display), e))
     }
 }

@@ -298,6 +298,44 @@ fn skip_current_dir_abandons_the_rest_of_that_directory() {
 }
 
 #[test]
+fn entry_paths_keep_the_root_the_caller_spelled() {
+    // `find ./x` prints `./x/y`, not the absolute path `./x` resolved to, and
+    // `find`'s entire output is these strings. The fixture above always passes
+    // an absolute root and strips prefixes, so it cannot see this -- findutils'
+    // own suite caught it, with 22 failures.
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = fixture();
+    install(tmp.path());
+
+    let ours: Vec<PathBuf> = brush_vfs::ambient::walk("/work/a")
+        .sort_by_file_name()
+        .into_iter()
+        .filter_map(|r| r.ok().map(brush_vfs::walk::DirEntry::into_path))
+        .collect();
+    let reference: Vec<PathBuf> = walkdir::WalkDir::new(tmp.path().join("a"))
+        .sort_by_file_name()
+        .into_iter()
+        .filter_map(|r| r.ok().map(walkdir::DirEntry::into_path))
+        .collect();
+
+    assert_eq!(ours.len(), reference.len(), "different entry counts");
+    // Every path is rooted at exactly the string that was passed in.
+    for (ours, reference) in ours.iter().zip(&reference) {
+        assert!(
+            ours.starts_with("/work/a"),
+            "{ours:?} is not rooted at the spelling given"
+        );
+        assert_eq!(
+            ours.strip_prefix("/work/a"),
+            reference.strip_prefix(tmp.path().join("a")),
+            "the tails differ"
+        );
+    }
+
+    brush_vfs::ambient::uninstall();
+}
+
+#[test]
 fn a_walk_rooted_outside_the_mount_enumerates_nothing() {
     // Gate 3, and the reason the milestone exists. `walkdir` reads directories
     // itself, so `grep -r` and `find` over a host path listed the tree and only
