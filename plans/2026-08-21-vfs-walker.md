@@ -6,7 +6,8 @@ walk. `deny.toml` bans the crate for exactly that reason and then lists every
 consumer as a `wrappers` exemption — an inventory of what is knowingly
 unrouted.
 
-**Status: not started.**
+**Status: implemented**, with one deliberate exception — see "Where it landed"
+at the end.
 
 ## The part that is already shipping
 
@@ -225,3 +226,62 @@ that are not obviously the vfs being *more* correct — stop and reconsider befo
 porting consumers. A walker that is subtly different from `walkdir` is worse
 than an honestly unrouted one, because four utilities would then be quietly
 wrong instead of visibly unconfined.
+
+
+## Where it landed
+
+Written after the fact. The plan above is left as written so the difference is
+visible.
+
+### Built as planned
+
+Steps 0-3 and 5-7. The walker mirrors `walkdir`, descends by directory
+capability, and yields virtual paths; `find`, `grep -r` and `cp -r` are ported
+and `find` is bundled for the first time. Gate 2 was built before the walker,
+which is the single decision that paid for itself.
+
+### Built differently
+
+**Step 4, `Dir::chown`, was not built, and `uucore::perms` keeps `walkdir`.**
+The plan asserted `perms` blocks on it. Measuring found `perms` unreachable from
+anything bundled — `chmod`, `chown` and `chgrp` are not in the coreutils set —
+and on Linux it takes the vfs-rooted `DirFd` path regardless. Porting it needs a
+routed `chown`, real trusted-boundary code, written for a caller that does not
+exist. Recorded in `deny.toml` and `forks/RESIDUAL-PATCHES.md` rather than done.
+
+**Gate 3 moved down a layer.** The plan put it on the utilities; an exit code
+cannot separate "enumerated the tree, then failed every read" from "never
+looked", and only the second is confinement. It is asserted on the walker
+instead: a walk rooted outside the mount yields zero entries and one error.
+
+**Gate 8, the performance baseline, was not built.** No number was measured, so
+nothing is claimed. Per-entry `openat` is the cost the anchoring trades for, and
+it is still unquantified.
+
+### Built after the fact
+
+**A Windows build check in `check build`.** Chasing the plan's wrong claim that
+`Dir` is Unix-only found that `brush-vfs` did not compile for Windows at all.
+Native-only checking is how that happened, so it stopped being native-only.
+
+**`check deps` fails on a stale `wrappers` list.** `cargo-deny` reports both
+unmatched and unused wrappers as warnings and exits 0 — how the list went stale
+in the first place.
+
+**`check lint` was repaired.** It runs `--all-features`; every clippy run this
+session omitted that, so an integration test crate full of `unwrap`s had been
+failing the gate since it was written.
+
+### What the differential caught
+
+Two bugs, both the kind reading would not have found. `path_is_symlink()` went
+false once a link was followed, losing the distinction `find -type l` depends
+on. And descending by parent handle is wrong for a followed symlink — `../..`
+names somewhere above its parent, so cap-std refused it, correctly, and the loop
+went unreported as an ordinary I/O error.
+
+### Not built
+
+`Dir::chown`. The performance baseline. `notify` (`uu_tail -f`), `fs_extra`,
+`filetime` and `xattr` remain separate unroutable dependencies with their own
+dispositions under D4.
