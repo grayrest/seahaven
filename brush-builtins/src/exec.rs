@@ -64,12 +64,16 @@ impl builtins::Command for ExecCommand {
             argv0 = Cow::Owned(std::format!("-{argv0}"));
         }
 
-        let mut cmd = commands::compose_std_command(
+        // `Replace`: this call does not return, so no parent remains to serve a
+        // bundled dispatch its namespace (D24). `compose_std_command` refuses
+        // one rather than letting the child wait out a timeout.
+        let (mut cmd, _rendezvous) = commands::compose_std_command(
             &context,
             &self.args[0],
             argv0.as_str(),
             &self.args[1..],
             self.empty_environment,
+            commands::Disposition::Replace,
         )?;
 
         let exec_error = cmd.exec();

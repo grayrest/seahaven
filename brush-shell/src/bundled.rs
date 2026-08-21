@@ -150,13 +150,14 @@ pub fn maybe_dispatch() -> Option<i32> {
     // closed with no session installed -- so without this the bundled command
     // could open nothing.
     //
-    // The session is the identity namespace, which preserves today's behavior:
-    // the child is a fresh process that was handed no policy, and confining it
-    // to the parent's mounts is D24's job (the broker). Under a closed world the
-    // parent still governs *whether* this child is spawned (D2); D4 governs that
-    // once it runs, its filesystem goes through the facade rather than raw
-    // `std::fs`.
-    install_dispatch_session();
+    // The session comes from the parent over the broker (D24) when there is
+    // one, and is the identity namespace otherwise -- a bundled command invoked
+    // by hand, from a shell that was confining nothing. A handshake that was
+    // expected and failed is fatal rather than a fallback to identity.
+    if let Err(message) = install_dispatch_session() {
+        eprintln!("brush: {message}");
+        return Some(exit_code(ExecutionExitCode::CannotExecute));
+    }
 
     let mut argv: Vec<OsString> = Vec::with_capacity(1 + args.len());
     argv.push(name.clone());
@@ -172,9 +173,23 @@ pub fn maybe_dispatch() -> Option<i32> {
 /// Identity rather than a confined policy because the child was handed none;
 /// see [`maybe_dispatch`]. If the namespace cannot be built the util runs with
 /// no session and its filesystem calls fail closed, which is the safe direction.
-fn install_dispatch_session() {
+fn install_dispatch_session() -> Result<(), String> {
+    // The namespace this process's parent handed it (D24). Present whenever the
+    // parent was a shell dispatching a bundled utility, which is every route
+    // D2's predicate permits -- so a confined shell's child is confined too.
+    if let Some(received) = brush_core::broker::receive() {
+        // A handshake that was expected and failed is fatal. Falling back to
+        // identity here is precisely the hole this closes: the parent already
+        // decided this child gets a confined namespace, and a child that
+        // quietly substitutes the host filesystem makes that decision a
+        // suggestion.
+        let session = received.map_err(|e| format!("session broker: {e}"))?;
+        brush_vfs::ambient::install(session);
+        return Ok(());
+    }
+
     let Ok(mounts) = brush_vfs::Policy::identity() else {
-        return;
+        return Ok(());
     };
     let mut session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
 
@@ -190,6 +205,7 @@ fn install_dispatch_session() {
     }
 
     brush_vfs::ambient::install(session);
+    Ok(())
 }
 
 fn exit_code(code: ExecutionExitCode) -> i32 {

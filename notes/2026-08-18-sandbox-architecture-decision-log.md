@@ -751,6 +751,40 @@ opens `/dev/null` **by host path** (`sys/unix/fs.rs:214`) — inside the lint
 allowlist, after the sandbox is supposed to be closed. Every non-stdio session fd
 would silently become `/dev/null` in the child.
 
+**Implemented on Unix, compile-checked on Windows**
+(`brush-core/src/broker/`, `plans/2026-08-21-broker.md`). The hole it closes was
+measured first: with `--mount`, `--closed-world` and `--restrict-builtins` all
+set, the bundled `cat` read `/etc/hosts` and `ls /etc` returned 82 entries. All
+three transcripts are inverted now, and the third one matters most --
+`cat /work/inside.txt` *succeeds*, which is what distinguishes a child that
+received the namespace from one that received nothing.
+
+**The milestone is smaller than this entry reads, and the survey is why.**
+Redirections already crossed correctly, so nothing here carries stdio. A bundled
+child runs one utility rather than a shell, so none of the serde blob is needed
+-- which is why the correction above about `openfiles.rs` did not bite. What
+crosses is a mount point, an `Access` and a directory handle per mount, plus the
+cwd.
+
+**The credential is the pid** (`LOCAL_PEERPID`, `SO_PEERCRED`,
+`GetNamedPipeClientProcessId`), so one question is asked on all three platforms.
+Nothing checks uid, which makes the rendezvous directory's `0700` mode -- an
+owner-only SDDL on Windows -- the only cross-user mechanism rather than a second
+layer. The path travels in the environment, not argv: `/proc/PID/environ` is
+owner-readable where `/proc/PID/cmdline` is not.
+
+**Two things the entry did not anticipate.** `Mount::host_path` had to become an
+`Option`, which turns out to strengthen D3 rather than weaken it -- a child
+handed capabilities has no host path to leak even by accident, and
+`Vfs::host_path` errors rather than guessing. And `exec` of a bundled dispatch is
+refused, because `exec` leaves no parent to serve the handshake; the child would
+fail closed correctly but only after its timeout, which is a right answer
+delivered as a hang.
+
+**Cost, measured rather than assumed:** about 1.4 ms per bundled dispatch on top
+of ~8.8 ms of process spawn (200 dispatches, debug build, medians of seven
+runs).
+
 Constraints the broker milestone inherits, each because the obvious
 implementation is wrong: peer credentials bind a *connection*, not a session, so
 pid registration must precede spawn or the ordering races; a double-connect passes

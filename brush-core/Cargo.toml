@@ -65,6 +65,16 @@ tokio = { version = "1.52.3", features = [
 [target.'cfg(windows)'.dependencies]
 check_elevation = "0.2.7"
 whoami = "2.1.1"
+# D24's broker: a named pipe, DuplicateHandle, and the client-pid call behind
+# the peer credential check.
+windows-sys = { version = "0.59.0", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
 
 [target.'cfg(unix)'.dependencies]
 command-fds = "0.3.2"
@@ -73,6 +83,10 @@ nix = { version = "0.31.2", features = [
     "fs",
     "poll",
     "process",
+    # D24's broker: SCM_RIGHTS and the peer-credential getsockopt behind it
+    # (LOCAL_PEERPID on macOS, SO_PEERCRED on Linux).
+    "socket",
+    "uio",
     "resource",
     "signal",
     "term",

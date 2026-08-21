@@ -157,9 +157,23 @@ impl<SE: extensions::ShellExtensions> std::ops::DerefMut for ShellForCommand<'_,
     }
 }
 
+/// What the caller of [`compose_std_command`] will do with the command, which
+/// decides whether a bundled dispatch can be handed a namespace (D24).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Disposition {
+    /// The caller will spawn the command and can serve its handshake.
+    Spawn,
+    /// The caller will replace this process with the command, so no parent
+    /// remains to serve anything.
+    Replace,
+}
+
 /// Composes a `std::process::Command` to execute the given command. Appropriately
 /// configures the command name and arguments, redirections, injected file
 /// descriptors, environment variables, etc.
+///
+/// Returns the command together with the rendezvous a bundled dispatch must be
+/// served on (D24), which is `None` for every other spawn.
 ///
 /// # Arguments
 ///
@@ -169,6 +183,12 @@ impl<SE: extensions::ShellExtensions> std::ops::DerefMut for ShellForCommand<'_,
 /// * `args` - The arguments to pass to the command.
 /// * `empty_env` - If true, the command will be executed with an empty environment; if false, the
 ///   command will inherit environment variables marked as exported in the provided `Shell`.
+/// * `disposition` - Whether the caller will spawn the command or replace this process with it.
+///
+/// # Errors
+///
+/// Returns [`error::Error`] if the command is refused by the execution policy,
+/// if a redirection cannot be set up, or if the rendezvous cannot be created.
 #[allow(unused_variables, reason = "argv0 is only used on unix platforms")]
 pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     context: &ExecutionContext<'_, SE>,
@@ -176,7 +196,8 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     argv0: &str,
     args: &[S],
     empty_env: bool,
-) -> Result<std::process::Command, error::Error> {
+    disposition: Disposition,
+) -> Result<(std::process::Command, Option<crate::broker::Rendezvous>), error::Error> {
     // The closed-world predicate (D2). Under an open world this is a no-op that
     // routes to the namespace; under a closed world the only spawn permitted is
     // the launcher re-invoking itself for a bundled command. `argv1` is the
@@ -186,6 +207,7 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     // checks against the builtin allowlist (D11).
     let argv1 = args.first().and_then(|a| a.as_ref().to_str());
     let argv2 = args.get(1).and_then(|a| a.as_ref().to_str());
+    let mut bundled_dispatch = false;
     let host_command = match context.shell.external_execution().permit(
         command_name,
         argv1,
@@ -202,7 +224,20 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
             .map_err(|_| error::ErrorKind::CommandNotFound(command_name.to_owned()))?,
         // The trusted launcher lives outside the namespace, so it is run by its
         // known host path rather than resolved through the vfs.
-        Some(execpolicy::ExecPermit::TrustedLauncher(host)) => host,
+        Some(execpolicy::ExecPermit::TrustedLauncher(host)) => {
+            // A bundled dispatch is the one spawn that gets this shell's
+            // namespace (D24), and serving the handshake needs a parent that
+            // still exists. `exec` leaves none, so it is refused here rather
+            // than producing a child that waits out its timeout and then fails
+            // closed -- a slow refusal that reads like a hang.
+            if disposition == Disposition::Replace {
+                return Err(
+                    error::ErrorKind::ExternalExecutionRefused(command_name.to_owned()).into(),
+                );
+            }
+            bundled_dispatch = true;
+            host
+        }
         None => {
             return Err(error::ErrorKind::ExternalExecutionRefused(command_name.to_owned()).into());
         }
@@ -289,7 +324,23 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     });
     cmd.inject_fds(other_files)?;
 
-    Ok(cmd)
+    // The namespace's own crossing (D24). Created here, beside the predicate
+    // that decided this is a bundled dispatch, so the two cannot drift: a
+    // spawn that D2 permits as a dispatch is exactly a spawn that gets a
+    // rendezvous. The caller serves it once the child has a pid.
+    //
+    // The path travels in the environment rather than argv: `/proc/PID/environ`
+    // is owner-readable where `/proc/PID/cmdline` is world-readable, and it
+    // leaves `argv[2]` as the utility name D11's predicate reads.
+    let rendezvous = if bundled_dispatch {
+        let r = crate::broker::Rendezvous::create()?;
+        cmd.env(crate::broker::RENDEZVOUS_ENV, r.path());
+        Some(r)
+    } else {
+        None
+    };
+
+    Ok((cmd, rendezvous))
 }
 
 pub(crate) async fn on_preexecute(
@@ -663,12 +714,13 @@ pub(crate) fn execute_external_command(
     // command) unless the caller specified an explicit override.
     let argv0 = argv0_override.unwrap_or(context.command_name.as_str());
     #[allow(unused_mut, reason = "only mutated on unix platforms")]
-    let mut cmd = compose_std_command(
+    let (mut cmd, rendezvous) = compose_std_command(
         &context,
         executable_path,
         argv0,
         cmd_args.as_slice(),
         false, /* empty environment? */
+        Disposition::Spawn,
     )?;
 
     // Set up process group state.
@@ -713,6 +765,23 @@ pub(crate) fn execute_external_command(
                 }
             } else {
                 tracing::warn!("could not retrieve pid for child process");
+            }
+
+            // Hand the child this shell's namespace before anyone waits on it
+            // (D24). After the spawn because the credential is the child's pid,
+            // and before the wait because the child blocks in `connect` until
+            // it is served.
+            //
+            // A failure here is fatal to the child rather than to us: it fails
+            // closed on its own, having been told to expect a session it never
+            // received. Reporting is all this side can usefully do.
+            if let Some(rendezvous) = rendezvous {
+                if let Err(e) = crate::broker::serve(rendezvous, pid, context.shell.session()) {
+                    tracing::warn!(
+                        target: trace_categories::COMMANDS,
+                        "could not hand the child its session: {e}"
+                    );
+                }
             }
 
             Ok(ExecutionSpawnResult::StartedProcess(

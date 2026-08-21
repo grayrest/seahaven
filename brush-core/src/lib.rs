@@ -3,6 +3,7 @@
 
 pub mod arithmetic;
 mod braceexpansion;
+pub mod broker;
 pub mod builtinpolicy;
 pub mod builtins;
 pub mod callstack;
