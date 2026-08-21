@@ -178,9 +178,14 @@ cases:
   - name: "Command completion does not leak the host's PATH"
     # The inherited PATH still names host directories; none of them are in the
     # namespace, so the correct answer is that they hold nothing.
+    #
+    # Only meaningful when `ls` is *not* compiled in: with the bundled
+    # coreutils it is a shell builtin, and completion offering it is correct
+    # rather than a leak.
     args: ["--mount", "/work:.", "-c", "compgen -c ls; echo done"]
     expected_exit_code: 0
     expected_stdout: "done\n"
+    incompatible_platforms: ["bundled-coreutils"]
 
   - name: "The null device answers a confined shell"
     # No mount contains it, and none should have to: the handle is taken at
@@ -255,3 +260,52 @@ cases:
     args: ["--mount", "/work:.", "-c", "pwd; echo \"PWD=$PWD\""]
     expected_exit_code: 0
     expected_stdout: "/work\nPWD=/work\n"
+
+  - name: "A bundled ls lists a named directory"
+    # `ls <dir>` regressed to `ls: No such file or directory` while `cd <dir> &&
+    # ls` and `ls <file>` both worked, because `uucore`'s `FileInformation`
+    # -- the loop-detection identity `ls` takes for each directory argument
+    # before it descends -- stats the path directly rather than through the
+    # namespace. The bare message carries no path, which is what distinguishes
+    # this failure from a mount that is genuinely absent.
+    #
+    # `--closed-world` because a bundled command is spawned by re-invoking the
+    # launcher, whose host path is not inside the mount; the closed world is
+    # what permits it. See `closed_world_tests.rs`.
+    args: ["--mount", "/work:.", "--closed-world", "-c", "ls /work"]
+    expected_exit_code: 0
+    expected_stdout: "a.txt\nsub\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "a.txt"
+        contents: "x\n"
+      - path: "sub/inner.txt"
+        contents: "y\n"
+
+  - name: "A bundled ls descends into a named directory"
+    # The recursive form takes the same identity per directory it enters, so it
+    # pins the failure one level deeper than the case above.
+    args: ["--mount", "/work:.", "--closed-world", "-c", "ls -R /work"]
+    expected_exit_code: 0
+    expected_stdout: "/work:\na.txt\nsub\n\n/work/sub:\ninner.txt\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "a.txt"
+        contents: "x\n"
+      - path: "sub/inner.txt"
+        contents: "y\n"
+
+  - name: "A bundled ls dereferences from the namespace, not the host"
+    # `-L` puts every entry on the dereferencing branch of
+    # `get_metadata_with_deref_opt`, which was `Path::metadata` -- an inherent
+    # method the codemod cannot see, so it asked the host and every entry
+    # failed with `cannot access`.
+    args: ["--mount", "/work:.", "--closed-world", "-c", "ls -L /work"]
+    expected_exit_code: 0
+    expected_stdout: "a.txt\nsub\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "a.txt"
+        contents: "x\n"
+      - path: "sub/inner.txt"
+        contents: "y\n"

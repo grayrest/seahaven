@@ -6,9 +6,19 @@ size of what is left over per rebase is the health metric.
 
 This file is that leftover. Everything listed here is hand-written, is **not**
 reproduced by re-running the tooling, and is therefore **lost by a re-vendor** —
-which happened once during this milestone and was caught only because
-`cargo xtask check forks` went red. Re-apply from git after regenerating a fork,
-and treat growth in this list as the signal it is meant to be.
+which happened twice during this milestone. Re-apply from git after regenerating
+a fork, and treat growth in this list as the signal it is meant to be.
+
+Only the first loss was caught by `cargo xtask check forks`. The second took all
+three `uucore` entries below with it and that gate stayed green, because it runs
+each fork's *upstream* suite on the host under an identity session — where
+routed and unrouted code behave identically, which is the property that makes it
+a useful rebase metric and the reason it cannot see confinement. Nothing in
+`cargo test --workspace` covers the gap either: no gate enables
+`experimental-bundled-coreutils` or `coreutils.all`, so the bundled utilities
+are never exercised by default and both `tests/routing.rs` and the `ls` cases in
+`cases/brush/sandbox.yaml` are compiled out or skipped. Until a gate runs with
+those features on, a lost routing patch is invisible to CI.
 
 Generated per fork and *not* listed here: `Cargo.toml`, `.gitignore`, the
 codemod's rewrites, and `src/**/flatland_test_session.rs` plus its `mod`
@@ -77,6 +87,27 @@ Invisible until D24 gave a bundled child a real namespace to be wrong about --
 before that, the child ran under identity and no virtual path resolved for it
 either, so the two failures looked the same. Both sites now go through
 `brush_vfs::ambient::metadata`.
+
+## `uu_ls` — three `Path::metadata` calls, routed by hand
+
+The same D34 carve-out as `uu_grep`'s, in the utility that feels it most.
+`Path::metadata` is an *inherent* method, so the codemod cannot see it, and
+three sites asked the host: the `Dereference::DirArgs` arm, the
+`must_dereference` fast path in `PathData::new`, and the dereferencing arm of
+`get_metadata_with_deref_opt`. The last is the funnel for `PathData::metadata`,
+`--group-directories-first` and `get_security_context`, and it is the more
+telling of the two arms: its `symlink_metadata` half *was* rewritten, because
+that one is reached as a free function, so the function asked the namespace and
+the host one line apart.
+
+Under a namespace the host answers "no such file" for every virtual path, so
+`ls <symlink-to-dir>` printed the link's own name instead of listing its target,
+and anything under `-L` failed outright with `ls: cannot access '/work'`. Pinned
+by three cases in `brush-shell/tests/cases/brush/sandbox.yaml`.
+
+`dotdot_path`'s `dotdot.metadata()` is the same shape and is left alone: it is
+inside `#[cfg(target_os = "wasi")]`, so no build this repo gates on reaches it
+and there is no failing case to point at.
 
 ## `uucore::perms` — left on `walkdir`, deliberately
 

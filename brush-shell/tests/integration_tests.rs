@@ -36,9 +36,26 @@ async fn run_brush_tests(mut options: TestOptions) -> Result<bool> {
 
     let test_shell = options.create_test_shell_config()?;
 
+    // Whether the binary under test has the coreutils compiled in changes what
+    // some cases can assert, in both directions: a case that invokes `ls` needs
+    // them present, and a case that asserts what command completion offers
+    // needs them absent, since a bundled `ls` is a shell builtin and is
+    // rightly suggested. Describe the build with a tag either way and let each
+    // case opt out through `incompatible_platforms`, the mechanism the WASI
+    // cases already use.
+    let mut platform_tags = options.platform_tags();
+    platform_tags.insert(
+        if cfg!(feature = "experimental-bundled-coreutils") {
+            "bundled-coreutils"
+        } else {
+            "no-bundled-coreutils"
+        }
+        .to_string(),
+    );
+
     let config = RunnerConfig::new(PathBuf::from(&options.brush_path), test_cases_dir)
         .with_mode(TestMode::Expectation)
-        .with_platform_tags(options.platform_tags());
+        .with_platform_tags(platform_tags);
 
     let config = RunnerConfig {
         test_shell,

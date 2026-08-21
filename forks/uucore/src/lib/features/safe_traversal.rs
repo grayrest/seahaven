@@ -140,17 +140,25 @@ impl DirFd {
     /// # Arguments
     /// * `path` - The path to the directory to open
     /// * `symlink_behavior` - Whether to follow symlinks when opening
+    // FLATLAND DIVERGENCE: `nix::fcntl::open` took any host path outright --
+    // the single ambient entry point for the whole traversal, and invisible to
+    // the `std::fs`-shaped codemod. The root is now resolved through the
+    // namespace; every `*at` call below this point is unchanged and inherits
+    // the confinement of the descriptor it starts from.
+    //
+    // What this does *not* do is make `..` unrepresentable: a raw directory fd
+    // is a position in the host tree, so `openat(fd, "..")` would still climb.
+    // uucore passes directory entry names here, never `..`. Sealing that off
+    // means porting DirFd onto `brush_vfs::dir::Dir`'s API, which needs `chown`
+    // that cap-std does not provide -- a milestone of its own. See
+    // `plans/2026-08-18-uucore-fork.md` step 7 and D3's amendment.
     pub fn open(path: &Path, symlink_behavior: SymlinkBehavior) -> io::Result<Self> {
-        let mut flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC;
-        if !symlink_behavior.should_follow() {
-            flags |= OFlag::O_NOFOLLOW;
-        }
-        let fd = nix::fcntl::open(path, flags, Mode::empty()).map_err(|e| {
-            SafeTraversalError::OpenFailed {
+        let fd = brush_vfs::ambient::open_dir_fd(path, symlink_behavior.should_follow()).map_err(
+            |source| SafeTraversalError::OpenFailed {
                 path: path.into(),
-                source: io::Error::from_raw_os_error(e as i32),
-            }
-        })?;
+                source,
+            },
+        )?;
         Ok(Self { fd })
     }
 

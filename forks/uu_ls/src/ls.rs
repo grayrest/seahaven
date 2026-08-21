@@ -866,7 +866,15 @@ impl<'a> PathData<'a> {
         let must_dereference = match &config.dereference {
             Dereference::All => true,
             Dereference::Args => command_line,
-            Dereference::DirArgs => command_line && p_buf.metadata().is_ok_and(|m| m.is_dir()),
+            // FLATLAND DIVERGENCE: routed. `Path::metadata` is an inherent
+            // method, outside what the codemod can see (D34 bounds it to free
+            // functions), so upstream asks the *host* whether a command-line
+            // argument dereferences to a directory. Under a namespace the
+            // answer is no for every virtual path, and `ls <symlink-to-dir>`
+            // prints the link's own name instead of listing its target.
+            Dereference::DirArgs => {
+                command_line && brush_vfs::ambient::metadata(&p_buf).is_ok_and(|m| m.is_dir())
+            }
             Dereference::None => false,
         };
 
@@ -881,7 +889,10 @@ impl<'a> PathData<'a> {
         let security_context: OnceCell<Box<str>> = OnceCell::new();
 
         let de: RefCell<Option<DirEntry>> = if let Some(de) = dir_entry {
-            if must_dereference && let Ok(md_pb) = p_buf.metadata() {
+            // FLATLAND DIVERGENCE: routed, as the `Dereference::DirArgs` site
+            // above. This is the dereferenced metadata for a directory entry,
+            // so the host answer is wrong for every path in a namespace.
+            if must_dereference && let Ok(md_pb) = brush_vfs::ambient::metadata(&p_buf) {
                 ft.get_or_init(|| Some(md_pb.file_type()));
                 md.get_or_init(|| Some(md_pb));
             }
@@ -1544,7 +1555,14 @@ fn sort_entries(entries: &mut [PathData], config: &Config) {
 
 fn get_metadata_with_deref_opt(p_buf: &Path, dereference: bool) -> std::io::Result<Metadata> {
     if dereference {
-        p_buf.metadata()
+        // FLATLAND DIVERGENCE: routed. The `else` arm was rewritten by the
+        // codemod because `symlink_metadata` is reached as a free function
+        // here, but the dereferencing arm is `Path::metadata`, an inherent
+        // method the codemod cannot see -- so half of this function asked the
+        // namespace and half asked the host. It is the funnel for
+        // `PathData::metadata`, `--group-directories-first` and
+        // `get_security_context`, so under `-L` every one of them failed.
+        brush_vfs::ambient::metadata(p_buf)
     } else {
         brush_vfs::ambient::symlink_metadata(&(p_buf))
     }
