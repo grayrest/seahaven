@@ -30,5 +30,11 @@ unicode-normalization = "0.1.25"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.184"
 
+# `symlink_metadata` opens a link as itself here too, with
+# `FILE_FLAG_OPEN_REPARSE_POINT`; `FILE_FLAG_BACKUP_SEMANTICS` is what lets a
+# directory be opened at all. Only the two constants are needed.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3.27.0"

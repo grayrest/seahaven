@@ -190,6 +190,20 @@ impl Dir {
         file.metadata()
     }
 
+    /// Metadata for an entry, **not** following a final symlink.
+    ///
+    /// What a walk needs under `follow_links(false)`: a symlink to a directory
+    /// must report as a symlink, or the walk descends into it. Shares its
+    /// implementation with [`Vfs::symlink_metadata`], so the two cannot drift.
+    ///
+    /// # Errors
+    ///
+    /// If `name` is not a single component, or the entry cannot be stat'd.
+    pub fn symlink_metadata(&self, name: &str) -> std::io::Result<std::fs::Metadata> {
+        let name = component(name)?;
+        crate::fs::symlink_metadata_at(&self.inner, std::ffi::OsStr::new(name))
+    }
+
     /// Metadata for this directory itself.
     ///
     /// # Errors
@@ -339,6 +353,30 @@ mod tests {
         assert_eq!(sub.entry_names().unwrap(), vec!["f.txt".to_string()]);
         assert_eq!(sub.metadata("f.txt").unwrap().len(), 5);
         assert!(sub.self_metadata().unwrap().is_dir());
+    }
+
+    #[test]
+    fn the_capability_no_follow_stat_reports_the_link_not_the_target() {
+        // Gate 1. A walk under `follow_links(false)` descends into anything the
+        // stat calls a directory, so a symlink-to-directory reported as its
+        // target is how a walk leaves the tree it was told to walk.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("real")).unwrap();
+        std::fs::write(tmp.path().join("real/f.txt"), b"x").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("real", tmp.path().join("link")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir("real", tmp.path().join("link")).unwrap();
+
+        let vfs = vfs_at(tmp.path(), Access::ReadWrite);
+        let root = vfs.open_dir(&vp("/work")).unwrap();
+
+        assert!(root.symlink_metadata("link").unwrap().is_symlink());
+        assert!(!root.symlink_metadata("link").unwrap().is_dir());
+        // Following, which is what `metadata` does, still sees the directory.
+        assert!(root.metadata("link").unwrap().is_dir());
+        // And a plain directory is a directory either way.
+        assert!(root.symlink_metadata("real").unwrap().is_dir());
     }
 
     #[test]

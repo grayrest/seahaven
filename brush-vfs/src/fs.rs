@@ -283,6 +283,27 @@ impl OpenMode {
             }
         }
 
+        #[cfg(windows)]
+        {
+            use cap_std::fs::OpenOptionsExt as _;
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            };
+
+            // `BACKUP_SEMANTICS` is what lets a *directory* be opened at all,
+            // so it is unconditional: a stat-only open must work on both.
+            let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
+            if self.nofollow {
+                // The Windows spelling of "open the link, not its target".
+                // Unlike Unix, this is a flag rather than a question answered
+                // during resolution, so `Vfs::open_with`'s pre-check is belt to
+                // this brace -- see the note there.
+                flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+            }
+            options.custom_flags(flags);
+            let _ = self.mode; // no Unix mode bits on this platform
+        }
+
         options
     }
 }
@@ -764,43 +785,36 @@ impl Vfs {
     /// is opened normally, so the answer matches `metadata` there, as
     /// `symlink_metadata` requires.
     ///
-    /// On non-Unix it falls back to [`metadata`](Self::metadata), which
-    /// *follows* the final link. That is wrong for a symlink and is a documented
-    /// Windows limitation, pending the deferred Windows symlink work.
+    /// Windows takes the same shape with different spelling:
+    /// `FILE_FLAG_OPEN_REPARSE_POINT` opens the reparse point rather than its
+    /// target. Both platforms open the single final component relative to a
+    /// cap-std-resolved parent, so neither is doing path resolution of its own.
     ///
     /// # Errors
     ///
     /// Returns [`std::io::Error`] if the path is unmounted or the query fails.
     pub fn symlink_metadata(&self, path: &VirtualPath) -> std::io::Result<std::fs::Metadata> {
-        #[cfg(not(unix))]
-        {
-            return self.metadata(path);
+        let located = self.locate(path, false)?;
+
+        // The mount point itself is a directory, never a symlink.
+        if located.relative.as_os_str().is_empty() {
+            return located.mount.dir().try_clone()?.into_std_file().metadata();
         }
 
-        #[cfg(unix)]
-        {
-            let located = self.locate(path, false)?;
-
-            // The mount point itself is a directory, never a symlink.
-            if located.relative.as_os_str().is_empty() {
-                return located.mount.dir().try_clone()?.into_std_file().metadata();
-            }
-
-            let name = located.relative.file_name().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "path has no final component",
-                )
-            })?;
-            // The parent is opened through cap-std, so intermediate components
-            // are resolved with the same confinement as every other access; only
-            // the single final component is opened by name below.
-            let parent = match located.relative.parent() {
-                Some(p) if !p.as_os_str().is_empty() => located.mount.dir().open_dir(p)?,
-                _ => located.mount.dir().try_clone()?,
-            };
-            symlink_metadata_at(&parent, name)
-        }
+        let name = located.relative.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path has no final component",
+            )
+        })?;
+        // The parent is opened through cap-std, so intermediate components are
+        // resolved with the same confinement as every other access; only the
+        // single final component is opened by name below.
+        let parent = match located.relative.parent() {
+            Some(p) if !p.as_os_str().is_empty() => located.mount.dir().open_dir(p)?,
+            _ => located.mount.dir().try_clone()?,
+        };
+        symlink_metadata_at(&parent, name)
     }
 
     /// Whether `path` exists, following symlinks.
@@ -1298,11 +1312,23 @@ fn read_link_contents(mount: &Mount, relative: &std::path::Path) -> std::io::Res
 /// (Linux/BSD) or `O_SYMLINK` (macOS) is what lets a symlink be opened as itself
 /// rather than followed; a non-symlink is opened normally, so its metadata is
 /// the same one `metadata` would return.
-#[cfg(unix)]
-fn symlink_metadata_at(
+pub(crate) fn symlink_metadata_at(
     parent: &cap_std::fs::Dir,
     name: &std::ffi::OsStr,
 ) -> std::io::Result<std::fs::Metadata> {
+    #[cfg(not(unix))]
+    {
+        // No `openat` to reach for, so the flag does the work: cap-std resolves
+        // `name` beneath `parent` and `FILE_FLAG_OPEN_REPARSE_POINT` stops the
+        // final component being followed.
+        return parent
+            .open_with(name, &OpenMode::read().with_nofollow(true).to_cap_std())?
+            .into_std()
+            .metadata();
+    }
+
+    #[cfg(unix)]
+    {
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
 
@@ -1334,6 +1360,7 @@ fn symlink_metadata_at(
     // wrapping it in a `File` transfers ownership so it is closed on drop.
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
     file.metadata()
+    }
 }
 
 #[cfg(test)]
