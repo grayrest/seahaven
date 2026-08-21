@@ -1329,37 +1329,37 @@ pub(crate) fn symlink_metadata_at(
 
     #[cfg(unix)]
     {
-    use std::os::fd::{AsRawFd, FromRawFd};
-    use std::os::unix::ffi::OsStrExt;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::ffi::OsStrExt;
 
-    let cname = std::ffi::CString::new(name.as_bytes()).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "directory entry name contains an interior NUL",
-        )
-    })?;
+        let cname = std::ffi::CString::new(name.as_bytes()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "directory entry name contains an interior NUL",
+            )
+        })?;
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    let flags = libc::O_SYMLINK | libc::O_CLOEXEC | libc::O_NONBLOCK;
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        let flags = libc::O_SYMLINK | libc::O_CLOEXEC | libc::O_NONBLOCK;
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "brush-vfs is the facade; this is the confined primitive it exists to provide, \
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "brush-vfs is the facade; this is the confined primitive it exists to provide, \
                   opening a single named entry relative to a cap-std-resolved parent descriptor"
-    )]
-    // SAFETY: `parent` is a live directory descriptor for the duration of the
-    // call, and `cname` is a valid NUL-terminated C string. `openat` returns a
-    // fresh owned descriptor or -1.
-    let fd = unsafe { libc::openat(parent.as_raw_fd(), cname.as_ptr(), flags) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: `fd` is a fresh, valid, owned descriptor returned by `openat`;
-    // wrapping it in a `File` transfers ownership so it is closed on drop.
-    let file = unsafe { std::fs::File::from_raw_fd(fd) };
-    file.metadata()
+        )]
+        // SAFETY: `parent` is a live directory descriptor for the duration of the
+        // call, and `cname` is a valid NUL-terminated C string. `openat` returns a
+        // fresh owned descriptor or -1.
+        let fd = unsafe { libc::openat(parent.as_raw_fd(), cname.as_ptr(), flags) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: `fd` is a fresh, valid, owned descriptor returned by `openat`;
+        // wrapping it in a `File` transfers ownership so it is closed on drop.
+        let file = unsafe { std::fs::File::from_raw_fd(fd) };
+        file.metadata()
     }
 }
 
@@ -1458,7 +1458,11 @@ mod tests {
         // test returns at all: a regression wedges the suite rather than
         // reddening it, which is itself the signal.
         let fx = fixture();
-        let host = fx.vfs.host_path(&vp("/work")).expect("host path").join("pipe");
+        let host = fx
+            .vfs
+            .host_path(&vp("/work"))
+            .expect("host path")
+            .join("pipe");
         let cpath = std::ffi::CString::new(host.as_os_str().as_encoded_bytes()).unwrap();
         // SAFETY: `cpath` is a valid NUL-terminated path for the lifetime of the
         // call, and 0o644 is a valid mode.
@@ -1478,7 +1482,11 @@ mod tests {
         // `std::fs::Metadata` has no public constructor and `fstatat` cannot
         // produce one. Recorded as a test rather than a comment so the platform
         // difference is visible.
-        let sock = fx.vfs.host_path(&vp("/work")).expect("host path").join("sock");
+        let sock = fx
+            .vfs
+            .host_path(&vp("/work"))
+            .expect("host path")
+            .join("sock");
         drop(std::os::unix::net::UnixListener::bind(&sock).expect("bind"));
         let stat = fx.vfs.symlink_metadata(&vp("/work/sock"));
         if cfg!(any(target_os = "macos", target_os = "ios")) {
@@ -1543,7 +1551,11 @@ mod tests {
 
         // The destination is a namespace path like any other write, so copying
         // *out* of the namespace is not expressible.
-        assert!(fx.vfs.copy(&vp("/work/hello.txt"), &vp("/etc/passwd")).is_err());
+        assert!(
+            fx.vfs
+                .copy(&vp("/work/hello.txt"), &vp("/etc/passwd"))
+                .is_err()
+        );
         // And a read-only destination is refused.
         assert_eq!(
             fx.vfs
@@ -1590,7 +1602,11 @@ mod tests {
     #[test]
     fn set_permissions_is_refused_on_a_read_only_mount() {
         let fx = fixture();
-        let perms = fx.vfs.metadata(&vp("/work/hello.txt")).unwrap().permissions();
+        let perms = fx
+            .vfs
+            .metadata(&vp("/work/hello.txt"))
+            .unwrap()
+            .permissions();
         fx.vfs
             .set_permissions(&vp("/work/hello.txt"), &perms)
             .expect("writable mount");
@@ -1675,9 +1691,17 @@ mod tests {
         // A link pointing outside the namespace: symlink_metadata reports on the
         // link itself (it does not follow), and an unmounted path is not found.
         std::os::unix::fs::symlink("/etc/passwd", work_host(&f).join("escape.txt")).unwrap();
-        assert!(f.vfs.symlink_metadata(&vp("/work/escape.txt")).unwrap().is_symlink());
+        assert!(
+            f.vfs
+                .symlink_metadata(&vp("/work/escape.txt"))
+                .unwrap()
+                .is_symlink()
+        );
         assert_eq!(
-            f.vfs.symlink_metadata(&vp("/etc/passwd")).unwrap_err().kind(),
+            f.vfs
+                .symlink_metadata(&vp("/etc/passwd"))
+                .unwrap_err()
+                .kind(),
             std::io::ErrorKind::NotFound
         );
     }

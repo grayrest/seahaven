@@ -9,12 +9,12 @@ mod analyze;
 #[cfg(unix)]
 mod bash_tests;
 mod check;
-mod codemod;
-mod vendor;
 mod ci;
+mod codemod;
 mod common;
 mod generate;
 mod test;
+mod vendor;
 
 use anyhow::Result;
 use clap::Parser;

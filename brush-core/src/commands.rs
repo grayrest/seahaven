@@ -14,8 +14,7 @@ use sys::commands::{CommandExt, CommandFdInjectionExt, CommandFgControlExt};
 
 use crate::{
     ErrorKind, ExecutionControlFlow, ExecutionExitCode, ExecutionParameters, ExecutionResult,
-    Shell, ShellFd, builtins, commands, env, error, escape,
-    execpolicy,
+    Shell, ShellFd, builtins, commands, env, error, escape, execpolicy,
     extensions::{self, ShellExtensions},
     functions,
     interp::{self, Execute, ProcessGroupPolicy},
@@ -184,7 +183,11 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     // first element after the program, which is what lands in the child's
     // `argv[1]` -- `argv[0]` is set separately below.
     let argv1 = args.first().and_then(|a| a.as_ref().to_str());
-    let host_command = match context.shell.external_execution().permit(command_name, argv1) {
+    let host_command = match context
+        .shell
+        .external_execution()
+        .permit(command_name, argv1)
+    {
         // The name the namespace resolved, translated into a host path. Without
         // this the namespace's approval of a *virtual* path authorizes running
         // the host's file at the same spelling -- so under `--mount /:jail`

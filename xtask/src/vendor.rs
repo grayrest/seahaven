@@ -107,7 +107,9 @@ pub fn run_locales(cmd: &VendorLocalesCommand, _verbose: bool) -> Result<()> {
             .collect();
         entries.sort();
         for src in entries {
-            let Some(name) = src.file_name() else { continue };
+            let Some(name) = src.file_name() else {
+                continue;
+            };
             std::fs::copy(&src, dest.join(name))
                 .with_context(|| format!("copying {}", src.display()))?;
             files += 1;
@@ -177,10 +179,7 @@ pub fn run(cmd: &VendorCommand, verbose: bool) -> Result<()> {
 
     let dest = PathBuf::from("forks").join(&cmd.crate_name);
     if dest.exists() {
-        anyhow::bail!(
-            "{} already exists; remove it to re-vendor",
-            dest.display()
-        );
+        anyhow::bail!("{} already exists; remove it to re-vendor", dest.display());
     }
 
     copy_lib_sources(&src, &dest, declares_build_script(&src)?)?;
@@ -189,7 +188,10 @@ pub fn run(cmd: &VendorCommand, verbose: bool) -> Result<()> {
     ensure_lock_ignored(&dest)?;
 
     if cmd.no_codemod {
-        eprintln!("vendored (codemod skipped). Run `cargo xtask codemod {}`", dest.join("src").display());
+        eprintln!(
+            "vendored (codemod skipped). Run `cargo xtask codemod {}`",
+            dest.join("src").display()
+        );
         return Ok(());
     }
 
@@ -215,8 +217,8 @@ pub fn run(cmd: &VendorCommand, verbose: bool) -> Result<()> {
 
 /// Finds a crate's extracted source in the cargo registry cache.
 fn locate_crate(name: &str, version: Option<&str>) -> Result<PathBuf> {
-    let home = std::env::var_os("CARGO_HOME")
-        .map_or_else(|| dirs_home().join(".cargo"), PathBuf::from);
+    let home =
+        std::env::var_os("CARGO_HOME").map_or_else(|| dirs_home().join(".cargo"), PathBuf::from);
     let mut roots = Vec::new();
     let registry_src = home.join("registry/src");
     if let Ok(entries) = std::fs::read_dir(&registry_src) {
@@ -234,7 +236,9 @@ fn locate_crate(name: &str, version: Option<&str>) -> Result<PathBuf> {
 
     let mut best: Option<(String, PathBuf)> = None;
     for root in roots {
-        for entry in std::fs::read_dir(&root).with_context(|| format!("reading {}", root.display()))? {
+        for entry in
+            std::fs::read_dir(&root).with_context(|| format!("reading {}", root.display()))?
+        {
             let entry = entry?;
             let file_name = entry.file_name();
             let dir_name = file_name.to_string_lossy();
@@ -358,8 +362,7 @@ fn copy_tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result<()>
         if path.is_dir() {
             copy_tree(&path, &target, skip)?;
         } else {
-            std::fs::copy(&path, &target)
-                .with_context(|| format!("copying {}", path.display()))?;
+            std::fs::copy(&path, &target).with_context(|| format!("copying {}", path.display()))?;
         }
     }
     Ok(())
@@ -499,7 +502,11 @@ mod flatland_test_session;
 fn install_test_session(src: &Path, dest: &Path) -> Result<()> {
     let lib_rel = lib_path(src)?;
     let lib = dest.join(&lib_rel);
-    anyhow::ensure!(lib.is_file(), "fork library root {} is missing", lib.display());
+    anyhow::ensure!(
+        lib.is_file(),
+        "fork library root {} is missing",
+        lib.display()
+    );
 
     let module_dir = lib.parent().unwrap_or(dest);
     std::fs::write(

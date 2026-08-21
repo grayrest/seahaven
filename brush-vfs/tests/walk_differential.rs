@@ -58,10 +58,8 @@ fn fixture() -> tempfile::TempDir {
         // a loop, so it must not be reported as one.
         symlink("../empty", root.join("a/b/sideways")).unwrap();
         // A FIFO, which an open-to-stat implementation can block on forever.
-        let fifo = std::ffi::CString::new(
-            root.join("a/pipe").as_os_str().as_encoded_bytes(),
-        )
-        .unwrap();
+        let fifo =
+            std::ffi::CString::new(root.join("a/pipe").as_os_str().as_encoded_bytes()).unwrap();
         // SAFETY: a valid NUL-terminated path and a valid mode.
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o644) }, 0);
     }
@@ -104,7 +102,11 @@ fn from_walkdir(root: &Path, w: walkdir::WalkDir) -> Vec<Item> {
         .into_iter()
         .map(|r| match r {
             Ok(e) => Item::Entry {
-                rel: e.path().strip_prefix(root).unwrap_or_else(|_| e.path()).to_path_buf(),
+                rel: e
+                    .path()
+                    .strip_prefix(root)
+                    .unwrap_or_else(|_| e.path())
+                    .to_path_buf(),
                 depth: e.depth(),
                 is_dir: e.file_type().is_dir(),
                 is_symlink: e.path_is_symlink(),
@@ -122,7 +124,11 @@ fn from_vfs(root: &Path, w: brush_vfs::walk::Walk) -> Vec<Item> {
         .into_iter()
         .map(|r| match r {
             Ok(e) => Item::Entry {
-                rel: e.path().strip_prefix(root).unwrap_or_else(|_| e.path()).to_path_buf(),
+                rel: e
+                    .path()
+                    .strip_prefix(root)
+                    .unwrap_or_else(|_| e.path())
+                    .to_path_buf(),
                 depth: e.depth(),
                 is_dir: e.file_type().is_dir(),
                 is_symlink: e.path_is_symlink(),
@@ -152,7 +158,9 @@ fn assert_agrees(
 
 #[test]
 fn the_walk_agrees_with_walkdir() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = fixture();
     install(tmp.path());
 
@@ -226,7 +234,9 @@ fn the_walk_agrees_with_walkdir() {
 fn a_symlink_loop_terminates_and_is_reported_as_a_loop() {
     // Gate 4. The guard is that this test returns at all: a walker that spins
     // wedges the suite rather than reddening it, which is itself the signal.
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("a/b")).unwrap();
     std::os::unix::fs::symlink("../..", tmp.path().join("a/b/up")).unwrap();
@@ -257,7 +267,9 @@ fn a_symlink_loop_terminates_and_is_reported_as_a_loop() {
 
 #[test]
 fn skip_current_dir_abandons_the_rest_of_that_directory() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = fixture();
     install(tmp.path());
 
@@ -268,7 +280,11 @@ fn skip_current_dir_abandons_the_rest_of_that_directory() {
             .into_iter();
         let mut out = Vec::new();
         while let Some(Ok(e)) = it.next() {
-            let rel = e.path().strip_prefix("/work").unwrap_or_else(|_| e.path()).to_path_buf();
+            let rel = e
+                .path()
+                .strip_prefix("/work")
+                .unwrap_or_else(|_| e.path())
+                .to_path_buf();
             let hit = rel == Path::new("a/b");
             out.push(rel);
             if hit {
@@ -283,7 +299,11 @@ fn skip_current_dir_abandons_the_rest_of_that_directory() {
             .into_iter();
         let mut out = Vec::new();
         while let Some(Ok(e)) = it.next() {
-            let rel = e.path().strip_prefix(tmp.path()).unwrap_or_else(|_| e.path()).to_path_buf();
+            let rel = e
+                .path()
+                .strip_prefix(tmp.path())
+                .unwrap_or_else(|_| e.path())
+                .to_path_buf();
             let hit = rel == Path::new("a/b");
             out.push(rel);
             if hit {
@@ -293,7 +313,10 @@ fn skip_current_dir_abandons_the_rest_of_that_directory() {
         out
     };
 
-    assert_eq!(collect_ours, collect_reference, "skip_current_dir disagrees");
+    assert_eq!(
+        collect_ours, collect_reference,
+        "skip_current_dir disagrees"
+    );
     brush_vfs::ambient::uninstall();
 }
 
@@ -303,7 +326,9 @@ fn entry_paths_keep_the_root_the_caller_spelled() {
     // `find`'s entire output is these strings. The fixture above always passes
     // an absolute root and strips prefixes, so it cannot see this -- findutils'
     // own suite caught it, with 22 failures.
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = fixture();
     install(tmp.path());
 
@@ -342,7 +367,9 @@ fn a_walk_rooted_outside_the_mount_enumerates_nothing() {
     // then failed each read -- content contained, structure not. An exit code
     // cannot tell that apart from never having looked, so this asserts on what
     // the walk *yielded*.
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let outside = fixture();
     let jail = tempfile::tempdir().unwrap();
     install(jail.path());
@@ -357,7 +384,10 @@ fn a_walk_rooted_outside_the_mount_enumerates_nothing() {
             .iter()
             .filter(|i| matches!(i, Item::Entry { .. }))
             .count();
-        assert_eq!(entries, 0, "walking {root} yielded {entries} entries: {items:?}");
+        assert_eq!(
+            entries, 0,
+            "walking {root} yielded {entries} entries: {items:?}"
+        );
         assert!(
             matches!(items.as_slice(), [Item::Err { .. }]),
             "walking {root} should report exactly one error and stop: {items:?}"
@@ -377,7 +407,9 @@ fn a_walk_rooted_outside_the_mount_enumerates_nothing() {
 
 #[test]
 fn a_walk_with_no_session_yields_one_error_and_stops() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     brush_vfs::ambient::uninstall();
 
     let items = from_vfs(Path::new("/work"), brush_vfs::ambient::walk("/work"));

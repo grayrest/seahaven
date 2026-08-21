@@ -45,7 +45,9 @@ pub fn install(session: Session) {
     // A poisoned lock means a previous holder panicked mid-write; the stored
     // session is still structurally valid to replace, so recover rather than
     // propagate a panic into every later filesystem call.
-    let mut guard = SESSION.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = SESSION
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = Some(session);
 }
 
@@ -54,13 +56,17 @@ pub fn install(session: Session) {
 /// Exists for tests that must not leak a session into the next one; ordinary
 /// process teardown does not need it.
 pub fn uninstall() {
-    let mut guard = SESSION.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = SESSION
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None;
 }
 
 /// A cheap snapshot of the installed session, or an error if none is installed.
 fn current() -> io::Result<Session> {
-    let guard = SESSION.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = SESSION
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     guard.clone().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -434,7 +440,6 @@ pub fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Resu
     session.vfs().hard_link(&original, &link)
 }
 
-
 /// The entries of a directory. The rewrite target for `std::fs::read_dir`.
 ///
 /// # Errors
@@ -471,7 +476,10 @@ impl Iterator for ReadDir {
         // iterator.
         match self.dir.resolve(&name) {
             Ok(path) => Some(Ok(DirEntry { path, name })),
-            Err(e) => Some(Err(io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))),
+            Err(e) => Some(Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                e.to_string(),
+            ))),
         }
     }
 }
@@ -563,7 +571,9 @@ mod tests {
 
     #[test]
     fn no_session_fails_closed() {
-        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         uninstall();
         assert!(open("/work/x").is_err());
         assert!(!exists("/work/x"));
@@ -572,7 +582,9 @@ mod tests {
 
     #[test]
     fn open_read_write_round_trip_against_the_session() {
-        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp = tempfile::tempdir().unwrap();
         install_over(tmp.path());
 
@@ -586,7 +598,9 @@ mod tests {
 
     #[test]
     fn relative_paths_resolve_against_the_working_directory() {
-        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp = tempfile::tempdir().unwrap();
         install_over(tmp.path());
 
@@ -599,7 +613,9 @@ mod tests {
 
     #[test]
     fn read_dir_yields_entries_that_can_answer_about_themselves() {
-        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp = tempfile::tempdir().unwrap();
         install_over(tmp.path());
         write("/work/a.txt", b"a").unwrap();
@@ -626,7 +642,9 @@ mod tests {
 
     #[test]
     fn canonicalize_returns_a_virtual_path_not_a_host_one() {
-        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp = tempfile::tempdir().unwrap();
         install_over(tmp.path());
         create_dir_all("/work/a/b").unwrap();
@@ -642,7 +660,9 @@ mod tests {
 
     #[test]
     fn a_path_outside_the_mount_is_unreachable() {
-        let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tmp = tempfile::tempdir().unwrap();
         install_over(tmp.path());
         assert!(open("/etc/passwd").is_err());

@@ -51,18 +51,26 @@ fn cat(path: &str) -> i32 {
 
 #[test]
 fn a_file_inside_the_mount_is_readable() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("inside.txt"), b"hello\n").unwrap();
     confine_to(tmp.path());
 
-    assert_eq!(cat("/work/inside.txt"), 0, "a file in the mount must be readable");
+    assert_eq!(
+        cat("/work/inside.txt"),
+        0,
+        "a file in the mount must be readable"
+    );
     brush_vfs::ambient::uninstall();
 }
 
 #[test]
 fn a_host_path_outside_the_mount_is_unreachable() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     // A real file that exists on the host but is not in the namespace. If cat
     // still used raw std::fs it would open this; routed through the vfs, the
@@ -75,22 +83,35 @@ fn a_host_path_outside_the_mount_is_unreachable() {
     confine_to(jail.path());
 
     let by_host_path = cat(&outside.to_string_lossy());
-    assert_ne!(by_host_path, 0, "a host path outside the mount must not open");
+    assert_ne!(
+        by_host_path, 0,
+        "a host path outside the mount must not open"
+    );
 
     // And the virtual spelling of it is equally unreachable.
-    assert_ne!(cat("/etc/passwd"), 0, "an unmounted virtual path must not open");
+    assert_ne!(
+        cat("/etc/passwd"),
+        0,
+        "an unmounted virtual path must not open"
+    );
     brush_vfs::ambient::uninstall();
 }
 
 #[test]
 fn climbing_out_of_the_mount_is_refused() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("inside.txt"), b"hello\n").unwrap();
     confine_to(tmp.path());
 
     // `..` from the mount root cannot escape to the parent directory.
-    assert_ne!(cat("/work/../inside.txt"), 0, "climbing above the root must fail");
+    assert_ne!(
+        cat("/work/../inside.txt"),
+        0,
+        "climbing above the root must fail"
+    );
     brush_vfs::ambient::uninstall();
 }
 
@@ -123,7 +144,9 @@ fn run_util(name: &str, path: &str) -> i32 {
 #[cfg(feature = "coreutils.cksum")]
 #[test]
 fn a_utility_with_no_filesystem_code_of_its_own_is_confined_through_uucore() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     let outside = tmp.path().join("outside.txt");
     std::fs::write(&outside, b"secret\n").unwrap();
@@ -156,7 +179,9 @@ fn a_utility_with_no_filesystem_code_of_its_own_is_confined_through_uucore() {
 ))]
 #[test]
 fn the_whole_routed_batch_is_confined() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("inside.txt"), b"one\ntwo\n").unwrap();
     let outside = tmp.path().join("outside.txt");
@@ -194,7 +219,9 @@ fn the_whole_routed_batch_is_confined() {
 #[cfg(feature = "coreutils.all")]
 #[test]
 fn the_whole_fork_set_refuses_a_path_outside_the_mount() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     let outside = tmp.path().join("outside.txt");
     std::fs::write(&outside, b"secret\n").unwrap();
@@ -225,11 +252,45 @@ fn the_whole_fork_set_refuses_a_path_outside_the_mount() {
     // thing. Its routing is evidenced by the codemod's own report (no unrouted
     // sites) rather than by this sweep.
     let readers = [
-        "cat", "head", "wc", "tac", "nl", "cksum", "base32", "base64", "basenc",
-        "comm", "csplit", "cut", "expand", "fmt", "fold", "md5sum", "od",
-        "paste", "pr", "ptx", "readlink", "realpath", "sha1sum", "sha256sum",
-        "shuf", "sort", "split", "sum", "tail", "tsort", "unexpand", "uniq",
-        "b2sum", "sha224sum", "sha384sum", "sha512sum", "du", "ls", "dircolors",
+        "cat",
+        "head",
+        "wc",
+        "tac",
+        "nl",
+        "cksum",
+        "base32",
+        "base64",
+        "basenc",
+        "comm",
+        "csplit",
+        "cut",
+        "expand",
+        "fmt",
+        "fold",
+        "md5sum",
+        "od",
+        "paste",
+        "pr",
+        "ptx",
+        "readlink",
+        "realpath",
+        "sha1sum",
+        "sha256sum",
+        "shuf",
+        "sort",
+        "split",
+        "sum",
+        "tail",
+        "tsort",
+        "unexpand",
+        "uniq",
+        "b2sum",
+        "sha224sum",
+        "sha384sum",
+        "sha512sum",
+        "du",
+        "ls",
+        "dircolors",
     ];
 
     let cmds = brush_coreutils_builtins::bundled_commands();
@@ -263,7 +324,9 @@ fn the_whole_fork_set_refuses_a_path_outside_the_mount() {
 #[cfg(all(feature = "findutils.all", feature = "textutils.all"))]
 #[test]
 fn findutils_and_textutils_are_confined() {
-    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _g = GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().unwrap();
     let outside = tmp.path().join("outside.txt");
     std::fs::write(&outside, b"secret\n").unwrap();
@@ -283,12 +346,28 @@ fn findutils_and_textutils_are_confined() {
     };
 
     // Inside the mount, each works.
-    assert_eq!(run("grep", &["needle", "/work/inside.txt"]), 0, "grep in-mount");
-    assert_eq!(run("sed", &["s/needle/x/", "/work/inside.txt"]), 0, "sed in-mount");
+    assert_eq!(
+        run("grep", &["needle", "/work/inside.txt"]),
+        0,
+        "grep in-mount"
+    );
+    assert_eq!(
+        run("sed", &["s/needle/x/", "/work/inside.txt"]),
+        0,
+        "sed in-mount"
+    );
 
     // Outside it, none can reach the file.
-    assert_ne!(run("grep", &["secret", &outside]), 0, "grep must not read outside");
-    assert_ne!(run("sed", &["s/secret/x/", &outside]), 0, "sed must not read outside");
+    assert_ne!(
+        run("grep", &["secret", &outside]),
+        0,
+        "grep must not read outside"
+    );
+    assert_ne!(
+        run("sed", &["s/secret/x/", &outside]),
+        0,
+        "sed must not read outside"
+    );
 
     // `xargs` reads its argument file through the facade -- its only filesystem
     // site, and one the codemod missed until this survey, since `fs::File::open`

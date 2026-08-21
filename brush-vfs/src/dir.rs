@@ -532,15 +532,22 @@ mod tests {
 
         let source = include_str!("dir.rs");
         let banned = [
-            "PathBuf", "&Path", "as_fd", "as_raw_fd", "OwnedFd", "RawFd",
-            "into_std_file", "cap_std::fs::Dir",
+            "PathBuf",
+            "&Path",
+            "as_fd",
+            "as_raw_fd",
+            "OwnedFd",
+            "RawFd",
+            "into_std_file",
+            "cap_std::fs::Dir",
         ];
 
         for line in source.lines() {
             let line = line.trim();
-            let Some(rest) = line.strip_prefix("pub fn ").or_else(|| {
-                line.strip_prefix("pub const fn ")
-            }) else {
+            let Some(rest) = line
+                .strip_prefix("pub fn ")
+                .or_else(|| line.strip_prefix("pub const fn "))
+            else {
                 continue;
             };
             if rest.starts_with(ALLOWED) {

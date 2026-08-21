@@ -328,7 +328,11 @@ fn check_forks(sh: &Shell, verbose: bool) -> Result<()> {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    anyhow::ensure!(!names.is_empty(), "no forks found under {}", forks_dir.display());
+    anyhow::ensure!(
+        !names.is_empty(),
+        "no forks found under {}",
+        forks_dir.display()
+    );
 
     for name in &names {
         let dir = forks_dir.join(name);
@@ -338,7 +342,10 @@ fn check_forks(sh: &Shell, verbose: bool) -> Result<()> {
             .map(|(_, f)| *f);
 
         if verbose {
-            eprintln!("Testing fork {name} ({})", features.unwrap_or("default features"));
+            eprintln!(
+                "Testing fork {name} ({})",
+                features.unwrap_or("default features")
+            );
         }
         let _guard = sh.push_dir(&dir);
         let output = if let Some(features) = features {
@@ -374,7 +381,11 @@ fn check_forks(sh: &Shell, verbose: bool) -> Result<()> {
             "fork {name} lists {} known failure(s) that now pass; remove them from \
              known-test-failures.txt:\n  {}",
             stale.len(),
-            stale.iter().map(|t| t.as_str()).collect::<Vec<_>>().join("\n  ")
+            stale
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
         );
         if verbose {
             eprintln!("  {name}: {} known failure(s), no new ones", known.len());
@@ -711,10 +722,7 @@ fn check_deps(sh: &Shell, verbose: bool) -> Result<()> {
         .read_stderr()
         .context("Failed to run cargo-deny")?;
     eprint!("{output}");
-    anyhow::ensure!(
-        !output.contains("error["),
-        "Dependency check failed"
-    );
+    anyhow::ensure!(!output.contains("error["), "Dependency check failed");
 
     assert_no_unmatched_wrappers(&output)?;
     check_vfs_has_no_features()?;

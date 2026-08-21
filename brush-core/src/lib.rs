@@ -9,8 +9,8 @@ pub mod commands;
 pub mod completion;
 pub mod env;
 pub mod error;
-pub mod execpolicy;
 pub mod escape;
+pub mod execpolicy;
 pub mod expansion;
 mod extendedtests;
 pub mod extensions;
@@ -54,11 +54,11 @@ pub mod parser {
 
 pub use commands::{CommandArg, ExecutionContext};
 pub use error::{BuiltinError, Error, ErrorKind};
+pub use execpolicy::{ExternalExecution, TrustedLauncher};
 pub use extensions::ShellExtensions;
 pub use interp::{ExecutionParameters, ProcessGroupPolicy};
 pub use parser::{SourcePosition, SourcePositionOffset, SourceSpan};
 pub use results::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, ExecutionSpawnResult};
-pub use execpolicy::{ExternalExecution, TrustedLauncher};
 pub use shell::{
     CreateOptions, ProfileLoadBehavior, RcLoadBehavior, Shell, ShellBuilder, ShellBuilderState,
     ShellFd, ShellState,

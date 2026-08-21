@@ -55,9 +55,8 @@ pub fn run(cmd: &CodemodCommand, _verbose: bool) -> Result<()> {
         anyhow::bail!("no .rs files under {}", cmd.path.display());
     }
 
-    let (files, skipped): (Vec<_>, Vec<_>) = all
-        .into_iter()
-        .partition(|f| !is_skipped(f, &cmd.skips));
+    let (files, skipped): (Vec<_>, Vec<_>) =
+        all.into_iter().partition(|f| !is_skipped(f, &cmd.skips));
     for file in &skipped {
         eprintln!("{}: skipped (--skip)", file.display());
     }
@@ -75,10 +74,9 @@ pub fn run(cmd: &CodemodCommand, _verbose: bool) -> Result<()> {
     let mut total_rewrites = 0usize;
     let mut total_unhandled = 0usize;
     for file in &files {
-        let source = std::fs::read_to_string(file)
-            .with_context(|| format!("reading {}", file.display()))?;
-        let outcome = rewrite(&source)
-            .with_context(|| format!("rewriting {}", file.display()))?;
+        let source =
+            std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+        let outcome = rewrite(&source).with_context(|| format!("rewriting {}", file.display()))?;
 
         if !outcome.rewrites.is_empty() || !outcome.unhandled.is_empty() {
             eprintln!("{}:", file.display());
@@ -102,7 +100,11 @@ pub fn run(cmd: &CodemodCommand, _verbose: bool) -> Result<()> {
         "\n{} site(s) routed, {} inherent/carve-out site(s) left unrouted{}.",
         total_rewrites,
         total_unhandled,
-        if cmd.check { " (check only, nothing written)" } else { "" }
+        if cmd.check {
+            " (check only, nothing written)"
+        } else {
+            ""
+        }
     );
     Ok(())
 }
@@ -377,8 +379,9 @@ impl<'ast> Visit<'ast> for EditCollector<'_> {
     fn visit_local(&mut self, local: &'ast syn::Local) {
         if let syn::Pat::Ident(pat) = &local.pat {
             let declared_non_path = match &local.pat {
-                syn::Pat::Type(t) => named_base_type(&t.ty)
-                    .is_some_and(|b| !PATH_LIKE_TYPES.contains(&b.as_str())),
+                syn::Pat::Type(t) => {
+                    named_base_type(&t.ty).is_some_and(|b| !PATH_LIKE_TYPES.contains(&b.as_str()))
+                }
                 _ => false,
             };
             // Transitive, because the binding is usually several hops from the
@@ -499,9 +502,7 @@ impl EditCollector<'_> {
                 Some(real) => (Some(only.clone()), real.clone()),
                 None => (None, String::new()),
             },
-            [module, f] if self.bindings.module_aliases.contains(module) => {
-                (None, f.clone())
-            }
+            [module, f] if self.bindings.module_aliases.contains(module) => (None, f.clone()),
             [s, fs, f] if s == "std" && fs == "fs" => (None, f.clone()),
             _ => (None, String::new()),
         };
@@ -522,8 +523,9 @@ impl EditCollector<'_> {
         } else if CARVE_OUT_FNS.contains(&real.as_str()) {
             // A known fs function the facade does not provide (carve-out).
             let line = span.map_or(0, |s| s.start().line);
-            self.unhandled
-                .push(format!("line {line}: `{real}` is a carve-out (D34), facade has no equivalent"));
+            self.unhandled.push(format!(
+                "line {line}: `{real}` is a carve-out (D34), facade has no equivalent"
+            ));
         }
     }
 
@@ -600,8 +602,7 @@ fn prune_imports(
         let refs = references.get(name).copied().unwrap_or(0);
         let used = consumed.get(name).copied().unwrap_or(0);
         // Only prune names we actually bound from std::fs.
-        (bindings.file_names.contains(name) || bindings.free_fns.contains_key(name))
-            && refs == used
+        (bindings.file_names.contains(name) || bindings.free_fns.contains_key(name)) && refs == used
     };
 
     let mut edits = Vec::new();
@@ -704,17 +705,14 @@ fn prune_use_item(
 
 /// The byte range a path's tokens occupy, from the first segment to the last.
 fn path_byte_range(path: &syn::Path) -> (usize, usize) {
-    let start = path
-        .leading_colon
-        .as_ref()
-        .map_or_else(
-            || {
-                path.segments
-                    .first()
-                    .map_or(0, |s| span_byte_range(s.ident.span()).0)
-            },
-            |c| span_byte_range(c.spans[0]).0,
-        );
+    let start = path.leading_colon.as_ref().map_or_else(
+        || {
+            path.segments
+                .first()
+                .map_or(0, |s| span_byte_range(s.ident.span()).0)
+        },
+        |c| span_byte_range(c.spans[0]).0,
+    );
     let end = path
         .segments
         .last()
@@ -760,7 +758,9 @@ fn rust_files(path: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     let mut stack = vec![path.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+        for entry in
+            std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))?
+        {
             let entry = entry?;
             let p = entry.path();
             if p.is_dir() {
@@ -829,7 +829,10 @@ fn is_test_gated(attrs: &[syn::Attribute]) -> bool {
             return false;
         };
         let tokens = list.tokens.to_string();
-        !tokens.contains("not") && tokens.split(|c: char| !c.is_alphanumeric() && c != '_').any(|t| t == "test")
+        !tokens.contains("not")
+            && tokens
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .any(|t| t == "test")
     })
 }
 
@@ -1001,7 +1004,10 @@ mod tests {
         let out = routed(
             "fn f(md: std::fs::Metadata) -> bool { let ft = md.file_type(); ft.is_dir() }\n",
         );
-        assert!(out.unhandled.is_empty(), "is_dir on a FileType must not be flagged");
+        assert!(
+            out.unhandled.is_empty(),
+            "is_dir on a FileType must not be flagged"
+        );
         assert!(!out.changed);
     }
 
@@ -1035,9 +1041,7 @@ mod tests {
     fn a_not_test_cfg_is_production_and_still_routes() {
         // `#[cfg(not(test))]` marks production code. Treating it as a test gate
         // would silently stop routing it -- the failure direction that matters.
-        let out = routed(
-            "#[cfg(not(test))]\nfn prod(p: &str) { let _ = std::fs::read(p); }\n",
-        );
+        let out = routed("#[cfg(not(test))]\nfn prod(p: &str) { let _ = std::fs::read(p); }\n");
         assert!(out.source.contains("brush_vfs::ambient::read(p)"));
     }
 
@@ -1063,7 +1067,10 @@ mod tests {
 
     #[test]
     fn skip_matches_whole_components_only() {
-        assert!(path_has_suffix(Path::new("a/features/fsext.rs"), "features/fsext.rs"));
+        assert!(path_has_suffix(
+            Path::new("a/features/fsext.rs"),
+            "features/fsext.rs"
+        ));
         assert!(path_has_suffix(Path::new("a/mods/os.rs"), "mods/os.rs"));
         // A suffix must not match a partial component: `fs.rs` is not `safe_fs.rs`.
         assert!(!path_has_suffix(Path::new("a/safe_fs.rs"), "fs.rs"));
@@ -1125,8 +1132,14 @@ mod tests {
         // missing parent, so the two must not collapse into one.
         assert!(!mkdir.source.contains("create_dir_all"));
 
-        let perms = routed("fn f(p: &str, m: std::fs::Permissions) { let _ = std::fs::set_permissions(p, m); }\n");
-        assert!(perms.source.contains("brush_vfs::ambient::set_permissions(p, m)"));
+        let perms = routed(
+            "fn f(p: &str, m: std::fs::Permissions) { let _ = std::fs::set_permissions(p, m); }\n",
+        );
+        assert!(
+            perms
+                .source
+                .contains("brush_vfs::ambient::set_permissions(p, m)")
+        );
     }
 
     #[test]
@@ -1149,7 +1162,8 @@ mod tests {
             "use std::path::Path;\nfn f(p: &Path) -> std::io::Result<std::path::PathBuf> { p.join(\"x\").canonicalize() }\n",
         );
         assert!(
-            out.source.contains("brush_vfs::ambient::canonicalize(&(p.join(\"x\")))"),
+            out.source
+                .contains("brush_vfs::ambient::canonicalize(&(p.join(\"x\")))"),
             "got: {}",
             out.source
         );
@@ -1157,9 +1171,8 @@ mod tests {
 
     #[test]
     fn read_dir_as_a_method_is_routed() {
-        let out = routed(
-            "use std::path::Path;\nfn f(p: &Path) { for _e in p.read_dir().unwrap() {} }\n",
-        );
+        let out =
+            routed("use std::path::Path;\nfn f(p: &Path) { for _e in p.read_dir().unwrap() {} }\n");
         assert!(out.source.contains("brush_vfs::ambient::read_dir(&(p))"));
     }
 
@@ -1187,7 +1200,8 @@ mod tests {
         );
         assert!(out.source.contains("brush_vfs::ambient::open(p)"));
         assert!(
-            out.source.contains("use std::{fs::File, ffi::OsString, path::PathBuf};"),
+            out.source
+                .contains("use std::{fs::File, ffi::OsString, path::PathBuf};"),
             "the grouped import must be untouched, got: {}",
             out.source
         );
@@ -1198,12 +1212,18 @@ mod tests {
         // Once the facade grew a descriptor-based symlink_metadata, it stopped
         // being a carve-out.
         let free = routed("fn f(p: &str) { let _ = std::fs::symlink_metadata(p); }\n");
-        assert!(free.source.contains("brush_vfs::ambient::symlink_metadata(p)"));
-
-        let method = routed(
-            "use std::path::Path;\nfn f(p: &Path) { let _ = p.symlink_metadata(); }\n",
+        assert!(
+            free.source
+                .contains("brush_vfs::ambient::symlink_metadata(p)")
         );
-        assert!(method.source.contains("brush_vfs::ambient::symlink_metadata(&(p))"));
+
+        let method =
+            routed("use std::path::Path;\nfn f(p: &Path) { let _ = p.symlink_metadata(); }\n");
+        assert!(
+            method
+                .source
+                .contains("brush_vfs::ambient::symlink_metadata(&(p))")
+        );
         assert!(method.unhandled.is_empty());
     }
 

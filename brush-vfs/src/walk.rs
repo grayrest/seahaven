@@ -141,7 +141,9 @@ pub struct Error {
 enum ErrorKind {
     Io(std::io::Error),
     /// A followed symlink reached a directory already on the path to it.
-    Loop { ancestor: PathBuf },
+    Loop {
+        ancestor: PathBuf,
+    },
 }
 
 impl Error {
@@ -213,7 +215,10 @@ impl std::fmt::Display for Error {
             ErrorKind::Loop { ancestor } => write!(
                 f,
                 "File system loop found: {} points to an ancestor {}",
-                self.path.as_deref().unwrap_or_else(|| Path::new("?")).display(),
+                self.path
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new("?"))
+                    .display(),
                 ancestor.display()
             ),
         }
@@ -283,7 +288,9 @@ pub struct Walk {
 
 impl std::fmt::Debug for Walk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Walk").field("root", &self.root).finish_non_exhaustive()
+        f.debug_struct("Walk")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
     }
 }
 
@@ -421,7 +428,9 @@ pub struct IntoIter {
 
 impl std::fmt::Debug for IntoIter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("walk::IntoIter").field("depth", &self.depth).finish_non_exhaustive()
+        f.debug_struct("walk::IntoIter")
+            .field("depth", &self.depth)
+            .finish_non_exhaustive()
     }
 }
 
@@ -462,7 +471,11 @@ impl Iterator for IntoIter {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(error) = self.deferred.take() {
             self.done = true;
-            return Some(Err(Error::io(0, self.start.as_ref().map(|(_, d)| d.as_path()), error)));
+            return Some(Err(Error::io(
+                0,
+                self.start.as_ref().map(|(_, d)| d.as_path()),
+                error,
+            )));
         }
         if self.done {
             return None;
@@ -519,7 +532,10 @@ impl Iterator for IntoIter {
 
 impl IntoIter {
     /// Stats the walk's root, which has no parent handle to be relative to.
-    #[expect(clippy::unused_self, reason = "reads as a method alongside child_entry")]
+    #[expect(
+        clippy::unused_self,
+        reason = "reads as a method alongside child_entry"
+    )]
     fn root_entry(
         &self,
         vfs: &Vfs,
@@ -529,7 +545,12 @@ impl IntoIter {
         let metadata = vfs
             .symlink_metadata(&root)
             .map_err(|e| Error::io(0, Some(&display), e))?;
-        let name = root.as_str().rsplit('/').next().unwrap_or_default().to_string();
+        let name = root
+            .as_str()
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_string();
         Ok(DirEntry {
             is_symlink: metadata.is_symlink(),
             path: root,
@@ -555,10 +576,13 @@ impl IntoIter {
                 std::io::Error::other("BUG: child entry with no open directory"),
             )
         })?;
-        let path = frame
-            .path
-            .resolve(name)
-            .map_err(|e| Error::io(depth, Some(&frame.display), std::io::Error::other(e.to_string())))?;
+        let path = frame.path.resolve(name).map_err(|e| {
+            Error::io(
+                depth,
+                Some(&frame.display),
+                std::io::Error::other(e.to_string()),
+            )
+        })?;
         let display = frame.display.join(name);
         let metadata = frame
             .dir
@@ -620,7 +644,10 @@ impl IntoIter {
     }
 
     /// Re-stats a symlink as its target.
-    #[expect(clippy::unused_self, reason = "reads as a method alongside push/handle_entry")]
+    #[expect(
+        clippy::unused_self,
+        reason = "reads as a method alongside push/handle_entry"
+    )]
     fn follow(&self, vfs: &Vfs, dent: DirEntry) -> Result<DirEntry, Error> {
         let metadata = vfs
             .metadata(&dent.path)
@@ -664,13 +691,13 @@ impl IntoIter {
 
         if dent.followed
             && let Some(id) = identity
-            && let Some(ancestor) = self
-                .stack
-                .iter()
-                .rev()
-                .find(|f| f.identity == Some(id))
+            && let Some(ancestor) = self.stack.iter().rev().find(|f| f.identity == Some(id))
         {
-            return Err(Error::symlink_loop(dent.depth, &ancestor.display, &dent.display));
+            return Err(Error::symlink_loop(
+                dent.depth,
+                &ancestor.display,
+                &dent.display,
+            ));
         }
 
         let mut entries = dir

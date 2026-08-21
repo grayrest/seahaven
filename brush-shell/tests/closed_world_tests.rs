@@ -49,7 +49,13 @@ fn open_world_runs_an_external_program() {
 
 #[test]
 fn closed_world_refuses_an_external_program() {
-    let (code, stderr) = run_brush(&["--norc", "--noprofile", "--closed-world", "-c", "/bin/echo hi"]);
+    let (code, stderr) = run_brush(&[
+        "--norc",
+        "--noprofile",
+        "--closed-world",
+        "-c",
+        "/bin/echo hi",
+    ]);
     assert_eq!(
         code,
         Some(126),
@@ -70,7 +76,11 @@ fn closed_world_refuses_the_launcher_without_the_dispatch_flag() {
     let launcher = launcher.to_string_lossy();
     let script = format!("exec {launcher} -c 'echo PWNED'");
     let (code, stderr) = run_brush(&["--norc", "--noprofile", "--closed-world", "-c", &script]);
-    assert_eq!(code, Some(126), "the launcher-as-fresh-shell must be refused");
+    assert_eq!(
+        code,
+        Some(126),
+        "the launcher-as-fresh-shell must be refused"
+    );
     assert!(
         !stderr.contains("PWNED"),
         "the fresh shell must never have run, got: {stderr}"
@@ -86,7 +96,11 @@ fn open_world_control_runs_the_launcher_as_a_fresh_shell() {
     let launcher = launcher.to_string_lossy();
     let script = format!("{launcher} --norc --noprofile -c 'echo OPEN'");
     let (code, stderr) = run_brush(&["--norc", "--noprofile", "-c", &script]);
-    assert_eq!(code, Some(0), "under identity the nested shell runs, got: {stderr}");
+    assert_eq!(
+        code,
+        Some(0),
+        "under identity the nested shell runs, got: {stderr}"
+    );
 }
 
 /// A bundled command still runs under a closed world — the shim exemption. Only
@@ -144,7 +158,10 @@ fn the_flag_is_documented_in_help() {
     let (_, _) = run_brush(&["--norc", "--noprofile", "-c", "true"]);
     let shell_path = assert_cmd::cargo::cargo_bin!("brush");
     assert!(Path::new(&shell_path).exists());
-    let output = Command::new(shell_path).arg("--help").output().expect("help");
+    let output = Command::new(shell_path)
+        .arg("--help")
+        .output()
+        .expect("help");
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(
         help.contains("--closed-world"),
