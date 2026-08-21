@@ -24,8 +24,15 @@ use std::ffi::OsString;
 use std::fs;
 use thiserror::Error;
 
+// FLATLAND DIVERGENCE: routed. `std::os::unix::fs::symlink` writes to the
+// *host*, and the link name is resolved against the host process's working
+// directory -- so `cd /work && ln -s f.txt newlink` under a mount exited 0 and
+// created `newlink` outside the namespace entirely. The facade takes the same
+// two arguments in the same order, so the call site below is unchanged, and it
+// validates that the stored target stays inside the mount, which the raw
+// syscall cannot.
 #[cfg(any(unix, target_os = "redox"))]
-use std::os::unix::fs::symlink;
+use brush_vfs::ambient::symlink;
 #[cfg(windows)]
 use std::os::windows::fs::{symlink_dir, symlink_file};
 use std::path::{Path, PathBuf};
@@ -286,7 +293,13 @@ pub fn exec(files: &[PathBuf], settings: &Settings) -> LnResult<()> {
             return link_files_in_dir(files, &PathBuf::from("."), settings);
         }
         let last_file = &PathBuf::from(files.last().unwrap());
-        if files.len() > 2 || last_file.is_dir() {
+        // FLATLAND DIVERGENCE: routed, as every `is_dir`/`is_symlink` below.
+        // These are inherent `Path` methods, outside what the codemod can see
+        // (D34 bounds it to free functions), so they asked the host -- where
+        // every virtual path answers "no". That silently changed which *form*
+        // of the command was taken: `ln -s f.txt dir/` stopped meaning "link
+        // into the directory".
+        if files.len() > 2 || brush_vfs::ambient::is_dir(last_file) {
             // 3rd form: create links in the last argument.
             return link_files_in_dir(&files[0..files.len() - 1], last_file, settings);
         }
@@ -310,7 +323,7 @@ pub fn exec(files: &[PathBuf], settings: &Settings) -> LnResult<()> {
 
 #[allow(clippy::cognitive_complexity)]
 fn link_files_in_dir(files: &[PathBuf], target_dir: &Path, settings: &Settings) -> LnResult<()> {
-    if !target_dir.is_dir() {
+    if !brush_vfs::ambient::is_dir(target_dir) {
         return Err(LnError::TargetIsNotADirectory(target_dir.to_owned()));
     }
     // remember the linked destinations for further usage
@@ -318,7 +331,7 @@ fn link_files_in_dir(files: &[PathBuf], target_dir: &Path, settings: &Settings) 
 
     let mut all_successful = true;
     for srcpath in files {
-        let targetpath = if settings.no_dereference && target_dir.is_symlink() {
+        let targetpath = if settings.no_dereference && brush_vfs::ambient::is_symlink(target_dir) {
             let remove_target = || {
                 // Not sure why but on Windows, the symlink can be
                 // considered as a dir
@@ -415,7 +428,12 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
         src.into()
     };
 
-    if dst.is_symlink() || brush_vfs::ambient::exists(&(dst)) {
+    // FLATLAND DIVERGENCE: routed. Worth naming separately: with `exists`
+    // routed and `is_symlink` not, `ln -sf` over an existing link in the mount
+    // took the overwrite branch, removed the real link through the facade, and
+    // then wrote the replacement to the host -- losing the file and escaping in
+    // one step.
+    if brush_vfs::ambient::is_symlink(dst) || brush_vfs::ambient::exists(&(dst)) {
         backup_path = backup_control::get_backup_path(settings.backup, dst, &settings.suffix);
         if settings.backup == BackupMode::Existing && !settings.symbolic {
             // when ln --backup f f, it should detect that it is the same file
@@ -442,7 +460,7 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
                 // In case of error, don't do anything
             }
             OverwriteMode::Force => {
-                if !dst.is_symlink()
+                if !brush_vfs::ambient::is_symlink(dst)
                     && paths_refer_to_same_file(src, dst, true)
                     && is_same_entry(src, dst)
                 {
@@ -466,7 +484,7 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
             )
         })
     } else {
-        let p = if settings.logical && source.is_symlink() {
+        let p = if settings.logical && brush_vfs::ambient::is_symlink(&source) {
             brush_vfs::ambient::canonicalize(&source).map_err(|e| {
                 LnError::IoContext(
                     UIoError::from(e),
@@ -478,7 +496,9 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
         };
         match brush_vfs::ambient::hard_link(&p, dst) {
             Ok(()) => Ok(()),
-            Err(_) if p.is_dir() => Err(LnError::FailedToCreateHardLinkDir(source.to_path_buf())),
+            Err(_) if brush_vfs::ambient::is_dir(&p) => {
+                Err(LnError::FailedToCreateHardLinkDir(source.to_path_buf()))
+            }
             Err(e) => Err(LnError::IoContext(
                 UIoError::from(e),
                 translate!(
@@ -526,7 +546,9 @@ pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result
     }
 }
 
+// FLATLAND DIVERGENCE: routed, as the Unix import above. `rustix::fs::symlink`
+// is the same host write in a third spelling.
 #[cfg(target_os = "wasi")]
 pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {
-    rustix::fs::symlink(src.as_ref(), dst.as_ref()).map_err(io::Error::from)
+    brush_vfs::ambient::symlink(src, dst)
 }

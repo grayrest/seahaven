@@ -109,6 +109,43 @@ by three cases in `brush-shell/tests/cases/brush/sandbox.yaml`.
 inside `#[cfg(target_os = "wasi")]`, so no build this repo gates on reaches it
 and there is no failing case to point at.
 
+## `uu_ln` — the symlink write, and five predicates
+
+The only one of these that was an *escape* rather than a wrong answer.
+`std::os::unix::fs::symlink` writes to the host and resolves the link name
+against the host process's working directory, so under a mount
+`cd /work && ln -s f.txt newlink` exited 0 and created `newlink` outside the
+namespace, where nothing in the shell could reach it. Routed by swapping the
+import for `brush_vfs::ambient::symlink`, which takes the same two arguments in
+the same order — so every call site is unchanged, which is the codemod's own
+idiom — and which additionally checks that the stored target lands inside the
+mount. `ln -s ../f.txt up` used to hand out a name for the mount's parent and
+is now refused. The WASI arm spelled the same write `rustix::fs::symlink` and
+is routed with it.
+
+Note that the ban list already named `std::os::unix::fs::symlink`, and clippy
+flags it the moment anyone lints this crate. Nobody does: the forks are not
+workspace members, so `cargo xtask check lint` never sees them. The ban was
+working and unread.
+
+Five inherent `Path` predicates go with it — two `is_dir` deciding which *form*
+of the command line this is, and three `is_symlink` — all the D34 carve-out
+again. Each has its own failing case, and one is worse than a wrong answer:
+with `exists` routed and `is_symlink` not, `ln -sf` over an existing link took
+the overwrite branch, removed the real link *through the namespace*, and wrote
+its replacement to the host. The file was gone from the mount and the new link
+was outside it, in one step.
+
+Pinned by four cases in `brush-shell/tests/cases/brush/sandbox.yaml`. They
+mount a subdirectory rather than `.`, because with the mount at `.` the host
+working directory and the mount root are the same directory and an escaped
+write is indistinguishable from a confined one.
+
+The `#[cfg(windows)]` arm is deliberately untouched. It dispatches
+`symlink_dir` / `symlink_file`, a distinction `Vfs::symlink` does not take and
+which cap-std resolves its own way; routing it is a change to Windows behaviour
+this repository cannot test and has no failing case for.
+
 ## `uucore::perms` — left on `walkdir`, deliberately
 
 `dive_into` is the last walk in the fork set that is not routed, and it stays

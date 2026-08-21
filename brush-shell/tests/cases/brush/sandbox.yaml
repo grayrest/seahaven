@@ -309,3 +309,91 @@ cases:
         contents: "x\n"
       - path: "sub/inner.txt"
         contents: "y\n"
+
+  # `--mount /work:sub` rather than `/work:.` for these four: with the mount at
+  # `.` the host working directory and the mount root are the same directory,
+  # so a write that escapes the namespace lands in the same place as one that
+  # does not and the test cannot tell them apart. Mounting a subdirectory puts
+  # the two somewhere different, which is the whole property under test.
+  - name: "A symbolic link is created inside the namespace, not beside it"
+    # `ln -s` wrote through `std::os::unix::fs::symlink`, which resolves the
+    # link name against the *host* process's working directory: under a mount
+    # this exited 0 and created the link outside the namespace entirely, where
+    # nothing in the shell could reach it. Reading it back is the assertion --
+    # an escaped link leaves `cat` with nothing to open.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && ln -s f.txt newlink && cat newlink"
+    expected_exit_code: 0
+    expected_stdout: "x\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
+
+  - name: "ln -sf replaces a link in place rather than losing it"
+    # The sharp edge of the same bug. `exists` was routed and `is_symlink` was
+    # not, so the overwrite branch removed the real link through the namespace
+    # and then wrote its replacement to the host: the file was gone from the
+    # mount and the new link was outside it, in one step.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && ln -s f.txt link && ln -sf g.txt link && cat link"
+    expected_exit_code: 0
+    expected_stdout: "y\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
+      - path: "sub/g.txt"
+        contents: "y\n"
+
+  - name: "A link target cannot climb out of the namespace"
+    # The stored target is resolved against the link's own directory and must
+    # land inside the mount, which `brush-vfs` checks and the raw syscall
+    # cannot. Unrouted this succeeded and handed out a name for the mount's
+    # parent.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && ln -s ../f.txt up"
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/g.txt"
+        contents: "y\n"
+      - path: "f.txt"
+        contents: "outside\n"
+
+  - name: "ln links into a directory named on the command line"
+    # `Path::is_dir` on the host decided which *form* of the command this was,
+    # so `ln -s f.txt d/` stopped meaning "link into the directory" and became
+    # a link named `d/`.
+    #
+    # The target is `../f.txt` rather than `f.txt` because the link is created
+    # *inside* `d`, so a bare `f.txt` would name itself -- `cat` gets ELOOP on
+    # the host too, which is `ln` being right rather than confined.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && ln -s ../f.txt d/ && cat d/f.txt"
+    expected_exit_code: 0
+    expected_stdout: "x\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
+      - path: "sub/d/keep.txt"
+        contents: "k\n"
