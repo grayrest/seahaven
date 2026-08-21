@@ -409,15 +409,18 @@ fn write_manifest(src: &Path, dest: &Path, name: &str) -> Result<()> {
 
     // The fork's own test binary needs `ctor` to install the identity session
     // before upstream's tests run; see `install_test_session`. Dev-only, so it
-    // never enters a shipped graph.
-    let mut ctor_dep = toml::Table::new();
-    ctor_dep.insert("version".into(), toml::Value::String("0.8".into()));
-    if let Some(toml::Value::Table(dev)) = manifest.get_mut("dev-dependencies") {
-        dev.insert("ctor".into(), toml::Value::Table(ctor_dep));
-    } else {
-        let mut dev = toml::Table::new();
-        dev.insert("ctor".into(), toml::Value::Table(ctor_dep));
-        manifest.insert("dev-dependencies".into(), toml::Value::Table(dev));
+    // never enters a shipped graph -- unless upstream already brought its own,
+    // in which case adding a second is harmful; see `declares_ctor`.
+    if !declares_ctor(&manifest) {
+        let mut ctor_dep = toml::Table::new();
+        ctor_dep.insert("version".into(), toml::Value::String("0.8".into()));
+        if let Some(toml::Value::Table(dev)) = manifest.get_mut("dev-dependencies") {
+            dev.insert("ctor".into(), toml::Value::Table(ctor_dep));
+        } else {
+            let mut dev = toml::Table::new();
+            dev.insert("ctor".into(), toml::Value::Table(ctor_dep));
+            manifest.insert("dev-dependencies".into(), toml::Value::Table(dev));
+        }
     }
 
     // Add the facade the codemod's output depends on.
@@ -490,6 +493,60 @@ fn install_identity_session_for_tests() {
     brush_vfs::ambient::install(session);
 }
 ";
+
+/// Whether the manifest already declares `ctor` in a form the fork's own test
+/// binary can use.
+///
+/// Upstream sometimes depends on it directly -- `uutils/sed` does, at 0.6.
+/// Adding a second, semver-incompatible copy puts two `ctor` rlibs in the test
+/// target's graph and rustc refuses to choose between them (E0464), so the
+/// fork's entire suite stops compiling. That failure is quieter than it sounds:
+/// `cargo xtask check forks` counts failing test *names*, and a crate that
+/// never builds reports none, so the fork reads as passing while running
+/// nothing at all.
+///
+/// The version does not matter, only the presence: `#[ctor::ctor]` on a free
+/// function is spelled the same across every release the forks pull in.
+///
+/// An `optional` dependency does not count. It is absent unless a feature turns
+/// it on, so the generated module could not name it.
+fn declares_ctor(manifest: &toml::Table) -> bool {
+    /// Whether a `[dependencies]`-shaped table carries a usable `ctor`.
+    fn usable(table: &toml::Table) -> bool {
+        match table.get("ctor") {
+            None => false,
+            // The `ctor = { version = "..", optional = true }` form.
+            Some(toml::Value::Table(dep)) => {
+                dep.get("optional") != Some(&toml::Value::Boolean(true))
+            }
+            // The `ctor = "0.6"` shorthand, which cannot be optional.
+            Some(_) => true,
+        }
+    }
+
+    const KINDS: [&str; 2] = ["dependencies", "dev-dependencies"];
+
+    let direct = KINDS
+        .iter()
+        .filter_map(|kind| manifest.get(*kind))
+        .filter_map(toml::Value::as_table)
+        .any(usable);
+
+    // `[target.'cfg(..)'.dependencies]` is the same declaration behind a cfg.
+    // A fork built for one platform still collides on that platform.
+    direct
+        || manifest
+            .get("target")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|targets| {
+                targets
+                    .values()
+                    .filter_map(toml::Value::as_table)
+                    .flat_map(|table| KINDS.iter().filter_map(move |kind| table.get(*kind)))
+                    .filter_map(toml::Value::as_table)
+                    .any(usable)
+            })
+}
 
 /// Declaration prepended to the fork's library root.
 const TEST_SESSION_DECL: &str = r"
@@ -566,4 +623,51 @@ fn ensure_lock_ignored(dest: &Path) -> Result<()> {
     std::fs::write(dest.join(".gitignore"), "Cargo.lock\n")
         .with_context(|| format!("writing {}/.gitignore", dest.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::declares_ctor;
+
+    fn manifest(text: &str) -> toml::Table {
+        text.parse().expect("fixture manifest parses")
+    }
+
+    #[test]
+    fn a_manifest_without_ctor_wants_the_dev_dependency() {
+        assert!(!declares_ctor(&manifest(
+            "[dependencies]\nlibc = \"0.2\"\n"
+        )));
+    }
+
+    #[test]
+    fn an_upstream_dependency_is_reused() {
+        // `uutils/sed`'s own manifest, reduced to the line that matters.
+        assert!(declares_ctor(&manifest(
+            "[dependencies.ctor]\nversion = \"0.6.0\"\n"
+        )));
+    }
+
+    #[test]
+    fn the_shorthand_form_is_recognized() {
+        assert!(declares_ctor(&manifest(
+            "[dev-dependencies]\nctor = \"0.8\"\n"
+        )));
+    }
+
+    #[test]
+    fn a_platform_gated_dependency_is_recognized() {
+        assert!(declares_ctor(&manifest(
+            "[target.'cfg(unix)'.dependencies.ctor]\nversion = \"0.6.0\"\n"
+        )));
+    }
+
+    #[test]
+    fn an_optional_dependency_does_not_count() {
+        // Off unless a feature turns it on, so the generated module could not
+        // name it and the fork still needs its own.
+        assert!(!declares_ctor(&manifest(
+            "[dependencies.ctor]\nversion = \"0.6.0\"\noptional = true\n"
+        )));
+    }
 }

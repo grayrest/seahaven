@@ -73,9 +73,6 @@ default-features = false
 features = ["clock"]
 version = "0.4.37"
 
-[dev-dependencies.ctor]
-version = "0.8"
-
 [dev-dependencies.divan]
 package = "codspeed-divan-compat"
 version = "4.0.5"
