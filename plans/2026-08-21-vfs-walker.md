@@ -56,10 +56,20 @@ have forced a closure-typed design.
 (`src/find/matchers/entry.rs:220`), so its coupling is concentrated at one
 adapter rather than spread through the matchers.
 
-**The pieces to build on exist.** `brush_vfs::dir::Dir` already does confined
-`*at` descent (`open_dir`, `metadata`, `entry_names`), and `Vfs::open_dir`
-mints one from a resolved path. A walk over that is anchored per level rather
-than re-resolving a path per entry.
+**The pieces to build on exist, and they are cross-platform.**
+`brush_vfs::dir::Dir` already does confined descent (`open_dir`, `metadata`,
+`entry_names`), and `Vfs::open_dir` mints one from a resolved path. A walk over
+that is anchored per level rather than re-resolving a path per entry.
+`cap_std::fs::Dir` has a Windows backend, and only two things on our wrapper are
+Unix — `set_permissions`, which takes a `u32` mode, and the descriptor accessor
+`safe_traversal` needs. Neither is used by a walk.
+
+**One Windows gap is real and load-bearing.** `Vfs::symlink_metadata` falls back
+to `metadata` on non-Unix, so it *follows* the final link there. A walker built
+on it would silently follow directory symlinks under `follow_links(false)` — an
+escape-shaped bug, not a cosmetic difference. This was already a recorded
+deferral; the walker is what makes it matter, so it is step 0 rather than a
+footnote.
 
 **`deny.toml`'s inventory has already rotted, and cannot fail.** `findutils`
 and `uu_grep` are direct parents of `walkdir` and are *not* listed as wrappers.
@@ -69,6 +79,17 @@ separate defects: the entries are stale, and the mechanism that was supposed to
 notice cannot.
 
 ## The change
+
+0. **Make `symlink_metadata` stop following on Windows, and give `Dir` a
+   no-follow child stat.** The technique is already proven in this tree:
+   `uucore::fs::FileInformation::from_path` opens with
+   `FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS` and stats the
+   handle, which is the Windows analogue of the `O_PATH`/`O_SYMLINK` open
+   `symlink_metadata_at` already does on Unix. `OpenMode::to_cap_std` currently
+   wires `custom_flags` only under `#[cfg(unix)]` and needs a Windows arm.
+
+   This is first because everything after it inherits the answer, and because a
+   walker that quietly follows links on one platform is worse than no walker.
 
 1. **`brush_vfs::walk`, mirroring `walkdir`'s shape.** A builder with the eight
    options above, an iterator yielding `Result<DirEntry, Error>`, and
@@ -94,15 +115,19 @@ notice cannot.
      reports a loop rather than spinning. Needs dev/ino ancestry, and must
      produce the same error shape `uucore::perms` already matches on
      (`io_error()` absent → "Too many levels of symbolic links").
-   - **`same_file_system`.** A device comparison against the root's, from
-     metadata.
+   - **`same_file_system`.** A comparison against the root's volume, which is
+     `MetadataExt::dev()` on Unix and `volume_serial_number()` on Windows —
+     different APIs for the same question, so it needs a small internal identity
+     type rather than a `dev` field. `DirEntry::ino()` is the mirror case and
+     stays `#[cfg(unix)]`, as `walkdir`'s own does.
    - **`contents_first`.** Post-order, which `find -depth` depends on and which
      interacts with `skip_current_dir`.
 
 4. **`Dir` grows what `perms` needs.** Recursive `chown` has no `cap-std`
    expression at all, so this is a raw `fchownat` inside the trusted boundary,
-   the same shape as `symlink_metadata_at`. Without it `perms` cannot leave
-   `walkdir` and step 5 stalls on its largest consumer.
+   the same shape as `symlink_metadata_at`. Unix-only, because `uucore::perms`
+   is. Without it `perms` cannot leave `walkdir` and step 5 stalls on its
+   largest consumer.
 
 5. **Port the four consumers**, smallest first: `uu_grep`, `uu_cp`,
    `uucore::perms`, then `findutils`. Each is a residual patch entry
@@ -123,41 +148,50 @@ notice cannot.
 `xattr`. Each is a separate unroutable dependency with its own disposition
 under D4; none is a traversal.
 
-Windows. `Dir` is Unix-only, so the walker is too, and the four consumers keep
-`walkdir` there. That is a real asymmetry rather than a deferral, and it means
-`deny.toml`'s entry cannot be deleted outright — only narrowed to Windows.
+Nothing platform-shaped. An earlier draft of this plan excluded Windows on the
+grounds that `Dir` is Unix-only. That was simply wrong — `Dir` is
+cross-platform, and checking the claim instead of repeating it turned up that
+`brush-vfs` did not compile for Windows at all, which is now fixed. Windows
+directories need recursive walking exactly as much as Unix ones, so the walker
+covers both and `deny.toml`'s `walkdir` entry can be deleted outright rather
+than narrowed.
 
 ## Gates
 
-1. **Differential against `walkdir` itself.** Both walk the same fixture tree
+1. **The no-follow stat does not follow, on every platform.** A symlink to a
+   directory reports as a symlink, not as its target. *Fails if:* Windows still
+   answers with the target's metadata. Without this the differential in gate 2
+   passes on Unix and means nothing on Windows.
+2. **Differential against `walkdir` itself.** Both walk the same fixture tree
    under the identity policy; the yielded sequences must be identical —
    same entries, same order, same depths, same error positions. Fixture covers
    nesting, a symlink to a directory, a symlink loop, a dangling symlink, a
    FIFO, mixed depths, and a directory made unreadable mid-tree. *Fails if:* any
    divergence. This is the gate that actually retires the risk; the rest are
-   narrower.
-2. **Enumeration is confined.** `grep -r`, `cp -r`, `chmod -R` and `find`
+   narrower. Run on Linux, macOS and Windows, since the point is that the walk
+   agrees with `walkdir` everywhere `walkdir` runs.
+3. **Enumeration is confined.** `grep -r`, `cp -r`, `chmod -R` and `find`
    rooted outside the mount must yield **zero entries**, not merely fail to read
    them. *Fails if:* any entry is produced from outside the namespace. The
    existing sweep asserts on exit codes, which this deliberately does not — an
    exit code cannot distinguish "enumerated then refused" from "never
    enumerated", and that distinction is the milestone.
-3. **A symlink loop terminates.** *Fails if:* the walk hangs, or reports an
+4. **A symlink loop terminates.** *Fails if:* the walk hangs, or reports an
    error `uucore::perms`'s existing match arm does not recognize. A hang cannot
    be asserted against directly, so the guard is that the test returns at all —
    the same shape as the FIFO regression test.
-4. **`find` is registered and confined.** *Fails if:* it reads or enumerates
+5. **`find` is registered and confined.** *Fails if:* it reads or enumerates
    outside the mount, or the sweep's absence assertion is left inverted-but-
    unreplaced.
-5. **The fork suites stay green.** `cargo xtask check forks`, all 52.
+6. **The fork suites stay green.** `cargo xtask check forks`, all 52.
    *Fails if:* any upstream test regresses, or a `known-test-failures.txt` entry
    starts passing. This is what catches semantic drift the differential fixture
    did not think to cover.
-6. **`deny.toml` describes the tree, and can say so.** *Fails if:*
+7. **`deny.toml` describes the tree, and can say so.** *Fails if:*
    `unmatched-wrapper` is still a warning, or any `wrappers` entry names a crate
    that is not a real parent. Both halves are needed: the current entry is stale
    *and* the check that should have caught it exits 0.
-7. **Performance is not a cliff.** A walk over a large tree within a stated
+8. **Performance is not a cliff.** A walk over a large tree within a stated
    factor of `walkdir`'s, measured and committed as a baseline. *Fails if:* past
    the threshold. `grep -r` and `find` over a source tree are the realistic
    shapes; per-entry `openat` is the cost this design trades for the anchoring.
@@ -169,7 +203,7 @@ mature and its edge behaviours — error-as-item, ordering under
 `contents_first`, what `skip_current_dir` does after an error, loop reporting —
 are load-bearing for four utilities. Reimplementing them is exactly the
 hand-rolled hardening D3 exists to avoid, and this would be the *second* such
-place after the symlink resolution in `fs.rs`. Gate 1 is the answer, and it is
+place after the symlink resolution in `fs.rs`. Gate 2 is the answer, and it is
 worth building before the walker rather than after.
 
 **The `chown` addition widens the trusted boundary.** `cap-std` has no
@@ -186,7 +220,7 @@ consumer can go back to `walkdir` independently, since the API is mirrored. What
 is not cheaply revertible is `Dir::chown`, and `find`'s registration is a
 one-line change either way.
 
-**Decision rule:** if gate 1 cannot be held — the differential diverges in ways
+**Decision rule:** if gate 2 cannot be held — the differential diverges in ways
 that are not obviously the vfs being *more* correct — stop and reconsider before
 porting consumers. A walker that is subtly different from `walkdir` is worse
 than an honestly unrouted one, because four utilities would then be quietly
