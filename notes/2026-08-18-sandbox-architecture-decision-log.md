@@ -994,6 +994,15 @@ closed with an error naming the exact `--mount` flag. **No blanket approve-all f
 exists** — every `--yes` becomes a copy-pasted line in every pipeline, on exactly
 the machines where the boundary matters most.
 
+**Implemented** as `brush-shell/src/trust.rs`. Two properties worth naming
+because a set comparison gets both wrong by default: *less access* to the same
+directory is narrowing and does not re-ask, and *more* access to it is a
+superset that does; and the store is normalised on record, so a project run
+repeatedly with a narrower grant does not accumulate entries. A store that
+cannot be parsed reads as empty rather than as an error -- the failure direction
+is an extra prompt, where treating it as fatal would let a corrupt file lock a
+user out of their own projects.
+
 ## D30 — `just_executable()` returns `/bin/just`, and recursion works
 
 The idiom exists so a recipe can re-invoke just, which a closed world forbids.
@@ -1023,6 +1032,23 @@ consulted only inside `if self.options.login_shell`
 **`RcLoadBehavior`**. And since `/home/user` is persistent and writable, a hostile
 repo dropping `~/.bashrc` gets execution on every later run — this converts a
 host-scoped persistence vector into a project-scoped one unless rc loading is off.
+
+**Implemented.** `/home/user` is a mount under the user's state directory, keyed
+by the project's name plus an FNV-1a hash of its full path -- readable in the
+state directory, and distinct for two checkouts of one repository. FNV rather
+than the standard library's hasher, which makes no stability guarantee across
+releases: a key that moves on a toolchain upgrade orphans every existing home.
+Rc loading defaults **off** under a policy, per the correction above; `--rcfile`
+opts back in, since that is the user naming a file rather than the project
+supplying one.
+
+**The fail-open half needed one qualification.** "Delete it, do not shadow it"
+is right about the mechanism and wrong about the scope: the compatibility
+harness runs with `HOME` unset and bash resolves `~` through the passwd
+database, so deleting the fallback outright fails two cases. It is removed under
+a policy and kept under identity, where the host *is* the namespace and
+`/etc/passwd` is a path the shell can name. The condition is exactly "is the
+passwd database outside the namespace", which `Shell::is_confined` answers.
 
 ## D32 — The broker authenticates with kernel peer credentials
 
@@ -1353,6 +1379,22 @@ set is therefore enumerated rather than described: on macOS `/System`,
 `/Library`, `/usr`, `/bin`, `/sbin`, `/opt`, `/Applications`, `/Volumes` and
 `/private/etc`, but *not* `/private/tmp`; on Linux `/usr`, `/etc`, `/boot`,
 `/proc`, `/sys`, `/dev`; on Windows `%SystemRoot%` and the program directories.
+
+**Implemented** as `brush-shell/src/discovery.rs`, with the grant in
+`grant.rs` and consent in `trust.rs`; selected by `--project DIR`. The two
+searches are separate as this entry requires, the bound is a predicate on the
+answer applied to every route, and the stop list is enumerated per platform with
+a test asserting directly that no stop swallows a temp directory -- so an edit
+adding `/private` or `/var` fails there rather than in a user's checkout.
+
+**The marker is shadowed, not carved out, because carving is not expressible.**
+Mounting it read-only inside the read-write project does not build:
+`MountTable::build` rejects overlapping host directories precisely so that
+`ln /work/.git/config /work/x` cannot give a read-write name to a read-only
+inode -- the hazard D16 raises against per-path rules. An empty read-only
+directory mounted over it is ordinary mount semantics, keeps the host
+directories disjoint, and leaves the real marker with no name at all, which is
+what this entry actually asks for.
 
 And the home directory is resolved through the same helper the shell uses, not
 through `HOME`. On Windows `HOME` is normally unset — the shell synthesizes it

@@ -133,6 +133,19 @@ pub struct CommandLineArgs {
     #[clap(long = "closed-world", help_heading = HEADING_STANDARD_OPTIONS)]
     pub closed_world: bool,
 
+    /// Confine the shell to a project discovered from this directory (D44).
+    ///
+    /// Walks upward for a source-control root, bounded by `$HOME`, the
+    /// filesystem root and the platform's system trees, and grants the project
+    /// its own tree read-write, a persistent home of its own, and nothing else.
+    /// The source-control marker is shadowed, because git runs what it finds in
+    /// `.git` at the user's next command.
+    ///
+    /// Mutually exclusive with `--mount`, which names a namespace outright
+    /// instead of deriving one.
+    #[clap(long = "project", value_name = "DIR", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub project: Option<PathBuf>,
+
     /// Restrict builtins to a default-deny allowlist (D11).
     ///
     /// A third axis, independent of `--mount` and `--closed-world`: those decide

@@ -13,3 +13,4 @@ mod error_formatter;
 pub mod events;
 pub mod grant;
 mod productinfo;
+pub mod trust;

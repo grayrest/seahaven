@@ -399,9 +399,30 @@ async fn initialize_shell(
     // than after config loading matters: profile and rc scripts are the first
     // filesystem access a shell performs, and they must be subject to the same
     // policy as everything after them.
-    if !args.mounts.is_empty() {
-        let mounts = build_mount_table(&args.mounts)
-            .map_err(|e| brush_interactive::ShellError::from(std::io::Error::other(e)))?;
+    if args.project.is_some() && !args.mounts.is_empty() {
+        return Err(brush_interactive::ShellError::from(std::io::Error::other(
+            "--project derives a namespace and --mount names one; pick one",
+        )));
+    }
+
+    let derived = match &args.project {
+        Some(dir) => Some(
+            derive_project_namespace(dir, args)
+                .map_err(|e| brush_interactive::ShellError::from(std::io::Error::other(e)))?,
+        ),
+        None => None,
+    };
+
+    let mounts = match derived {
+        Some(mounts) => Some(mounts),
+        None if args.mounts.is_empty() => None,
+        None => Some(
+            build_mount_table(&args.mounts)
+                .map_err(|e| brush_interactive::ShellError::from(std::io::Error::other(e)))?,
+        ),
+    };
+
+    if let Some(mounts) = mounts {
         let mut shell = shell_ref.lock().await;
         shell.set_mounts(mounts);
         strip_host_environment(&mut shell);
@@ -433,7 +454,14 @@ async fn initialize_shell(
     };
 
     // Compute desired rc-loading behavior.
-    let rc = if args.no_rc {
+    //
+    // Off by default under a policy (D31). `/home/user` is persistent and
+    // writable, so a hostile repository that drops `~/.bashrc` once gets
+    // execution on every later run -- which converts a host-scoped persistence
+    // vector into a project-scoped one unless rc loading is off. `--rcfile`
+    // still opts back in, because that is the user naming a file rather than
+    // the project supplying one.
+    let rc = if args.no_rc || (is_confined(args) && args.rc_file.is_none()) {
         brush_core::RcLoadBehavior::Skip
     } else if let Some(rc_file) = &args.rc_file {
         brush_core::RcLoadBehavior::LoadCustom(rc_file.clone())
@@ -471,6 +499,77 @@ fn build_mount_table(specs: &[String]) -> Result<brush_vfs::MountTable, String> 
     }
 
     builder.build().map_err(|e| format!("--mount: {e}"))
+}
+
+/// Whether the command line asks for a namespace policy.
+///
+/// Read before the shell exists, so it cannot ask `Shell::is_confined`.
+const fn is_confined(args: &CommandLineArgs) -> bool {
+    args.project.is_some() || !args.mounts.is_empty()
+}
+
+/// Discovers a project and derives the namespace it is granted (D44, D31, D29).
+///
+/// Four steps that are each somebody's decision: find the ceiling, check the
+/// answer against it, derive the grant, and ask consent for anything not
+/// already granted.
+fn derive_project_namespace(
+    dir: &Path,
+    args: &CommandLineArgs,
+) -> Result<brush_vfs::MountTable, String> {
+    let bound = crate::discovery::Bound::platform_default();
+    let ceiling = bound.permits(dir).map_err(|e| e.to_string())?;
+
+    let grant = crate::grant::Grant::derive(&ceiling.dir, &ceiling).map_err(|e| e.to_string())?;
+    let mounts = grant.mount_table().map_err(|e| e.to_string())?;
+
+    let store_path =
+        crate::grant::trust_store_path().ok_or("no state directory for the trust store")?;
+    let mut store = crate::trust::TrustStore::load(&store_path);
+    let request = crate::trust::granted_set(&mounts);
+
+    match store.decide(&request) {
+        crate::trust::Decision::Accept => {}
+        crate::trust::Decision::Ask(excess) => {
+            // D29: no approve-all flag exists, so a run with nowhere to ask
+            // fails and names the flags that would grant it.
+            if !args.is_interactive() {
+                return Err(crate::trust::refusal(&excess));
+            }
+            if !prompt_for_grant(&excess)? {
+                return Err("refused".to_owned());
+            }
+            store.record(request);
+            store
+                .save(&store_path)
+                .map_err(|e| format!("cannot record consent: {e}"))?;
+        }
+    }
+
+    Ok(mounts)
+}
+
+/// Asks the user, on the terminal the launcher still has.
+///
+/// The launcher runs before the sandbox, so it has a terminal where D36 says
+/// the sandbox has none.
+fn prompt_for_grant(excess: &[crate::trust::GrantedMount]) -> Result<bool, String> {
+    use std::io::Write as _;
+
+    let mut err = std::io::stderr();
+    writeln!(err, "This project asks for access you have not granted:")
+        .map_err(|e| e.to_string())?;
+    for mount in excess {
+        writeln!(err, "    {}", mount.as_flag()).map_err(|e| e.to_string())?;
+    }
+    write!(err, "Grant it? [y/N] ").map_err(|e| e.to_string())?;
+    err.flush().map_err(|e| e.to_string())?;
+
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
 }
 
 /// Removes environment variables whose values name the host (D21).

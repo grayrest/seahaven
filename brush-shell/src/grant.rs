@@ -193,6 +193,12 @@ fn launcher_state() -> Result<PathBuf, GrantError> {
     Ok(base.join("brush"))
 }
 
+/// Where consent is recorded (D29).
+#[must_use]
+pub fn trust_store_path() -> Option<PathBuf> {
+    launcher_state().ok().map(|d| d.join("trust.toml"))
+}
+
 /// A stable, readable directory name for a project's home.
 ///
 /// The project's own directory name, so the state directory can be read by a
