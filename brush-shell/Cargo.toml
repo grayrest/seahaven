@@ -52,6 +52,10 @@ name = "brush-landlock-tests"
 path = "tests/landlock_tests.rs"
 harness = false
 
+[[test]]
+name = "brush-confinement-tests"
+path = "tests/confinement_tests.rs"
+
 [[bench]]
 name = "shell"
 path = "benches/shell.rs"

@@ -468,6 +468,46 @@ jobs:
           cargo test -p brush-shell --features landlock-tests \
             --test brush-landlock-tests -- --nocapture
 
+  # Prove confinement is invisible, on every platform the shell runs on.
+  #
+  # The third gate on D4's routing, and the one that covers what the other two
+  # cannot. The clippy ban shows no source line reaches the host outside
+  # forks/UNROUTED.txt, and it is blind to the inherent-method calls D34 puts
+  # outside the codemod -- it read clean while cp -r, mkdir -p, tail and dd were
+  # all broken under a mount. Landlock proves completeness with the kernel, but
+  # only on Linux and only for the in-process shell, so it never reaches a
+  # bundled utility, the D24 child, or the Apple-gated code in the forks.
+  #
+  # Runs on both platforms deliberately: they execute disjoint slices of the
+  # forks -- 108 linux-gated cfg blocks that macOS never runs, twelve files of
+  # Apple-gated code that Linux never runs -- so one platform is not a proxy for
+  # the other.
+  #
+  # This is also the only job that builds experimental-bundled-coreutils. Until
+  # it existed, nothing in CI ran a bundled utility at all.
+  confinement:
+    name: "Confinement differential (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: ["ubuntu-24.04", "macos-latest"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Enable cargo cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Run the confinement differential
+        run: cargo xtask check confinement
+
   # Check for unneeded dependencies.
   check-deps:
     name: "Check for unneeded dependencies"

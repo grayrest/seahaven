@@ -47,6 +47,8 @@ pub enum CheckCommand {
     UucoreFeatures,
     /// Run each fork's own upstream test suite, its health metric (D13).
     Forks,
+    /// Prove confinement is invisible, by differential (D4, D24).
+    Confinement,
 }
 
 /// Run a check command.
@@ -68,6 +70,7 @@ pub fn run(cmd: &CheckCommand, verbose: bool) -> Result<()> {
         CheckCommand::UucorePatch => check_uucore_patch(&sh, verbose),
         CheckCommand::UucoreFeatures => check_uucore_features(&sh, verbose),
         CheckCommand::Forks => check_forks(&sh, verbose),
+        CheckCommand::Confinement => check_confinement(&sh, verbose),
     }
 }
 
@@ -173,6 +176,56 @@ fn lint_args(verbose: bool) -> Vec<&'static str> {
         args.push("--verbose");
     }
     args.extend_from_slice(&["--", "-D", "warnings"]);
+    args
+}
+
+/// Runs the confinement differential: a bundled utility under a restrictive
+/// mount must behave exactly as it does under no policy at all.
+///
+/// The third gate on D4's routing, and the only one that is neither a lint nor
+/// Linux-only. `check lint` proves no *source line* reaches the host outside
+/// `forks/UNROUTED.txt`, and it cannot see the inherent-method calls D34 puts
+/// outside the codemod -- it read clean while `cp -r`, `mkdir -p`, `tail FILE`
+/// and `dd` were all broken under a mount. Landlock (D41) proves completeness
+/// with the kernel, but only on Linux and only for the in-process shell, so it
+/// never runs on the platform this was developed on and never reaches the
+/// bundled utilities or the D24 child.
+///
+/// Needs `experimental-bundled-coreutils`, which is why it is its own check
+/// rather than a line in `check lint`: no other gate builds that feature, and
+/// until this one did, nothing in CI exercised a bundled utility at all.
+fn check_confinement(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Running the confinement differential...");
+    let args = confinement_args(verbose);
+    if verbose {
+        eprintln!("Running: cargo {}", args.join(" "));
+    }
+    cmd!(sh, "cargo {args...}")
+        .run()
+        .context("Confinement differential failed")?;
+    eprintln!("Confinement differential passed.");
+    Ok(())
+}
+
+/// The exact argv the differential runs, and the only place it is assembled.
+///
+/// The feature is load-bearing twice over: without it the bundled utilities are
+/// not in the binary, and the test's own `cfg` compiles it away to nothing --
+/// so a dropped feature flag would leave this gate reporting success while
+/// running zero cases.
+fn confinement_args(verbose: bool) -> Vec<&'static str> {
+    let mut args = vec![
+        "test",
+        "-p",
+        "brush-shell",
+        "--features",
+        "experimental",
+        "--test",
+        "brush-confinement-tests",
+    ];
+    if verbose {
+        args.push("--verbose");
+    }
     args
 }
 
