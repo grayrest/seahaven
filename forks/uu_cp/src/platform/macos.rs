@@ -107,11 +107,13 @@ pub(crate) fn copy_on_write(
             let mut src_file =
                 brush_vfs::ambient::open(source).map_err(|e| CpError::IoErrContext(e, context.to_owned()))?;
             let mode = 0o622 & !get_umask();
-            let mut dst_file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .mode(mode)
-                .open(dest)
+            // FLATLAND DIVERGENCE: routed. The mode is carried through, since
+            // it is the point: the destination is created 0o622-minus-umask so
+            // it is not readable while the copy is in flight.
+            let mut dst_file = brush_vfs::ambient::open_with(
+                dest,
+                brush_vfs::OpenMode::write().with_truncate(false).with_mode(mode),
+            )
                 .map_err(|e| {
                     CpError::IoErrContext(
                         e,

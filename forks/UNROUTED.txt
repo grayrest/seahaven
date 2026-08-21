@@ -10,25 +10,22 @@
 # deliberately absent: they move for reasons that have nothing to do with
 # confinement, and a key that churns is a key nobody maintains.
 #
-# This is a **backlog with a ratchet**, not an acceptance. Every line below the
-# first section is a call that asks the host what it should be asking the
-# namespace, in the same way `uu_ln`'s `symlink` did before anyone noticed it
-# writing outside the mount. Routing one means deleting or decrementing its
-# line here.
+# **Every line below is deliberate.** The backlog this file was created to hold
+# -- 133 calls that asked the host what they should have asked the namespace --
+# is empty. That is the state to keep it in: a new entry here should be argued
+# for in the same terms as the ones already listed, not added because a lint
+# went red.
 #
-# To regenerate after routing something, run the fork lint and read the error:
-# it names the exact line to change.
-
 # ---------------------------------------------------------------------------
-# Deliberate, and not to be "fixed".
+# Build scripts run at build time on the host, before any namespace exists, and
+# cannot see `brush_vfs` at all. Routing `sed/build.rs` simply did not compile,
+# which is the honest answer.
 #
-# Build scripts run at build time on the host, before any namespace exists;
-# they are not sandboxed code.
-#
-# `uu_df` reads the *host mount table* -- `filesystem.rs` canonicalizes mount
-# device names and `df.rs` resolves those same names -- which is host
-# introspection, not namespace access. `uucore`'s `fsext` is the same class.
-# `df` is not confined, by decision; see RESIDUAL-PATCHES.md.
+# `uu_df` reads the *host mount table*: `filesystem.rs` canonicalizes mount
+# device names and `df.rs` resolves those same names. `/dev/disk1s1` is host
+# introspection, not namespace access, and routing it would make the symlink
+# resolution never fire. `df` is not confined, by decision; `uucore`'s `fsext`
+# is the same class. See RESIDUAL-PATCHES.md.
 #
 # `uucore::perms` is deliberately left on `walkdir`: unreachable from anything
 # bundled, and porting it needs a routed `chown` that does not exist.
@@ -40,12 +37,17 @@
 #
 # `mkfifo`, `mknod`, `utimensat`, `UnixListener::bind` and a child's
 # `Command::current_dir` have no facade equivalent. The ban list says "not
-# expressible in the namespace yet" for each, and means it.
+# expressible in the namespace yet" for each, and means it. Each is a real hole
+# for the day something needs it, recorded rather than papered over: a FIFO or
+# device node created through `cp -a` or `mv` across mounts lands on the host,
+# and `find -exec` runs its child in the host's working directory.
 #
 # `tempfile` and `env::temp_dir` are scratch space, which D38 places outside
 # the namespace on purpose.
 # ---------------------------------------------------------------------------
+
 findutils/src/find/matchers/exec.rs std::process::Command::current_dir 2
+sed/build.rs std::fs::File::create 1
 uu_cp/src/cp.rs nix::sys::stat::mknod 1
 uu_cp/src/cp.rs nix::unistd::mkfifo 1
 uu_cp/src/cp.rs std::os::unix::net::UnixListener::bind 1
@@ -61,39 +63,6 @@ uu_sort/src/sort.rs std::env::temp_dir 1
 uu_sort/src/tmp_dir.rs tempfile::Builder::tempdir_in 1
 uu_tac/src/tac.rs tempfile::tempfile 1
 uu_touch/src/touch.rs rustix::fs::utimensat 1
-
-# ---------------------------------------------------------------------------
-# The backlog. Each of these is a call that should go through
-# `brush_vfs::ambient` and does not yet.
-# ---------------------------------------------------------------------------
-findutils/src/updatedb/mod.rs std::fs::OpenOptions::new 1
-findutils/src/updatedb/mod.rs std::fs::OpenOptions::open 1
-sed/build.rs std::fs::File::create 1
-uu_cp/src/copydir.rs std::fs::DirBuilder::create 1
-uu_cp/src/copydir.rs std::fs::DirBuilder::new 1
-uu_cp/src/cp.rs std::fs::OpenOptions::new 1
-uu_cp/src/cp.rs std::fs::OpenOptions::open 1
-uu_cp/src/platform/macos.rs std::fs::OpenOptions::new 1
-uu_cp/src/platform/macos.rs std::fs::OpenOptions::open 1
-uu_dd/src/dd.rs std::fs::OpenOptions::new 4
-uu_dd/src/dd.rs std::fs::OpenOptions::open 4
-uu_mkdir/src/mkdir.rs std::fs::DirBuilder::create 1
-uu_mkdir/src/mkdir.rs std::fs::DirBuilder::new 1
-uu_shred/src/shred.rs std::fs::OpenOptions::new 2
-uu_shred/src/shred.rs std::fs::OpenOptions::open 2
-uu_sort/src/sort.rs std::fs::OpenOptions::new 1
-uu_sort/src/sort.rs std::fs::OpenOptions::open 1
-uu_split/src/platform/unix.rs std::fs::OpenOptions::new 3
-uu_split/src/platform/unix.rs std::fs::OpenOptions::open 3
-uu_tail/src/follow/watch.rs std::path::Path::symlink_metadata 1
-uu_tail/src/paths.rs std::path::Path::is_dir 1
-uu_tail/src/tail.rs std::fs::OpenOptions::new 1
-uu_tail/src/tail.rs std::fs::OpenOptions::open 1
-uu_tail/src/tail.rs std::path::Path::metadata 1
-uu_touch/src/touch.rs std::fs::OpenOptions::new 2
-uu_touch/src/touch.rs std::fs::OpenOptions::open 2
-uu_truncate/src/truncate.rs std::fs::OpenOptions::new 1
-uu_truncate/src/truncate.rs std::fs::OpenOptions::open 1
 uucore/build.rs std::fs::File::create 1
 uucore/build.rs std::fs::read_dir 3
 uucore/build.rs std::fs::read_to_string 3

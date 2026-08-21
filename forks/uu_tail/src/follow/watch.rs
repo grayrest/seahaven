@@ -320,8 +320,7 @@ impl Observer {
                     // silently followed to its target. GNU treats such a
                     // replacement as untailable.
                     let replaced_by_symlink = self.follow_name()
-                        && event_path
-                            .symlink_metadata()
+                        && brush_vfs::ambient::symlink_metadata(event_path)
                             .is_ok_and(|m| m.file_type().is_symlink());
                     let is_tailable = !replaced_by_symlink && new_md.is_tailable();
                     let pd = self.files.get(event_path);

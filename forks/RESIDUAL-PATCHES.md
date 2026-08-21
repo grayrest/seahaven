@@ -11,7 +11,9 @@ a fork, and treat growth in this list as the signal it is meant to be.
 
 The forks are linted by `cargo xtask check lint`, against the record in
 `UNROUTED.txt`; the entries below that describe a *deliberate* unrouted call are
-listed there too, so the gate and this file cannot disagree about them.
+listed there too, so the gate and this file cannot disagree about them. That
+record's backlog is empty: every call site in a fork that reaches the host is
+now one of the deliberate ones it names.
 
 Only the first loss was caught by `cargo xtask check forks`. The second took all
 three `uucore` entries below with it and that gate stayed green, because it runs

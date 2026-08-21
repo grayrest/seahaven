@@ -445,11 +445,10 @@ pub fn touch(files: &[InputFile], opts: &Options) -> Result<(), TouchError> {
 /// [`touch_file`] and this open, the open follows it but must not zero the
 /// symlink's target. Matches GNU touch (issue #10019).
 fn create_without_truncate(path: &Path) -> std::io::Result<fs::File> {
-    OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
+    // FLATLAND DIVERGENCE: routed, keeping the no-truncate the doc comment
+    // above explains: an attacker who swaps `path` for a symlink between the
+    // metadata check and this open must not get its target zeroed.
+    brush_vfs::ambient::open_with(path, brush_vfs::OpenMode::write().with_truncate(false))
 }
 
 /// Create or update the timestamp for a single file.
@@ -692,11 +691,15 @@ fn set_times_by_path(path: &Path, atime: FileTime, mtime: FileTime) -> UResult<(
 /// access and modification times on the open FD (not by path), which also
 /// triggers `IN_CLOSE_WRITE` on Linux when the FD is closed.
 fn try_futimens_via_write_fd(path: &Path, atime: FileTime, mtime: FileTime) -> std::io::Result<()> {
-    let file = OpenOptions::new()
-        .write(true)
-        // Avoid blocking on special files (e.g. FIFOs) before we can inspect metadata.
-        .custom_flags(O_NONBLOCK)
-        .open(path)?;
+    // FLATLAND DIVERGENCE: routed. `O_NONBLOCK` is the facade's own
+    // `with_nonblock`, so the comment above still holds.
+    let file = brush_vfs::ambient::open_with(
+        path,
+        brush_vfs::OpenMode::write()
+            .with_create(false)
+            .with_truncate(false)
+            .with_nonblock(true),
+    )?;
 
     let timestamps = Timestamps {
         last_access: rustix::fs::Timespec {

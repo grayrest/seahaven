@@ -2435,11 +2435,13 @@ fn handle_copy_mode(
             }
         }
         CopyMode::AttrOnly => {
-            OpenOptions::new()
-                .write(true)
-                .truncate(false)
-                .create(true)
-                .open(dest)
+            // FLATLAND DIVERGENCE: routed. `--attributes-only` creates the
+            // destination if absent and must not truncate one that exists --
+            // the whole point is that the contents are left alone.
+            brush_vfs::ambient::open_with(
+                dest,
+                brush_vfs::OpenMode::write().with_truncate(false),
+            )
                 .map_err(|e| {
                     CpError::IoErrContext(
                         e,

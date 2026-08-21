@@ -222,7 +222,7 @@ impl PathExtTail for Path {
 
     /// Return true if `path` has an existing parent directory
     fn has_active_parent(&self) -> bool {
-        self.parent().is_some_and(Self::is_dir)
+        self.parent().is_some_and(brush_vfs::ambient::is_dir)
     }
 
     /// Return true if `path` is a file type that can be tailed

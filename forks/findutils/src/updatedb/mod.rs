@@ -324,11 +324,9 @@ fn do_updatedb(args: &[&str]) -> UResult<()> {
     find_main(find_args.as_slice(), &deps);
 
     let output_path = config.output;
-    let file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open(&output_path)
+    // FLATLAND DIVERGENCE: routed. Create-and-truncate is exactly what the
+    // facade's `write()` mode is.
+    let file = brush_vfs::ambient::open_with(&output_path, brush_vfs::OpenMode::write())
         .map_err(|e| {
             USimpleError::new(
                 1,

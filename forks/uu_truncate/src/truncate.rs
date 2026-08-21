@@ -210,7 +210,15 @@ pub fn uu_app() -> Command {
 /// If the file could not be opened, or there was a problem setting the
 /// size of the file.
 fn do_file_truncate(filename: &Path, create: bool, size: u64) -> UResult<()> {
-    match OpenOptions::new().write(true).create(create).open(filename) {
+    // FLATLAND DIVERGENCE: routed. `write()` is the facade's create-and-
+    // truncate mode, and truncation is turned back off because this function
+    // sets the length itself -- truncating first would defeat `-s +N`.
+    match brush_vfs::ambient::open_with(
+        filename,
+        brush_vfs::OpenMode::write()
+            .with_truncate(false)
+            .with_create(create),
+    ) {
         Ok(file) => file.set_len(size),
         Err(e) if e.kind() == ErrorKind::NotFound && !create => Ok(()),
         Err(e) => Err(e),

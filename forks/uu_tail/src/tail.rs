@@ -122,10 +122,7 @@ fn tail_file(
     observer: &mut Observer,
     offset: u64,
 ) -> UResult<()> {
-    if path
-        .metadata()
-        .is_err_and(|e| e.kind() == ErrorKind::NotFound)
-    {
+    if brush_vfs::ambient::metadata(path).is_err_and(|e| e.kind() == ErrorKind::NotFound) {
         set_exit_code(1);
         show_error!(
             "{}",
@@ -232,10 +229,12 @@ fn open_file(path: &Path, use_nonblock_for_fifo: bool) -> io::Result<File> {
     let is_fifo = brush_vfs::ambient::metadata(path).is_ok_and(|m| m.file_type().is_fifo());
 
     if is_fifo && use_nonblock_for_fifo {
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(path)?;
+        // FLATLAND DIVERGENCE: routed. `O_NONBLOCK` is the facade's own
+        // `with_nonblock`; the flag is cleared just below exactly as before.
+        let file = brush_vfs::ambient::open_with(
+            path,
+            brush_vfs::OpenMode::read().with_nonblock(true),
+        )?;
 
         // Clear O_NONBLOCK so reads block normally
         let flags = fcntl_getfl(&file)?;

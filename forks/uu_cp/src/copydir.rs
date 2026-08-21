@@ -664,8 +664,13 @@ fn build_dir(
     options: &Options,
     copy_attributes_from: Option<&Path>,
 ) -> CopyResult<()> {
-    let mut builder = fs::DirBuilder::new();
-    builder.recursive(recursive);
+    // FLATLAND DIVERGENCE: routed. See `uu_mkdir` for why the mode has to be
+    // part of the create rather than a `chmod` after it: this function excludes
+    // permission bits *until the copy is finished* precisely so the destination
+    // is never readable before it is ready, and a chmod-after would reopen the
+    // window it exists to close. `recursive` and `mode` are carried through to
+    // the facade instead of onto a `DirBuilder`.
+    let mut dir_mode: Option<u32> = None;
 
     // To prevent unauthorized access before the folder is ready,
     // exclude certain permissions if ownership or special mode bits
@@ -698,9 +703,13 @@ fn build_dir(
         // Always keep the owner write bit so we can copy files into the directory.
         // The correct final permissions are applied afterward by dirs_needing_permissions.
         let mode = (!excluded_perms & 0o777) | 0o200; // mask to permission bits, always keep owner write
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, mode);
+        dir_mode = Some(mode);
     }
 
-    builder.create(path)?;
+    match dir_mode {
+        Some(mode) => brush_vfs::ambient::create_dir_with_mode(path, mode, recursive)?,
+        None if recursive => brush_vfs::ambient::create_dir_all(path)?,
+        None => brush_vfs::ambient::create_dir(path)?,
+    }
     Ok(())
 }

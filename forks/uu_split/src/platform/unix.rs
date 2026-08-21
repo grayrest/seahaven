@@ -140,9 +140,12 @@ pub fn instantiate_current_writer(
                 create_or_truncate_output_file(input, filename)?
             } else {
                 // re-open file that we previously created to append to it
-                let file = std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(Path::new(filename))
+                // FLATLAND DIVERGENCE: routed. Appending to a file this run
+                // already created, so it must not create one itself.
+                let file = brush_vfs::ambient::open_with(
+                    Path::new(filename),
+                    brush_vfs::OpenMode::append().with_create(false),
+                )
                     .map_err(|_| {
                         Error::other(translate!(
                             "split-error-unable-to-reopen-file",
@@ -168,16 +171,23 @@ pub fn instantiate_current_writer(
 }
 
 fn create_or_truncate_output_file(input: &OsStr, filename: &OsStr) -> Result<std::fs::File> {
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(Path::new(filename))
-    {
+    // FLATLAND DIVERGENCE: routed. `create_new` is what makes the
+    // already-exists branch below reachable, so it is carried through.
+    match brush_vfs::ambient::open_with(
+        Path::new(filename),
+        brush_vfs::OpenMode::write()
+            .with_truncate(false)
+            .with_create_new(true),
+    ) {
         Ok(file) => Ok(file),
         Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-            let file = std::fs::OpenOptions::new()
-                .write(true)
-                .open(Path::new(filename))
+            // FLATLAND DIVERGENCE: routed. The file is known to exist here.
+            let file = brush_vfs::ambient::open_with(
+                Path::new(filename),
+                brush_vfs::OpenMode::write()
+                    .with_create(false)
+                    .with_truncate(false),
+            )
                 .map_err(|e| open_file_error(filename, e))?;
 
             if input_and_output_refer_to_same_file(input, &file) {

@@ -233,11 +233,12 @@ impl Output {
             let path = Path::new(name.as_ref());
             // This is different from `File::create()` because we don't truncate the output yet.
             // This allows using the output file as an input file.
-            #[allow(clippy::suspicious_open_options)]
-            let file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(path)
+            // FLATLAND DIVERGENCE: routed, keeping the deliberate absence of
+            // truncation the comment above describes.
+            let file = brush_vfs::ambient::open_with(
+                path,
+                brush_vfs::OpenMode::write().with_truncate(false),
+            )
                 .map_err(|e| SortError::OpenFailed {
                     path: path.to_owned(),
                     error: e,

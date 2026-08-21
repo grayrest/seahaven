@@ -370,15 +370,18 @@ impl<'a> Input<'a> {
     /// Instantiate this struct with the named file as a source.
     fn new_file(filename: &Path, settings: &'a Settings) -> UResult<Self> {
         let src = {
-            let mut opts = OpenOptions::new();
-            opts.read(true);
+            // FLATLAND DIVERGENCE: routed. `iflag=`/`oflag=` are literal
+            // `open(2)` flags named by the user, so they are carried through
+            // rather than dropped -- see `OpenMode::with_custom_flags`.
+            #[allow(unused_mut)]
+            let mut mode = brush_vfs::OpenMode::read();
 
             #[cfg(any(target_os = "linux", target_os = "android"))]
             if let Some(libc_flags) = make_linux_iflags(&settings.iflags) {
-                opts.custom_flags(libc_flags);
+                mode = mode.with_custom_flags(libc_flags);
             }
 
-            opts.open(filename).map_err_context(
+            brush_vfs::ambient::open_with(filename, mode).map_err_context(
                 || translate!("dd-error-failed-to-open", "path" => filename.quote()),
             )?
         };
@@ -393,11 +396,14 @@ impl<'a> Input<'a> {
     /// Instantiate this struct with the named pipe as a source.
     #[cfg(unix)]
     fn new_fifo(filename: &Path, settings: &'a Settings) -> UResult<Self> {
-        let mut opts = OpenOptions::new();
-        opts.read(true);
+        // FLATLAND DIVERGENCE: routed, as the other three opens here.
+        #[allow(unused_mut)]
+        let mut mode = brush_vfs::OpenMode::read();
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        opts.custom_flags(make_linux_iflags(&settings.iflags).unwrap_or(0));
-        let mut src = Source::Fifo(opts.open(filename)?);
+        {
+            mode = mode.with_custom_flags(make_linux_iflags(&settings.iflags).unwrap_or(0));
+        }
+        let mut src = Source::Fifo(brush_vfs::ambient::open_with(filename, mode)?);
         if settings.skip > 0 {
             src.skip(settings.skip, settings.ibs)?;
         }
@@ -819,18 +825,21 @@ impl<'a> Output<'a> {
     /// Instantiate this struct with the named file as a destination.
     fn new_file(filename: &Path, settings: &'a Settings) -> UResult<Self> {
         fn open_dst(path: &Path, cflags: &OConvFlags, oflags: &OFlags) -> Result<File, io::Error> {
-            let mut opts = OpenOptions::new();
-            opts.write(true)
-                .create(!cflags.nocreat)
-                .create_new(cflags.excl)
-                .append(oflags.append);
+            // FLATLAND DIVERGENCE: routed, as the source side. No truncate:
+            // `dd` positions and overwrites rather than emptying the file.
+            #[allow(unused_mut)]
+            let mut mode = brush_vfs::OpenMode::write()
+                .with_truncate(false)
+                .with_create(!cflags.nocreat)
+                .with_create_new(cflags.excl)
+                .with_append(oflags.append);
 
             #[cfg(any(target_os = "linux", target_os = "android"))]
             if let Some(libc_flags) = make_linux_oflags(oflags) {
-                opts.custom_flags(libc_flags);
+                mode = mode.with_custom_flags(libc_flags);
             }
 
-            opts.open(path)
+            brush_vfs::ambient::open_with(path, mode)
         }
 
         let dst = open_dst(filename, &settings.oconv, &settings.oflags).map_err_context(
@@ -901,14 +910,18 @@ impl<'a> Output<'a> {
         }
         // At this point, we know there is at least one block to write
         // to the output, so we open the file for writing.
-        let mut opts = OpenOptions::new();
-        opts.write(true)
-            .create(!settings.oconv.nocreat)
-            .create_new(settings.oconv.excl)
-            .append(settings.oflags.append);
+        // FLATLAND DIVERGENCE: routed, as the other two.
+        #[allow(unused_mut)]
+        let mut mode = brush_vfs::OpenMode::write()
+            .with_truncate(false)
+            .with_create(!settings.oconv.nocreat)
+            .with_create_new(settings.oconv.excl)
+            .with_append(settings.oflags.append);
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        opts.custom_flags(make_linux_oflags(&settings.oflags).unwrap_or(0));
-        let dst = Dest::Fifo(opts.open(filename)?);
+        {
+            mode = mode.with_custom_flags(make_linux_oflags(&settings.oflags).unwrap_or(0));
+        }
+        let dst = Dest::Fifo(brush_vfs::ambient::open_with(filename, mode)?);
         Ok(Self { dst, settings })
     }
 

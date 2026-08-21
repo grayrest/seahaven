@@ -118,6 +118,9 @@ pub struct OpenMode {
     nonblock: bool,
     /// Permission bits for a newly created inode.
     mode: Option<u32>,
+    /// Extra raw `open(2)` flags, for a caller whose flags are its feature.
+    #[cfg(unix)]
+    custom_flags: i32,
 }
 
 impl OpenMode {
@@ -134,6 +137,8 @@ impl OpenMode {
             nofollow: false,
             nonblock: false,
             mode: None,
+            #[cfg(unix)]
+            custom_flags: 0,
         }
     }
 
@@ -150,6 +155,8 @@ impl OpenMode {
             nofollow: false,
             nonblock: false,
             mode: None,
+            #[cfg(unix)]
+            custom_flags: 0,
         }
     }
 
@@ -166,6 +173,8 @@ impl OpenMode {
             nofollow: false,
             nonblock: false,
             mode: None,
+            #[cfg(unix)]
+            custom_flags: 0,
         }
     }
 
@@ -231,9 +240,31 @@ impl OpenMode {
     /// For opens that exist only to `fstat` the descriptor. An ordinary
     /// `cat fifo` must still block until a writer appears, so this is *not* set
     /// on the general read path -- only where the file is never read.
+    ///
+    /// Public because the forks need it for exactly that: `tail` opens a FIFO
+    /// non-blocking and clears the flag once it holds the descriptor, and
+    /// `touch` opens one only to set times on the fd.
     #[must_use]
-    pub(crate) const fn with_nonblock(mut self, yes: bool) -> Self {
+    pub const fn with_nonblock(mut self, yes: bool) -> Self {
         self.nonblock = yes;
+        self
+    }
+
+    /// Extra raw `open(2)` flags, for a caller whose flags are its feature.
+    ///
+    /// `dd`'s `iflag=`/`oflag=` are literally this: `O_DIRECT`, `O_SYNC`,
+    /// `O_NOATIME` and friends, named by the user on the command line. They are
+    /// not options the facade could enumerate -- they are the syscall's own
+    /// flag word -- and dropping them would silently turn `dd oflag=sync` into
+    /// an ordinary buffered write.
+    ///
+    /// Confinement is unaffected: these reach `cap-std` *after* the path has
+    /// been resolved inside the namespace, so they change how a file is opened
+    /// and never which file that is.
+    #[cfg(unix)]
+    #[must_use]
+    pub const fn with_custom_flags(mut self, flags: i32) -> Self {
+        self.custom_flags = flags;
         self
     }
 
@@ -275,8 +306,12 @@ impl OpenMode {
             // `nofollow` is deliberately *not* forwarded as a flag: see
             // `Vfs::open_with`, which answers it during resolution because a
             // final symlink is followed before any descriptor exists.
+            let mut extra = self.custom_flags;
             if self.nonblock {
-                options.custom_flags(libc::O_NONBLOCK);
+                extra |= libc::O_NONBLOCK;
+            }
+            if extra != 0 {
+                options.custom_flags(extra);
             }
             if let Some(mode) = self.mode {
                 options.mode(mode);
@@ -1086,6 +1121,39 @@ impl Vfs {
         self.at(path, false, |located| {
             Self::require_writable(located)?;
             located.mount.dir().create_dir(&located.relative)
+        })
+    }
+
+    /// Creates a directory with an explicit mode, optionally creating parents.
+    /// The target for a `std::fs::DirBuilder` chain.
+    ///
+    /// `create_dir_all` cannot express this: `mkdir -m 700 d` and `cp -r`'s
+    /// "exclude these permission bits until the copy is finished" both need the
+    /// mode to be part of the `mkdirat(2)` call, not a `chmod` after it, or
+    /// there is a window where the directory is more permissive than asked for.
+    /// That window is the whole reason those callers use `DirBuilder`.
+    ///
+    /// # Errors
+    ///
+    /// If the path is unmounted, the mount is read-only, or the create fails.
+    #[cfg(unix)]
+    pub fn create_dir_with_mode(
+        &self,
+        path: &VirtualPath,
+        mode: u32,
+        recursive: bool,
+    ) -> std::io::Result<()> {
+        use cap_std::fs::DirBuilderExt as _;
+
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            let mut builder = cap_std::fs::DirBuilder::new();
+            builder.recursive(recursive);
+            builder.mode(mode);
+            located
+                .mount
+                .dir()
+                .create_dir_with(&located.relative, &builder)
         })
     }
 

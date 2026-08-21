@@ -271,11 +271,14 @@ fn create_dir_with_mode(
     mode: u32,
     shaped_umask: rustix::fs::Mode,
 ) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-
     let _guard = UmaskGuard::set(shaped_umask);
 
-    std::fs::DirBuilder::new().mode(mode).create(path)
+    // FLATLAND DIVERGENCE: routed. `DirBuilder` is the one directory create the
+    // facade's `create_dir_all` cannot express, because the mode has to be part
+    // of the `mkdirat(2)` call rather than a `chmod` after it -- otherwise
+    // `mkdir -m 700` has a window where the directory is world-readable, which
+    // is the whole reason this uses `DirBuilder`.
+    brush_vfs::ambient::create_dir_with_mode(path, mode, false)
 }
 
 #[cfg(not(unix))]

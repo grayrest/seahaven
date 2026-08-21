@@ -376,6 +376,16 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     with(path, |vfs, p| vfs.create_dir_all(p))
 }
 
+/// Creates a directory with an explicit mode, optionally creating parents.
+/// The rewrite target for a `std::fs::DirBuilder` chain.
+///
+/// # Errors
+/// As [`create_dir_all`], and if the mode cannot be applied.
+#[cfg(unix)]
+pub fn create_dir_with_mode(path: impl AsRef<Path>, mode: u32, recursive: bool) -> io::Result<()> {
+    with(path, |vfs, p| vfs.create_dir_with_mode(p, mode, recursive))
+}
+
 /// Removes a file. Mirrors `std::fs::remove_file`.
 ///
 /// # Errors
@@ -661,6 +671,58 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         uninstall();
         assert!(absolute("note").is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn create_dir_with_mode_applies_the_mode_at_creation() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().unwrap();
+        install_over(tmp.path());
+
+        create_dir_with_mode("/work/tight", 0o700, false).unwrap();
+        let mode = metadata("/work/tight").unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o700,
+            "the mode must be the one asked for, not the umask's"
+        );
+
+        // The recursive form makes parents, as `DirBuilder::recursive` does.
+        create_dir_with_mode("/work/a/b/c", 0o755, true).unwrap();
+        assert!(is_dir("/work/a/b/c"));
+        // And the non-recursive form still refuses a missing parent.
+        assert!(create_dir_with_mode("/work/x/y", 0o755, false).is_err());
+        uninstall();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn custom_open_flags_reach_the_open() {
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().unwrap();
+        install_over(tmp.path());
+        write("/work/f", b"x").unwrap();
+
+        // `O_NONBLOCK` is observable on the descriptor afterwards, which is how
+        // `dd`'s `iflag=` and `tail`'s FIFO open can be trusted to carry.
+        let file = open_with(
+            "/work/f",
+            crate::fs::OpenMode::read().with_custom_flags(libc::O_NONBLOCK),
+        )
+        .unwrap();
+        // SAFETY: `fcntl(F_GETFL)` only reads the descriptor's flag word.
+        let flags = unsafe { libc::fcntl(std::os::fd::AsRawFd::as_raw_fd(&file), libc::F_GETFL) };
+        assert!(flags >= 0, "fcntl failed");
+        assert!(
+            flags & libc::O_NONBLOCK != 0,
+            "O_NONBLOCK did not reach the open"
+        );
+        uninstall();
     }
 
     #[test]

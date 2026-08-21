@@ -699,10 +699,15 @@ fn wipe_file(
     }
 
     let total_passes = pass_sequence.len();
-    let mut file = OpenOptions::new()
-        .write(true)
-        .truncate(false)
-        .open(path)
+    // FLATLAND DIVERGENCE: routed. Neither creating nor truncating: `shred`
+    // overwrites an existing file in place, and either would destroy the very
+    // contents it is here to overwrite.
+    let mut file = brush_vfs::ambient::open_with(
+        path,
+        brush_vfs::OpenMode::write()
+            .with_create(false)
+            .with_truncate(false),
+    )
         .map_err_context(
             || translate!("shred-failed-to-open-for-writing", "file" => path.maybe_quote()),
         )?;
@@ -810,9 +815,13 @@ fn wipe_name(orig_path: &Path, verbose: bool, remove_method: RemoveMethod) -> Pa
 
                     if remove_method == RemoveMethod::WipeSync {
                         // Sync every file rename
-                        let new_file = OpenOptions::new()
-                            .write(true)
-                            .open(new_path.clone())
+                        // FLATLAND DIVERGENCE: routed, as above.
+                        let new_file = brush_vfs::ambient::open_with(
+                            new_path.clone(),
+                            brush_vfs::OpenMode::write()
+                                .with_create(false)
+                                .with_truncate(false),
+                        )
                             .expect("Failed to open renamed file for syncing");
                         new_file.sync_all().expect("Failed to sync renamed file");
                     }
