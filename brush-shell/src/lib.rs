@@ -11,4 +11,5 @@ pub mod discovery;
 pub mod entry;
 mod error_formatter;
 pub mod events;
+pub mod grant;
 mod productinfo;
