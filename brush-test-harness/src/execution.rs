@@ -26,6 +26,13 @@ pub struct RunResult {
     pub duration: std::time::Duration,
 }
 
+/// How many times a pty case will re-spawn a shell that never started.
+///
+/// See `run_shell`: the fork-plus-controlling-terminal setup loses a race
+/// against the rest of the runner about one time in ten, and a shell that never
+/// wrote a byte has not disagreed with anything.
+const PTY_SPAWN_ATTEMPTS: usize = 3;
+
 impl TestCase {
     /// Runs this test case with the given shell configuration.
     pub async fn run_shell(
@@ -33,15 +40,38 @@ impl TestCase {
         shell_config: &ShellConfig,
         working_dir: &assert_fs::TempDir,
     ) -> Result<RunResult> {
-        let test_cmd = self.create_command_for_shell(shell_config, working_dir);
+        if !self.pty {
+            let test_cmd = self.create_command_for_shell(shell_config, working_dir);
+            return self.run_command_with_stdin(test_cmd).await;
+        }
 
-        let result = if self.pty {
-            self.run_command_with_pty(test_cmd).await?
-        } else {
-            self.run_command_with_stdin(test_cmd).await?
-        };
+        // Retry a pty attempt that never got the shell running.
+        //
+        // Even serialized against each other, `Session::spawn`'s fork-plus-
+        // controlling-terminal dance loses about one run in ten against the
+        // other 31 threads' spawns: the shell comes up with no pty of its own
+        // and dies having written *nothing*, so the first `#expect-prompt`
+        // waits out its timeout on a prompt that was never coming. Both shells
+        // are exposed, and it was usually the oracle -- which fails the case on
+        // output neither side produced.
+        //
+        // The signature is narrow on purpose: not one byte was read. A shell
+        // that started and then misbehaved has written its prompt, so this
+        // cannot mask a real difference between `bash` and `brush`; it can only
+        // re-run a spawn that did not happen.
+        let mut result = None;
+        for _ in 0..PTY_SPAWN_ATTEMPTS {
+            let test_cmd = self.create_command_for_shell(shell_config, working_dir);
+            let candidate = self.run_command_with_pty(test_cmd).await?;
+            let never_started =
+                candidate.stdout.is_empty() && candidate.stderr.starts_with("failed to expect");
+            result = Some(candidate);
+            if !never_started {
+                break;
+            }
+        }
 
-        Ok(result)
+        result.ok_or_else(|| anyhow::anyhow!("no pty attempt ran"))
     }
 
     /// Creates the test files in the given temporary directory.
@@ -210,6 +240,26 @@ impl TestCase {
         use crate::util::{make_expectrl_output_readable, read_expectrl_log};
         use expectrl::{Expect, process::Termios as _};
 
+        // One pty case at a time, across the whole runner.
+        //
+        // `Session::spawn` forks, allocates a pty and makes the child a session
+        // leader with the pty as its controlling terminal. Doing that from a
+        // 32-thread runtime while other threads are forking too is a race the
+        // *oracle* loses: `bash` comes up with no controlling terminal, takes
+        // SIGHUP, and dies having printed nothing, so the case fails on a
+        // prompt that was never going to appear. Measured: the case flakes
+        // roughly one run in six alongside others and zero times in 25 runs on
+        // its own.
+        //
+        // Nine cases, so serializing them costs almost nothing. A plain
+        // `std::sync::Mutex` because this function never awaits -- see the
+        // `unused_async` above -- and poisoning is not interesting here, since
+        // a panicking pty case has already failed the run.
+        static PTY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _pty_guard = PTY_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         let mut log = Vec::new();
         let writer = std::io::Cursor::new(&mut log);
 
@@ -291,6 +341,20 @@ impl TestCase {
     #[expect(clippy::unused_async)]
     #[allow(unused_mut, reason = "only mutated on some platforms")]
     async fn run_command_with_stdin(&self, mut cmd: std::process::Command) -> Result<RunResult> {
+        // The highest descriptor the child could have inherited, read in the
+        // *parent* so the child's hook does no allocation and makes no
+        // non-async-signal-safe call. Capped: the limit is often 2^63-1 under
+        // `RLIMIT_INFINITY`, and closing that many would never return.
+        #[cfg(unix)]
+        let max_fd: i32 = {
+            const CAP: u64 = 4096;
+            nix::sys::resource::getrlimit(nix::sys::resource::Resource::RLIMIT_NOFILE)
+                .map_or(CAP, |(soft, _)| soft)
+                .min(CAP)
+                .try_into()
+                .unwrap_or(i32::MAX)
+        };
+
         // SAFETY:
         // To avoid bash trying to directly access /dev/tty and generate tty-related signals,
         // we create a new session for the child process. The standard library has a setsid()
@@ -299,12 +363,33 @@ impl TestCase {
         // around what can be safely done in that context. However, calling setsid() is generally
         // considered safe as it doesn't allocate memory or perform complex operations to forked
         // state.
+        //
+        // The close loop below is safe for the same reason and then some: `close(2)` is
+        // async-signal-safe and the bound was computed before the fork. It runs *after* the
+        // standard library has dup2'd the child's stdio onto 0, 1 and 2, so those survive.
+        //
+        // Why close at all: a shell under test must not see the test runner's descriptors.
+        // `mapfile -u 99` is supposed to fail because fd 99 is closed, and bash returns 0 when
+        // it happens to be open -- so whether that case passed depended on the runner's
+        // descriptor table at the moment of the spawn, which is why it failed once in a
+        // loaded `cargo test --workspace` and never in isolation. Every case that names a
+        // descriptor has the same exposure; this closes the class rather than that one case.
+        #[cfg(unix)]
+        let hook = move || {
+            let _ = nix::unistd::setsid();
+            for fd in 3..max_fd {
+                // SAFETY: `close(2)` is async-signal-safe, and closing a
+                // descriptor that is not open is a no-op `EBADF`.
+                unsafe { libc::close(fd) };
+            }
+            Ok(())
+        };
+
+        // SAFETY: as described above -- the hook only calls `setsid(2)` and
+        // `close(2)`, both async-signal-safe, and allocates nothing.
         #[cfg(unix)]
         unsafe {
-            cmd.pre_exec(|| {
-                let _ = nix::unistd::setsid();
-                Ok(())
-            })
+            cmd.pre_exec(hook)
         };
 
         let mut test_cmd = assert_cmd::Command::from_std(cmd);

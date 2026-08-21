@@ -55,6 +55,18 @@ cases:
       echo hello | var=value
 
   - name: "printf broken pipe returns 141 in PIPESTATUS"
+    # The range has to put the payload past *any* pipe buffer, or the case has
+    # two legal outcomes and picks one by scheduling. `{0..10000}` is 48,896
+    # bytes, which fits a 64KiB pipe whole: if `x=1` has not exited yet when
+    # `printf` writes, the write completes and `printf` exits 0, and the case
+    # fails with `PIPESTATUS: 0 0` -- which it did, once, in a loaded
+    # `cargo test --workspace` and never in isolation. Measured with the reader
+    # held open: at 48,896 bytes `printf` exits 0, at 108,896 it exits 141.
+    #
+    # `{0..20000}` is 108,896 bytes, so `printf` cannot finish whatever the
+    # reader does: it blocks with the pipe full and is still blocked when the
+    # reader exits. SIGPIPE is then the only outcome, by construction rather
+    # than by timing.
     stdin: |
-      printf '%s\n' {0..10000} | x=1
+      printf '%s\n' {0..20000} | x=1
       echo "Last: $?, PIPESTATUS: ${PIPESTATUS[*]}"

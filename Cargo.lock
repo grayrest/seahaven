@@ -709,6 +709,7 @@ dependencies = [
  "indent",
  "insta",
  "junit-report",
+ "libc",
  "nix 0.31.3",
  "os-release",
  "regex",
