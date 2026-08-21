@@ -327,11 +327,35 @@ Two walls the batch exposed, each an owner decision before the remaining ~95:
    the workspace. `df` had been passing the confinement sweep incidentally,
    which is worse than failing it, so it is excluded by name with its reason.
 
-   **`findutils`, `grep` and `sed` are not started, and are a different kind of
-   work.** They are not dependencies of this workspace — forking them means
-   first deciding to bundle them, which is new dependencies, new feature flags
-   and new registry entries rather than routing. The coreutils work says
-   nothing about whether a recipe runner needs them.
+   **`findutils`, `grep` and `sed` are done too, and they were a different kind
+   of work.** They are not dependencies of this workspace, so forking them began
+   with a decision to bundle — new dependencies, new feature flags, new registry
+   entries — rather than with routing. `findutils` supplies two utilities,
+   `find` and `xargs`. The fork set is 52 crates and all 52 upstream suites are
+   green.
+
+   **`find` was held back, and the reason generalises.** It is a *traversal*,
+   not an open: routing every open it makes would still have let it enumerate
+   the host tree, because the walk itself was `walkdir`, which takes a path and
+   descends by path. Bundling it before that was fixed would have shipped a
+   utility whose confinement claim was false in the one way that matters most
+   for a directory tree. So `find` stayed out of the registry until
+   `brush_vfs::walk` existed (`plans/2026-08-21-vfs-walker.md`) — a walk that
+   descends by directory capability and yields virtual paths — and `grep -r` and
+   `cp -r` moved onto it in the same change. The confinement sweep asserts that
+   a `find` rooted outside the mount enumerates **nothing**, which a non-zero
+   exit code alone would not have shown.
+
+   **One `walkdir` consumer is left, deliberately.** `uucore::perms`'s `-R` walk
+   needs `chown`, which `cap-std` does not provide and the namespace therefore
+   cannot express. It is unreachable from every bundled utility — `chown`,
+   `chgrp` and `chmod` are not in the registry — so it is dead code rather than
+   a hole, and it is named as such in `deny.toml` and
+   `forks/RESIDUAL-PATCHES.md` rather than exempted silently. `notify`
+   (`uu_tail -f`) remains the one capability this entry already declared
+   unexpressible.
+
+   **D4 is complete.**
 
 ## D5 — Re-exec now; in-process is a different project
 
