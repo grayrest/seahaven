@@ -63,7 +63,9 @@ impl<'a> Searcher<'a> {
 
     /// Search the given path.
     pub fn process_path(&mut self, lb: &mut LineBuffer, path: &Path) -> ControlFlow<()> {
-        if path.is_dir() {
+        // FLATLAND DIVERGENCE: routed, for the reason given at the other
+        // `is_dir` site in `lib.rs`.
+        if brush_vfs::ambient::metadata(path).is_ok_and(|m| m.is_dir()) {
             match self.config.directory_mode {
                 DirectoryMode::Skip => ControlFlow::Continue(()),
                 // Yield the directory path itself; `process_file` will

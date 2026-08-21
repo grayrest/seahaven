@@ -64,6 +64,20 @@ them.
 `findutils/known-test-failures.txt` records the one upstream test that diverges
 under routing, macOS only.
 
+## `uu_grep` — two `Path::is_dir` calls, routed by hand
+
+`lib.rs` and `searcher.rs` each ask `Path::is_dir()` before deciding whether to
+recurse. It is an *inherent* method, which D34's signature-preservation rule
+puts outside what the codemod can see, so both asked the **host**. Under a
+namespace the host answers "no" for every virtual path, and `grep -r /work`
+degraded to reading a directory as a file: `grep: /work: No such file or
+directory`.
+
+Invisible until D24 gave a bundled child a real namespace to be wrong about --
+before that, the child ran under identity and no virtual path resolved for it
+either, so the two failures looked the same. Both sites now go through
+`brush_vfs::ambient::metadata`.
+
 ## `uucore::perms` — left on `walkdir`, deliberately
 
 `dive_into` is the last walk in the fork set that is not routed, and it stays

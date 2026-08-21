@@ -344,7 +344,15 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         match file_args {
             [] => directory_mode == DirectoryMode::Recurse,
             [one] if one.to_str() != Some("-") => {
-                directory_mode == DirectoryMode::Recurse && Path::new(one).is_dir()
+                // FLATLAND DIVERGENCE: routed. `Path::is_dir` is an inherent
+                // method, which the codemod cannot see (D34's
+                // signature-preservation rule bounds it to free functions), so
+                // upstream asks the *host* whether this is a directory. Under a
+                // namespace the answer is no for every virtual path, and
+                // `grep -r /work` silently degrades to reading a directory as a
+                // file.
+                directory_mode == DirectoryMode::Recurse
+                    && brush_vfs::ambient::metadata(one).is_ok_and(|m| m.is_dir())
             }
             [_] => false,
             _ => true,
