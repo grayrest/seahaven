@@ -402,7 +402,10 @@ async fn initialize_shell(
     if !args.mounts.is_empty() {
         let mounts = build_mount_table(&args.mounts)
             .map_err(|e| brush_interactive::ShellError::from(std::io::Error::other(e)))?;
-        shell_ref.lock().await.set_mounts(mounts);
+        let mut shell = shell_ref.lock().await;
+        shell.set_mounts(mounts);
+        strip_host_environment(&mut shell);
+        drop(shell);
     }
 
     // Seal external execution independently of the namespace (D2). A launcher
@@ -468,6 +471,27 @@ fn build_mount_table(specs: &[String]) -> Result<brush_vfs::MountTable, String> 
     }
 
     builder.build().map_err(|e| format!("--mount: {e}"))
+}
+
+/// Removes environment variables whose values name the host (D21).
+///
+/// D21 puts `SHELL` in the *synthesized from policy, never inherited* class,
+/// and D6 lists it among the leaks against its own claim that host paths are
+/// unnameable. It is inherited from the invoking process before any policy
+/// exists, so the removal belongs here, where the policy is installed: this is
+/// the launcher's act, not the shell's.
+///
+/// Only `SHELL` today. The rest of D21's synthesized class -- `PATH`, `HOME`,
+/// `TMPDIR`, `HOSTNAME`, the locale variables, `TZ`, `UID` -- needs values to
+/// synthesize *from*, which is D21's and D22's own work. Removing them here
+/// without that would trade a leak for a shell that cannot find anything.
+///
+/// Nothing is synthesized in its place: `SHELL` should name this shell as the
+/// namespace sees it, and until D22 builds `/bin` from the builtin registry
+/// there is no such path. Unset is the truthful interim; a made-up value would
+/// name something that does not resolve.
+fn strip_host_environment(shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>) {
+    shell.env_mut().unset("SHELL").ok();
 }
 
 /// The builtin allowlist (D11) selected by the command line.

@@ -154,11 +154,24 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// Returns the shell's current home directory, if available.
     pub(crate) fn home_dir(&self) -> Option<PathBuf> {
         if let Some(home) = self.env.get_str("HOME", self) {
-            Some(PathBuf::from(home.to_string()))
-        } else {
-            // HOME isn't set, so let's sort it out ourselves.
-            users::get_current_user_home_dir()
+            return Some(PathBuf::from(home.to_string()));
         }
+        // D31 calls the fallback below "a fail-open leak where everything else
+        // fails closed", and under a namespace it is: `~` answers with a host
+        // path the namespace does not contain and cannot reach. So a confined
+        // shell gets `None`, which every caller already handles -- `~` becomes
+        // an error, history goes unwritten, rc files are not looked for.
+        //
+        // Under identity it is not a leak at all. The host *is* the namespace
+        // there, `/etc/passwd` is a path the shell can name, and bash resolves
+        // `~` this way -- which two compatibility cases assert, because the
+        // harness runs with `HOME` unset. The condition is therefore exactly
+        // "is the passwd database outside the namespace", which is what
+        // `is_confined` answers.
+        if self.is_confined() {
+            return None;
+        }
+        users::get_current_user_home_dir()
     }
 
     /// Finds executables in the shell's current default PATH, matching the given glob pattern.

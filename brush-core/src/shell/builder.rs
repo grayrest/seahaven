@@ -265,6 +265,10 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
             external_execution: crate::execpolicy::ExternalExecution::Sealed,
             // And registers no builtins, for the same reason.
             builtin_policy: crate::builtinpolicy::BuiltinPolicy::Sealed,
+            // A shell with the fail-closed empty namespace is as confined as it
+            // gets, so this reports the confined answer rather than the
+            // identity one.
+            namespace_installed: true,
             env: env::ShellEnvironment::default(),
             funcs: functions::FunctionEnv::default(),
             options: options::RuntimeOptions::default(),

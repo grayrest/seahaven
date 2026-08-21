@@ -549,7 +549,10 @@ impl Spec {
                     }
                 }
                 CompleteAction::Group => {
-                    for group_name in users::get_all_groups()? {
+                    // The host's group database is not the namespace's, and a
+                    // namespace has none (D6). Answering nothing is what a
+                    // completion source with no candidates already does.
+                    for group_name in confined_or(shell, users::get_all_groups)? {
                         if group_name.starts_with(token) {
                             candidates.push(group_name);
                         }
@@ -564,8 +567,10 @@ impl Spec {
                     }
                 }
                 CompleteAction::HostName => {
+                    // The machine's name is host layout, which D6 lists among
+                    // the leaks against its own unnameability claim.
                     // N.B. We only retrieve one hostname.
-                    if let Ok(name) = sys::network::get_hostname() {
+                    if let Ok(name) = confined_none(shell, sys::network::get_hostname) {
                         let name = name.to_string_lossy();
                         if name.starts_with(token) {
                             candidates.push(name.to_string());
@@ -634,7 +639,8 @@ impl Spec {
                     }
                 }
                 CompleteAction::User => {
-                    for user_name in users::get_all_users()? {
+                    // As for groups: no user database, so no users.
+                    for user_name in confined_or(shell, users::get_all_users)? {
                         if user_name.starts_with(token) {
                             candidates.push(user_name);
                         }
@@ -1256,6 +1262,37 @@ async fn get_file_completions(
     completions.sort();
     completions.dedup();
     completions
+}
+
+/// Runs a host-database lookup, or yields nothing under a namespace policy.
+///
+/// The user and group databases are the host's, and a namespace has neither
+/// (D6). Yielding an empty set rather than erroring is deliberate: a completion
+/// source with no candidates is an ordinary state that every caller here
+/// already handles, where an error would surface as a broken `compgen`.
+///
+/// **Not gated on the builtin allowlist**, though that would close these too by
+/// denying `compgen`. A leak closed by a list whose purpose is something else
+/// reopens the day the list changes.
+fn confined_or<SE: crate::extensions::ShellExtensions, T>(
+    shell: &crate::Shell<SE>,
+    lookup: impl FnOnce() -> Result<Vec<T>, error::Error>,
+) -> Result<Vec<T>, error::Error> {
+    if shell.is_confined() {
+        return Ok(Vec::new());
+    }
+    lookup()
+}
+
+/// As [`confined_or`], for a lookup yielding a single value.
+fn confined_none<SE: crate::extensions::ShellExtensions, T, E>(
+    shell: &crate::Shell<SE>,
+    lookup: impl FnOnce() -> Result<T, E>,
+) -> Result<T, ()> {
+    if shell.is_confined() {
+        return Err(());
+    }
+    lookup().map_err(|_| ())
 }
 
 fn get_external_command_completions(

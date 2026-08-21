@@ -1047,6 +1047,17 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                 }
             }
             brush_parser::word::TildeExpr::UserHome(username) => {
+                // `echo ~root` printing `/var/root` is one of the leaks D6 lists
+                // against its own claim that host paths are unnameable. A
+                // namespace has no user database, so under a policy there is no
+                // such user -- which bash already has a rendering for: the
+                // expression is left as written.
+                //
+                // Unconfined, the host *is* the namespace and bash's behaviour
+                // is kept.
+                if self.shell.is_confined() {
+                    return Ok(Cow::Owned(std::format!("~{username}")));
+                }
                 Ok(sys::users::get_user_home_dir(username).map_or_else(
                     || Cow::Owned(std::format!("~{username}")),
                     |p| Cow::Owned(p.to_string_lossy().to_string()),

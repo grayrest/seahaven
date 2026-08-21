@@ -96,6 +96,14 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
     #[cfg_attr(feature = "serde", serde(skip))]
     builtin_policy: crate::builtinpolicy::BuiltinPolicy,
 
+    /// Whether a launcher has replaced the namespace this shell was built with.
+    ///
+    /// Skipped by serde alongside `session`, which it describes: a
+    /// deserialized shell has the fail-closed empty namespace, and a caller
+    /// must reinstall a policy before this means anything.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    namespace_installed: bool,
+
     /// The shell environment, containing shell variables.
     env: ShellEnvironment,
 
@@ -183,6 +191,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
             session: self.session.clone(),
             external_execution: self.external_execution.clone(),
             builtin_policy: self.builtin_policy.clone(),
+            namespace_installed: self.namespace_installed,
             env: self.env.clone(),
             funcs: self.funcs.clone(),
             options: self.options.clone(),
@@ -250,6 +259,24 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
         &self.builtin_policy
     }
 
+    /// Whether this shell is running under a namespace a launcher installed.
+    ///
+    /// The closest thing the shell has to "am I sandboxed" on the *namespace*
+    /// axis, as [`BuiltinPolicy::is_open`] is on the builtin axis. It answers
+    /// the question the host-layout leaks D6 lists actually need: `~user` and
+    /// `$SHELL` may consult the host's user database only where the host *is*
+    /// the namespace.
+    ///
+    /// False for the identity namespace a shell is constructed with; true after
+    /// [`set_mounts`](Self::set_mounts), **including when what was installed
+    /// happens to be identity**. That errs toward more confinement rather than
+    /// less, which is the direction a wrong answer here should fail.
+    ///
+    /// [`BuiltinPolicy::is_open`]: crate::builtinpolicy::BuiltinPolicy::is_open
+    pub const fn is_confined(&self) -> bool {
+        self.namespace_installed
+    }
+
     /// Installs the builtin allowlist, pruning anything already registered that
     /// it does not admit.
     ///
@@ -280,6 +307,7 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     /// the previous namespace names nothing in the new one.
     pub fn set_mounts(&mut self, mounts: brush_vfs::MountTable) {
         self.session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
+        self.namespace_installed = true;
 
         // A fresh session starts at the virtual root, so the working directory
         // the shell was started in -- a host path, and one the new policy very
@@ -361,6 +389,8 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
                 builtins
             },
             builtin_policy: options.builtin_policy,
+            // Identity, until a launcher says otherwise.
+            namespace_installed: false,
             parser_impl: options.parser,
             key_bindings: options.key_bindings,
             ..Self::default()

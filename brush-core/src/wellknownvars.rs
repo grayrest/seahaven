@@ -468,7 +468,13 @@ pub(crate) fn init_well_known_vars(
     )?;
 
     // SHELL (if not already set)
-    if !shell.env().is_set("SHELL") {
+    //
+    // Left unset under a policy (D6): its value is the *host's* record of this
+    // user's login shell, a host path the namespace does not contain and cannot
+    // resolve. Naming one anyway is the leak; inventing a virtual one is worse,
+    // because it would name a path that does not resolve either. D22's
+    // synthesized `/bin` is where a truthful answer will come from.
+    if !shell.env().is_set("SHELL") && !shell.is_confined() {
         // Per docs, this should be the user's default login shell -- not the current shell.
         if let Some(default_shell) = sys::users::get_current_user_default_shell() {
             shell.env_mut().set_global(
