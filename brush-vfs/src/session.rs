@@ -45,6 +45,12 @@ impl Session {
         }
     }
 
+    /// The namespace, as a handle a walk can hold for its whole traversal.
+    #[must_use]
+    pub fn vfs_arc(&self) -> Arc<Vfs> {
+        Arc::clone(&self.vfs)
+    }
+
     /// The namespace this session resolves against.
     #[must_use]
     pub fn vfs(&self) -> &Vfs {

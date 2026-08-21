@@ -55,7 +55,7 @@ const MAX_SYMLINK_HOPS: usize = 40;
 
 /// Message identifying a symlink loop, since the matching `ErrorKind` is
 /// unstable.
-const SYMLINK_LOOP_MESSAGE: &str = "too many levels of symbolic links";
+pub(crate) const SYMLINK_LOOP_MESSAGE: &str = "too many levels of symbolic links";
 
 /// `ELOOP`, which the kernel reports when it gives up following links itself.
 ///

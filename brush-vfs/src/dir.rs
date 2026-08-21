@@ -72,6 +72,47 @@ fn component(name: &str) -> std::io::Result<&str> {
     Ok(name)
 }
 
+/// What makes two directory entries the same file, and two files the same
+/// filesystem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileIdentity {
+    /// The filesystem the file lives on.
+    pub device: u64,
+    /// The file within that filesystem.
+    pub file: u64,
+}
+
+#[cfg(unix)]
+fn identity_of(file: &std::fs::File) -> std::io::Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let md = file.metadata()?;
+    Ok(FileIdentity {
+        device: md.dev(),
+        file: md.ino(),
+    })
+}
+
+#[cfg(windows)]
+fn identity_of(file: &std::fs::File) -> std::io::Result<FileIdentity> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: `file` is a live open handle for the duration of the call, and
+    // `info` is a properly sized, writable `BY_HANDLE_FILE_INFORMATION`.
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &raw mut info) };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(FileIdentity {
+        device: u64::from(info.dwVolumeSerialNumber),
+        file: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    })
+}
+
 fn read_only() -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
@@ -204,6 +245,21 @@ impl Dir {
         crate::fs::symlink_metadata_at(&self.inner, std::ffi::OsStr::new(name))
     }
 
+    /// This directory's identity, for loop detection and same-filesystem tests.
+    ///
+    /// `(device, file)` — `(dev, ino)` on Unix, and volume serial plus file
+    /// index on Windows, where `std::fs::Metadata`'s accessors for those are
+    /// still nightly-only, so it goes to `GetFileInformationByHandle` directly.
+    /// Taken from the open handle rather than a path, so it cannot describe
+    /// something other than the directory this capability names.
+    ///
+    /// # Errors
+    ///
+    /// If the handle cannot be duplicated or interrogated.
+    pub fn identity(&self) -> std::io::Result<FileIdentity> {
+        identity_of(&self.inner.try_clone()?.into_std_file())
+    }
+
     /// Metadata for this directory itself.
     ///
     /// # Errors
@@ -219,7 +275,13 @@ impl Dir {
         component(name).is_ok_and(|n| self.inner.exists(n))
     }
 
-    /// The names of this directory's entries, excluding `.` and `..`.
+    /// The names of this directory's entries, excluding `.` and `..`, in the
+    /// order the filesystem reported them.
+    ///
+    /// Deliberately unsorted: a recursive walk has to yield what `readdir`
+    /// yielded, because that is what the utilities built on one expect, and
+    /// sorting here would hide the real order from a caller that wants it.
+    /// Callers wanting a stable order sort themselves.
     ///
     /// Names rather than `DirEntry`s: a `cap-std` entry can be asked for its
     /// path, and handing one out would defeat the point.
@@ -233,7 +295,6 @@ impl Dir {
             let entry = entry?;
             names.push(entry.file_name().to_string_lossy().into_owned());
         }
-        names.sort();
         Ok(names)
     }
 
@@ -350,7 +411,9 @@ mod tests {
         let root = vfs.open_dir(&vp("/work")).unwrap();
         let sub = root.open_dir("sub").unwrap();
 
-        assert_eq!(sub.entry_names().unwrap(), vec!["f.txt".to_string()]);
+        let mut names = sub.entry_names().unwrap();
+        names.sort();
+        assert_eq!(names, vec!["f.txt".to_string()]);
         assert_eq!(sub.metadata("f.txt").unwrap().len(), 5);
         assert!(sub.self_metadata().unwrap().is_dir());
     }

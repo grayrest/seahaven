@@ -9,6 +9,16 @@
 //! open regardless of the session; that it does not is the routing.
 
 #![cfg(feature = "coreutils.cat")]
+#![expect(
+    clippy::expect_used,
+    clippy::disallowed_methods,
+    clippy::tests_outside_test_module,
+    reason = "clippy's allow-unwrap-in-tests reaches `#[test]` bodies but not the \
+              helpers beside them, and an integration test crate is not a \
+              `cfg(test)` module, so every test here reads as outside one. A \
+              failed fixture should abort the test rather than be handled, and \
+              the fixture tree is built on the host, which is the point."
+)]
 
 use std::ffi::OsString;
 use std::sync::{Arc, Mutex};

@@ -151,6 +151,24 @@ pub fn open_dir_fd(path: impl AsRef<Path>, follow: bool) -> io::Result<std::os::
     .map(crate::dir::Dir::into_owned_fd_for_at_traversal)
 }
 
+/// A recursive walk rooted at `path`. The rewrite target for `WalkDir::new`.
+///
+/// Infallible like `WalkDir::new`, and for the same reason: a failure to resolve
+/// the root surfaces as the iterator's first item, so a call site needs no `?`
+/// the original did not have. See [`crate::walk`].
+pub fn walk(path: impl AsRef<Path>) -> crate::walk::Walk {
+    let Ok(session) = current() else {
+        return crate::walk::Walk::failed(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "no vfs session is installed; filesystem access is not permitted",
+        ));
+    };
+    match resolve(&session, path) {
+        Ok(root) => crate::walk::Walk::rooted(session.vfs_arc(), root),
+        Err(e) => crate::walk::Walk::failed(e),
+    }
+}
+
 // -- Opening ---------------------------------------------------------------
 
 /// Opens a file for reading. The rewrite target for `File::open(path)`.

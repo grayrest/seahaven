@@ -18,6 +18,7 @@ pub mod fs;
 pub mod mount;
 pub mod path;
 pub mod session;
+pub mod walk;
 
 pub use fs::{AccessModes, FileFacts, OpenMode, Vfs};
 pub use mount::{Access, Mount, MountError, MountTable};

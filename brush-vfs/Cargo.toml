@@ -34,7 +34,14 @@ libc = "0.2.184"
 # `FILE_FLAG_OPEN_REPARSE_POINT`; `FILE_FLAG_BACKUP_SEMANTICS` is what lets a
 # directory be opened at all. Only the two constants are needed.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59.0", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# The differential gate: the walk is required to agree with `walkdir` entry for
+# entry over the same tree under the identity policy. Reimplementing a mature
+# traversal is the risk this milestone carries, so the reference implementation
+# is a test dependency rather than an argument.
+walkdir = "2.5.0"
+# The fixture needs a FIFO, which std cannot create.
+libc = "0.2.184"
