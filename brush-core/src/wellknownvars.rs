@@ -28,6 +28,20 @@ pub(crate) fn inherit_env_vars(
         if let Some(func_name) = k.strip_prefix("BASH_FUNC_")
             && let Some(func_name) = func_name.strip_suffix("%%")
         {
+            // Shellshock's shape: an ancestor that controls the environment
+            // controls what code this shell defines. A sandboxed shell's
+            // environment is not something it can vouch for, so the definition
+            // is dropped rather than parsed (D11). The variable is dropped with
+            // it -- an exported function that did not become a function is not
+            // an ordinary variable a script should be able to read back.
+            //
+            // Gated on the builtin policy because it is the shell's only
+            // "am I sandboxed" question today; under an open policy the bash
+            // behaviour is kept, which is what the compatibility suite runs.
+            if !shell.builtin_policy().is_open() {
+                continue;
+            }
+
             // Intentionally best-effort; don't fail out of the shell if we can't
             // parse an incoming function.
             if shell.define_func_from_str(func_name, v.as_str()).is_ok()

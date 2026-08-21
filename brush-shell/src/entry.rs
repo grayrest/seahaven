@@ -470,6 +470,23 @@ fn build_mount_table(specs: &[String]) -> Result<brush_vfs::MountTable, String> 
     builder.build().map_err(|e| format!("--mount: {e}"))
 }
 
+/// The builtin allowlist (D11) selected by the command line.
+///
+/// A third axis beside `--mount` and `--closed-world`. The bundled utilities
+/// are folded in here rather than in the list itself because which of them
+/// exist is a build-time question -- the registry is assembled from Cargo
+/// features -- and a hard-coded copy of it would rot silently in the direction
+/// that leaves a shell unable to run `cat`.
+fn builtin_policy(args: &CommandLineArgs) -> brush_core::BuiltinPolicy {
+    if !args.restrict_builtins {
+        return brush_core::BuiltinPolicy::Open;
+    }
+    let bundled: Vec<String> = bundled::registry()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default();
+    crate::builtinallowlist::policy(&bundled, &args.allowed_builtins, &args.denied_builtins)
+}
+
 /// Instantiates a shell from command-line arguments. Does *not* run any code in the shell.
 ///
 /// # Arguments
@@ -482,7 +499,7 @@ async fn instantiate_shell(
 ) -> Result<BrushShell, brush_interactive::ShellError> {
     #[cfg(feature = "experimental-load")]
     let mut shell = if let Some(load_file) = &args.load_file {
-        instantiate_shell_from_file(load_file.as_path())?
+        instantiate_shell_from_file(load_file.as_path(), args)?
     } else {
         instantiate_shell_from_args(args, cli_args).await?
     };
@@ -501,6 +518,7 @@ async fn instantiate_shell(
 #[cfg(feature = "experimental-load")]
 fn instantiate_shell_from_file(
     file_path: &Path,
+    args: &CommandLineArgs,
 ) -> Result<BrushShell, brush_interactive::ShellError> {
     // Before any shell exists, so there is no namespace to resolve in: this
     // reads the shell that is about to exist.
@@ -511,6 +529,13 @@ fn instantiate_shell_from_file(
     let file = std::fs::File::open(file_path)?;
     let mut shell: BrushShell = serde_json::from_reader(file)
         .map_err(|e| brush_interactive::ShellError::IoError(std::io::Error::other(e)))?;
+
+    // Before any registration: a deserialized shell fails closed, so with no
+    // policy installed the loop below would register nothing at all. This is
+    // the route D11 names -- the registry does not survive serialization, so
+    // whatever the saved shell was allowed is re-derived from the command line
+    // rather than read back from disk.
+    shell.set_builtin_policy(builtin_policy(args));
 
     // NOTE: We need to manually register builtins because we can't serialize/deserialize them.
     // TODO(serde): we should consider whether we could/should at least track *which* are enabled.
@@ -631,6 +656,7 @@ async fn instantiate_shell_from_args(
         .disable_pathname_expansion(args.disable_pathname_expansion)
         .verbose(args.verbose)
         .parser(parser_impl)
+        .builtin_policy(builtin_policy(args))
         .error_formatter(new_error_behavior(args))
         .shell_version(env!("CARGO_PKG_VERSION").to_string());
 

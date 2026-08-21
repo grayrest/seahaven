@@ -87,6 +87,15 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
     #[cfg_attr(feature = "serde", serde(skip))]
     external_execution: crate::execpolicy::ExternalExecution,
 
+    /// The default-deny builtin allowlist (D11).
+    ///
+    /// Skipped by serde for the same reason as the two policies above: the
+    /// registry it governs is itself `serde(skip)`, so a policy that survived
+    /// the round trip would describe a registry that did not. A deserialized
+    /// shell fails closed (`Sealed`) and a caller must reinstall a policy.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    builtin_policy: crate::builtinpolicy::BuiltinPolicy,
+
     /// The shell environment, containing shell variables.
     env: ShellEnvironment,
 
@@ -173,6 +182,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
             working_dir: self.working_dir.clone(),
             session: self.session.clone(),
             external_execution: self.external_execution.clone(),
+            builtin_policy: self.builtin_policy.clone(),
             env: self.env.clone(),
             funcs: self.funcs.clone(),
             options: self.options.clone(),
@@ -233,6 +243,25 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     /// The closed-world policy governing external process execution (D2).
     pub(crate) const fn external_execution(&self) -> &crate::execpolicy::ExternalExecution {
         &self.external_execution
+    }
+
+    /// The default-deny builtin allowlist (D11).
+    pub const fn builtin_policy(&self) -> &crate::builtinpolicy::BuiltinPolicy {
+        &self.builtin_policy
+    }
+
+    /// Installs the builtin allowlist, pruning anything already registered that
+    /// it does not admit.
+    ///
+    /// Pruning is the whole point. Enforcement happens at *registration*, so a
+    /// policy installed after the registry was filled would otherwise be a
+    /// no-op -- and a silent one, indistinguishable from success under an open
+    /// policy where every deny branch is unreachable anyway. Callers that can
+    /// set the policy before building (the builder's `builtin_policy`) should;
+    /// this exists so that the ones that cannot are still correct.
+    pub fn set_builtin_policy(&mut self, policy: crate::builtinpolicy::BuiltinPolicy) {
+        self.builtins.retain(|name, _| policy.admits(name));
+        self.builtin_policy = policy;
     }
 
     /// Installs the closed-world execution policy.
@@ -322,7 +351,16 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
             // The identity namespace is an open world: behave as an ordinary
             // bash until a launcher installs a closed-world policy.
             external_execution: crate::execpolicy::ExternalExecution::Open,
-            builtins: options.builtins,
+            // Filtered here rather than trusted from the builder: `CreateOptions`
+            // collects registrations from several extension traits, and the
+            // registry must not contain a denied name for even the length of a
+            // constructor.
+            builtins: {
+                let mut builtins = options.builtins;
+                builtins.retain(|name, _| options.builtin_policy.admits(name));
+                builtins
+            },
+            builtin_policy: options.builtin_policy,
             parser_impl: options.parser,
             key_bindings: options.key_bindings,
             ..Self::default()

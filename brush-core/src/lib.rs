@@ -3,6 +3,7 @@
 
 pub mod arithmetic;
 mod braceexpansion;
+pub mod builtinpolicy;
 pub mod builtins;
 pub mod callstack;
 pub mod commands;
@@ -52,6 +53,7 @@ pub mod parser {
     };
 }
 
+pub use builtinpolicy::BuiltinPolicy;
 pub use commands::{CommandArg, ExecutionContext};
 pub use error::{BuiltinError, Error, ErrorKind};
 pub use execpolicy::{ExternalExecution, TrustedLauncher};

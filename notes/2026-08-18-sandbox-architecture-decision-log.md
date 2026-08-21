@@ -468,6 +468,40 @@ and five forked projects.
 (`brush-shell/src/entry.rs:451`), so a per-policy disable would be reset on the far
 side of D24's broker. It must be a policy value inside the session blob.
 
+**Corrected again, and this is the sharper reason.** The registry already
+carries a `disabled` flag, honoured at every dispatch site — and `enable NAME`
+clears it from inside the shell. Measured: `enable -n kill` blocks both `kill`
+and `builtin kill`, then `enable kill` restores it and the host process dies. So
+the flag is reset twice over, once by a script and once by a round trip, and
+the conclusion is not "guard `enable`" — that is the enumerated kill list this
+entry rejects — but that **a denied builtin must not be in the registry at
+all**.
+
+**Implemented** as `BuiltinPolicy` (`brush-core/src/builtinpolicy.rs`), enforced
+at *registration* rather than dispatch, which is why it is small: the three
+dispatch reads and the seven listing readers all ask the registry, and a name
+that is not in it is uniformly "not a shell builtin". Selected by
+`--restrict-builtins`, a separate axis from `--mount` and `--closed-world`;
+`--allow-builtin` and `--deny-builtin` adjust the list without a rebuild. The
+default admits 36 of 63 shell builtins plus every bundled utility.
+
+**Both escapes this entry names are fixed, and neither by the allowlist.** They
+were reproduced against the shipped binary under `--mount` and `--closed-world`
+first — the `sleep` died, the injected function ran. A recipe runner needs
+`kill`, so `kill` is on the list and its bare-PID form is now resolved through
+the job table; `BASH_FUNC_*` is not a builtin at all, so it is dropped
+separately. Both ask `BuiltinPolicy::is_open()`, which is the closest thing the
+shell has to "am I sandboxed" and belongs on D24's session object instead.
+
+**Two limits worth stating.** D2's predicate had to grow the dispatched utility
+name: `<launcher> --invoke-bundled NAME` runs in a fresh process reading the
+*process-global* bundled registry, so a shell-side allowlist alone is routed
+around by composing the dispatch directly. And denying a builtin without a
+closed world **promotes** it — the name falls through to an external lookup, so
+a denied `find` becomes the host's `/usr/bin/find`. `--restrict-builtins` is
+only meaningful alongside `--closed-world`, which is asserted in both directions
+rather than left as a reader's assumption.
+
 ## D12 — Strict virtual path grammar carries cross-platform parity
 
 cap-std is kernel-enforced on Linux (`openat2(RESOLVE_BENEATH)`) and FreeBSD, and

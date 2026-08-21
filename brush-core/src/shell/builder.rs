@@ -143,6 +143,23 @@ pub struct CreateOptions<SE: extensions::ShellExtensions = extensions::DefaultSh
     /// are assigned *after* inherited or well-known variables are set (when applicable).
     #[builder(field)]
     pub vars: HashMap<String, ShellVariable>,
+    /// The default-deny builtin allowlist (D11), applied to `builtins` when the
+    /// shell is constructed.
+    ///
+    /// Set here rather than only through [`Shell::set_builtin_policy`] because
+    /// the policy is read during construction -- `BASH_FUNC_*` inheritance asks
+    /// it -- so a policy installed afterwards would arrive too late for that
+    /// decision even though it would still prune the registry.
+    ///
+    /// Defaults to [`BuiltinPolicy::Open`], not to the type's own fail-closed
+    /// default: a builder with nothing said about builtins is an ordinary
+    /// bash, which is what every existing consumer expects and what the
+    /// compatibility suite runs.
+    ///
+    /// [`Shell::set_builtin_policy`]: crate::Shell::set_builtin_policy
+    /// [`BuiltinPolicy::Open`]: crate::builtinpolicy::BuiltinPolicy::Open
+    #[builder(default = crate::builtinpolicy::BuiltinPolicy::Open)]
+    pub builtin_policy: crate::builtinpolicy::BuiltinPolicy,
     /// Error behavior implementation.
     #[builder(default)]
     pub error_formatter: SE::ErrorFormatter,
@@ -246,6 +263,8 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
             session: brush_vfs::Session::default(),
             // And runs nothing external until a policy says which world it is in.
             external_execution: crate::execpolicy::ExternalExecution::Sealed,
+            // And registers no builtins, for the same reason.
+            builtin_policy: crate::builtinpolicy::BuiltinPolicy::Sealed,
             env: env::ShellEnvironment::default(),
             funcs: functions::FunctionEnv::default(),
             options: options::RuntimeOptions::default(),

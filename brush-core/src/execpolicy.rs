@@ -86,21 +86,40 @@ impl ExternalExecution {
     /// Decides whether an external program may be spawned, and if so how its
     /// host path is obtained. `None` is a refusal.
     ///
-    /// `command_name` is the program as the caller named it; `argv1` is what
-    /// will land in the child's `argv[1]` (the first element after the program,
-    /// since `argv[0]` is set separately).
-    pub(crate) fn permit(&self, command_name: &str, argv1: Option<&str>) -> Option<ExecPermit> {
+    /// `command_name` is the program as the caller named it; `argv1` and `argv2`
+    /// are what will land in the child's `argv[1]` and `argv[2]` (the first two
+    /// elements after the program, since `argv[0]` is set separately).
+    ///
+    /// `builtins` is the shell's builtin allowlist (D11), consulted for the one
+    /// case where a bundled dispatch names a utility: `<launcher> --invoke-bundled
+    /// NAME` runs `NAME` in a fresh process that reads the *process-global*
+    /// bundled registry, not this shell's, so a policy that only kept `NAME`
+    /// out of the shell's registry would be routed around by composing the
+    /// dispatch directly. The name is taken from the argv about to be spawned
+    /// rather than from a caller's claim about it, for the same reason the
+    /// dispatch flag is.
+    pub(crate) fn permit(
+        &self,
+        command_name: &str,
+        argv1: Option<&str>,
+        argv2: Option<&str>,
+        builtins: &crate::builtinpolicy::BuiltinPolicy,
+    ) -> Option<ExecPermit> {
         match self {
             Self::Open => Some(ExecPermit::ViaNamespace),
             Self::Sealed => None,
             Self::Bundled(launcher) => {
                 let is_launcher = Path::new(command_name) == launcher.path;
                 let is_dispatch = argv1 == Some(launcher.dispatch_flag.as_str());
-                if is_launcher && is_dispatch {
-                    Some(ExecPermit::TrustedLauncher(launcher.path.clone()))
-                } else {
-                    None
+                if !is_launcher || !is_dispatch {
+                    return None;
                 }
+                // A dispatch that names nothing runs nothing; refusing it is
+                // both correct and keeps `argv2` from being an optional check.
+                if !builtins.admits(argv2?) {
+                    return None;
+                }
+                Some(ExecPermit::TrustedLauncher(launcher.path.clone()))
             }
         }
     }
@@ -121,23 +140,31 @@ impl ExternalExecution {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtinpolicy::BuiltinPolicy;
 
     const FLAG: &str = "--invoke-bundled";
     const LAUNCHER: &str = "/opt/brush/bin/brush";
+    const UTIL: &str = "cat";
 
     fn bundled() -> ExternalExecution {
         ExternalExecution::Bundled(TrustedLauncher::new(LAUNCHER, FLAG))
+    }
+
+    /// A permissive builtin policy, so these cases test the exec predicate
+    /// alone. The allowlist's own effect on it has its own tests below.
+    fn any() -> BuiltinPolicy {
+        BuiltinPolicy::Open
     }
 
     #[test]
     fn open_world_permits_anything_via_the_namespace() {
         let p = ExternalExecution::Open;
         assert!(matches!(
-            p.permit("/bin/cargo", Some("build")),
+            p.permit("/bin/cargo", Some("build"), None, &any()),
             Some(ExecPermit::ViaNamespace)
         ));
         assert!(matches!(
-            p.permit("ls", None),
+            p.permit("ls", None, None, &any()),
             Some(ExecPermit::ViaNamespace)
         ));
     }
@@ -145,13 +172,13 @@ mod tests {
     #[test]
     fn a_sealed_world_refuses_everything() {
         let p = ExternalExecution::Sealed;
-        assert!(p.permit("/bin/ls", None).is_none());
-        assert!(p.permit(LAUNCHER, Some(FLAG)).is_none());
+        assert!(p.permit("/bin/ls", None, None, &any()).is_none());
+        assert!(p.permit(LAUNCHER, Some(FLAG), Some(UTIL), &any()).is_none());
     }
 
     #[test]
     fn the_closed_world_runs_the_launchers_dispatch_by_its_host_path() {
-        let permit = bundled().permit(LAUNCHER, Some(FLAG));
+        let permit = bundled().permit(LAUNCHER, Some(FLAG), Some(UTIL), &any());
         assert!(
             matches!(permit, Some(ExecPermit::TrustedLauncher(ref host)) if host == Path::new(LAUNCHER)),
             "the bundled dispatch must be permitted, and by the launcher's host path: {permit:?}"
@@ -163,13 +190,49 @@ mod tests {
         // This is the escape the two-part predicate exists to close: naming the
         // launcher and asking it to be a fresh shell rather than a single
         // utility.
-        assert!(bundled().permit(LAUNCHER, Some("-c")).is_none());
-        assert!(bundled().permit(LAUNCHER, None).is_none());
+        assert!(
+            bundled()
+                .permit(LAUNCHER, Some("-c"), Some(UTIL), &any())
+                .is_none()
+        );
+        assert!(bundled().permit(LAUNCHER, None, None, &any()).is_none());
     }
 
     #[test]
     fn a_different_program_is_refused_even_with_the_flag() {
-        assert!(bundled().permit("/bin/sh", Some(FLAG)).is_none());
+        assert!(
+            bundled()
+                .permit("/bin/sh", Some(FLAG), Some(UTIL), &any())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_dispatch_naming_a_denied_utility_is_refused() {
+        // The route around a shell-side allowlist: the dispatched child reads
+        // the process-global bundled registry, so keeping `cat` out of *this*
+        // shell's registry would not stop `<launcher> --invoke-bundled cat`.
+        let policy = BuiltinPolicy::allowlist(["echo"]);
+        assert!(
+            bundled()
+                .permit(LAUNCHER, Some(FLAG), Some(UTIL), &policy)
+                .is_none()
+        );
+        assert!(
+            bundled()
+                .permit(LAUNCHER, Some(FLAG), Some("echo"), &policy)
+                .is_some(),
+            "an admitted utility must still dispatch"
+        );
+    }
+
+    #[test]
+    fn a_dispatch_naming_nothing_is_refused() {
+        assert!(
+            bundled()
+                .permit(LAUNCHER, Some(FLAG), None, &any())
+                .is_none()
+        );
     }
 
     #[test]

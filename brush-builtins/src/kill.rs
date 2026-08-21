@@ -121,7 +121,27 @@ impl builtins::Command for KillCommand {
             } else {
                 let pid = brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)?;
 
-                // It's a pid.
+                // It's a pid. Under a restrictive builtin policy it must be one
+                // of *this shell's* (D11): `kill` is on the default allowlist
+                // because a recipe runner needs job control, and an allowlist
+                // is a statement about names, so it cannot bound what a
+                // permitted builtin reaches. Unbounded, this signals any
+                // process on the host -- measured, with a `sleep` the shell
+                // never started, under both `--mount` and `--closed-world`.
+                //
+                // Bash's own behaviour is kept under an open policy, so the
+                // compatibility suite is unaffected.
+                if !context.shell.builtin_policy().is_open() && !context.shell.jobs().owns_pid(pid)
+                {
+                    writeln!(
+                        context.stderr(),
+                        "{}: {}: not a job of this shell",
+                        context.command_name,
+                        pid_or_job_spec
+                    )?;
+                    return Ok(ExecutionResult::general_error());
+                }
+
                 sys::signal::kill_process(pid, trap_signal)?;
             }
         }

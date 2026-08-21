@@ -5,8 +5,8 @@ decides what a builtin may open (D3, D6), and the closed world decides what may
 be executed (D2). Neither says anything about what a builtin may *do* once
 running, and the shell's own surface is the part nothing has touched.
 
-**Status: not started.** This plan is written before the code, as the vfs
-walker's was, so the gates can be built first.
+**Status: implemented.** See "Where it landed" at the end for what was built,
+what was built differently from this plan, and what was not built at all.
 
 ## The escapes are real, and measured
 
@@ -190,3 +190,67 @@ D21's environment policy beyond the `BASH_FUNC_*` case; D24's broker, which is
 what makes "inside the session blob" more than a fail-closed default; D29's
 approval store, which is how a policy's list would ever be widened by consent
 rather than by editing a constant.
+
+## Where it landed
+
+Written after the fact. The plan above is left as written so the difference is
+visible.
+
+### Built as planned
+
+Steps 0–5 and gates 1–7. `BuiltinPolicy` sits beside `Session` and
+`ExternalExecution` on `Shell` with their properties — `serde(skip)`,
+fail-closed, caller reinstalls. Enforcement is at registration, covering both
+insertion routes: the builder's map is filtered in `Shell::new`, and
+`register_builtin` / `register_builtin_if_unset` refuse a denied name, which is
+what reaches `register_shims`. D2's predicate gained `argv2` and the policy, so
+`<launcher> --invoke-bundled NAME` is refused for a denied `NAME`. `kill`'s
+bare-PID form resolves through the job table, `BASH_FUNC_*` is dropped, and
+`--restrict-builtins` selects the list.
+
+The ordering hazard was removed rather than asserted about.
+`Shell::set_builtin_policy` prunes the registry as it installs, so a policy
+arriving after registration is still correct — which the deserialize path needs,
+since it re-registers the default set on a shell that fails closed. The builder
+field still exists and is still the right place, because `BASH_FUNC_*`
+inheritance is decided during construction and a later install would arrive too
+late for that one decision.
+
+### Built differently
+
+**`--deny-builtin` was added, and it is not a convenience.** The bundled
+utilities are admitted wholesale, because which of them exist is a build-time
+question and a hard-coded copy of that list would rot toward a shell that cannot
+run `cat`. That left no way to deny a bundled utility at all, which would have
+made D11's claim about "five forked projects" unrealizable and gate 3
+unreachable from the shell.
+
+**The list denies 27 of 63 shell builtins**, and the reasons are recorded by
+class rather than per name. `exec` is allowed, against the instinct: its program
+form is already governed by D2's predicate, and denying it would only remove
+`exec 3>&1`.
+
+### Built after the fact
+
+**A case pinning that denial without a closed world is not denial.** Removing a
+builtin promotes the name to an external lookup, so `--restrict-builtins
+--deny-builtin find` runs the host's `/usr/bin/find`. That reads as a bug and is
+not one — the builtin policy governs which builtins exist, not what may be run —
+but it is exactly the wrong assumption to leave a reader holding, so it is
+asserted in both directions and stated on the flag.
+
+### Not built
+
+**Nothing bounds a permitted builtin beyond `kill`.** The two escapes D11 names
+are fixed; the argument that motivated them — that a permitted builtin can still
+do too much — applies to others that were not audited.
+
+**`is_open()` is the wrong question, knowingly.** `kill` and `BASH_FUNC_*` ask
+the builtin policy whether it is restrictive because that is the closest thing
+the shell has to "am I sandboxed". When D24 gives a session a policy object,
+that is where both belong.
+
+**The escapes were re-measured but the child is still unconfined.** A bundled
+utility dispatched through the shim runs in a fresh process under the identity
+namespace, so `--mount` does not reach it — D2 already records this as D24's
+job, and nothing here changes it.

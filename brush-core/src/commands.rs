@@ -182,12 +182,16 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     // the launcher re-invoking itself for a bundled command. `argv1` is the
     // first element after the program, which is what lands in the child's
     // `argv[1]` -- `argv[0]` is set separately below.
+    // `argv2` is the utility a bundled dispatch names, which the predicate
+    // checks against the builtin allowlist (D11).
     let argv1 = args.first().and_then(|a| a.as_ref().to_str());
-    let host_command = match context
-        .shell
-        .external_execution()
-        .permit(command_name, argv1)
-    {
+    let argv2 = args.get(1).and_then(|a| a.as_ref().to_str());
+    let host_command = match context.shell.external_execution().permit(
+        command_name,
+        argv1,
+        argv2,
+        context.shell.builtin_policy(),
+    ) {
         // The name the namespace resolved, translated into a host path. Without
         // this the namespace's approval of a *virtual* path authorizes running
         // the host's file at the same spelling -- so under `--mount /:jail`

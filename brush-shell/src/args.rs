@@ -133,6 +133,41 @@ pub struct CommandLineArgs {
     #[clap(long = "closed-world", help_heading = HEADING_STANDARD_OPTIONS)]
     pub closed_world: bool,
 
+    /// Restrict builtins to a default-deny allowlist (D11).
+    ///
+    /// A third axis, independent of `--mount` and `--closed-world`: those decide
+    /// what may be named and what may be run, this decides which builtins
+    /// exist. A denied builtin is not registered at all, so `enable` cannot
+    /// bring it back and `command -v` does not find it. Every bundled utility
+    /// is admitted; what the list removes is the shell's own interactive,
+    /// registry-mutating and host-facing builtins.
+    ///
+    /// It also bounds two things a list of names cannot express: `kill` is
+    /// restricted to this shell's own jobs, and `BASH_FUNC_*` entries in the
+    /// environment no longer define shell functions.
+    ///
+    /// Pair it with `--closed-world`. On its own, denying a builtin *promotes*
+    /// the name to an external lookup, so a denied `find` becomes the host's
+    /// `/usr/bin/find`. Only a closed world makes denial mean what it looks
+    /// like it means.
+    #[clap(long = "restrict-builtins", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub restrict_builtins: bool,
+
+    /// Admit a builtin the `--restrict-builtins` allowlist would deny, repeatable.
+    ///
+    /// Ignored without `--restrict-builtins`, which is the only mode that
+    /// denies anything.
+    #[clap(long = "allow-builtin", value_name = "NAME", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub allowed_builtins: Vec<String>,
+
+    /// Deny a builtin the `--restrict-builtins` allowlist would admit, repeatable.
+    ///
+    /// Applied after `--allow-builtin`, and the only way to deny a *bundled*
+    /// utility: those are admitted wholesale, because which of them exist is a
+    /// build-time question. Ignored without `--restrict-builtins`.
+    #[clap(long = "deny-builtin", value_name = "NAME", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub denied_builtins: Vec<String>,
+
     /// Don't process "rc" files if the shell is interactive (e.g., `~/.bashrc`, `~/.brushrc`).
     #[clap(long = "norc", help_heading = HEADING_STANDARD_OPTIONS)]
     pub no_rc: bool,

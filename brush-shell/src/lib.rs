@@ -4,6 +4,7 @@
 
 pub mod args;
 mod brushctl;
+mod builtinallowlist;
 pub mod bundled;
 pub mod config;
 pub mod entry;

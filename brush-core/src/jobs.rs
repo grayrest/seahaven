@@ -162,6 +162,16 @@ impl JobManager {
         }
     }
 
+    /// Whether `pid` belongs to a job this shell manages.
+    ///
+    /// The question `kill` asks before signalling a bare PID under a
+    /// restrictive policy (D11): a process the shell did not start is not
+    /// something a sandboxed script has any claim on.
+    #[must_use]
+    pub fn owns_pid(&self, pid: sys::process::ProcessId) -> bool {
+        self.jobs.iter().any(|job| job.owns_pid(pid))
+    }
+
     /// Waits for all managed jobs to complete.
     pub async fn wait_all(&mut self) -> Result<Vec<Job>, error::Error> {
         for job in &mut self.jobs {
@@ -454,5 +464,21 @@ impl Job {
     pub fn process_group_id(&self) -> Option<sys::process::ProcessId> {
         // TODO(jobs): Don't assume that the first PID is the PGID.
         self.pgid.or_else(|| self.representative_pid())
+    }
+
+    /// Whether `pid` names one of this job's processes, or its process group.
+    ///
+    /// Every external task is checked rather than only the representative one:
+    /// a pipeline is several processes in one job, and signalling the second
+    /// member of it is as legitimate as signalling the first.
+    #[must_use]
+    pub fn owns_pid(&self, pid: sys::process::ProcessId) -> bool {
+        if self.pgid == Some(pid) {
+            return true;
+        }
+        self.tasks.iter().any(|task| match task {
+            JobTask::External(p) => p.pid() == Some(pid),
+            JobTask::Internal(_) => false,
+        })
     }
 }
