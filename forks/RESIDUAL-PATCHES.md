@@ -63,6 +63,44 @@ between two paths in the same mount. The root is now pushed and not probed —
 skipped rather than special-cased in the error handling, because the question is
 meaningless rather than unanswerable.
 
+## `uucore/src/lib/features/fsxattr.rs` — descriptors, not paths
+
+`xattr`'s path functions resolve on the host, so under a mount they address a
+file outside it. The crate also ships `xattr::FileExt`, and `brush_vfs`'s
+contract *is* descriptors — `Vfs::open_with` hands back a `std::fs::File` — so
+`copy_xattrs`, `copy_xattrs_skip_selinux`, `copy_acls`, `retrieve_xattrs` and
+`apply_xattrs` open both ends through the facade and work on the descriptors.
+Signatures are unchanged, so `uu_cp` and `uu_mv` are untouched.
+
+This corrects a misclassification the decision log had already caught: `xattr`
+was listed as a capability the namespace could not express, on a check made
+against `cap-fs-ext`'s API surface, which is not the contract.
+
+Read-only descriptors at both ends, which is the part worth measuring rather
+than assuming: `fsetxattr` checks the *inode's* permissions rather than the
+descriptor's access mode, so a read-only fd can set an attribute — and it is the
+only option for a directory, which cannot be opened for writing and which
+`cp -r` copies attributes onto. Verified both, including on a directory fd.
+
+`has_acl` and `has_security_cap_acl` stay on the path deliberately. `ls -l`
+calls the first once per entry, and upstream's own comment there is about
+counting `getxattr` calls; routing it means an open per file listed. Recorded in
+`UNROUTED.txt` with that reasoning, and `clippy.toml` now bans `xattr`'s path
+functions so a third one cannot join them quietly.
+
+## `uucore/build.rs` and `sed/build.rs` — a crate-level lint allow
+
+Both carry `#![allow(clippy::disallowed_methods)]` with the reason. A build
+script runs at build time on the host, before any namespace exists, and cannot
+see `brush_vfs` at all — routing one does not compile.
+
+The allow is at the source rather than in `UNROUTED.txt` because of how the gate
+works: `check lint` *denies* the ban, a denied lint is an error, and an error in
+a build script aborts the crate before its library is ever analysed. That is not
+a hypothetical. It hid the whole of `uucore`'s and `sed`'s libraries from the
+fork lint — seventeen unrouted call sites reported as "no new ones" — until the
+allow let their build scripts compile.
+
 ## `uucore/src/lib/features/safe_traversal.rs` — `nix::fcntl::open`
 
 `DirFd::open` accepted any host path. Now rooted through

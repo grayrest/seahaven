@@ -366,6 +366,19 @@ fn check_fork_lint(sh: &Shell, verbose: bool) -> Result<()> {
 /// `-A warnings` first so upstream's own warnings stay upstream's business,
 /// then `-D clippy::disallowed_methods` -- later flags win, so the ban is the
 /// one thing denied.
+///
+/// Deny rather than warn, and not by preference: `-A warnings` allows the
+/// `warnings` *group*, and a lint at warn level is in that group, so
+/// `-W clippy::disallowed_methods` emits nothing at all. Only an error escapes
+/// the group allow. Measured -- the same fork reports five sites under `-D` and
+/// zero under `-W`.
+///
+/// That has a consequence worth knowing, because it cost this pass a crate: an
+/// error in a **build script** aborts the whole crate before its library is
+/// analysed. `uucore`'s build script is host code by nature, so under `-D` it
+/// failed and the entire `uucore` *library* went unlinted -- reported as "no
+/// new ones". The build scripts now carry a crate-level allow with the reason,
+/// which is where that exemption belongs anyway.
 fn fork_lint_args(features: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> = ["clippy", "--lib", "--message-format", "short"]
         .iter()
@@ -390,25 +403,29 @@ fn assert_denies_ban(args: &[String]) -> Result<()> {
     };
     let rustc_args = &args[separator + 1..];
 
-    let Some(deny) = rustc_args
+    let Some(enabled) = rustc_args
         .windows(2)
-        .position(|w| w == ["-D", "clippy::disallowed_methods"])
+        .position(|w| (w[0] == "-W" || w[0] == "-D") && w[1] == "clippy::disallowed_methods")
     else {
         anyhow::bail!(
-            "the fork lint argv does not deny the ban: {args:?}; every fork would lint clean \
-             while reaching the host"
+            "the fork lint argv does not switch the ban on: {args:?}; every fork would lint \
+             clean while reaching the host"
         );
     };
 
-    // A later allow overrides an earlier deny, so anything after it that
-    // re-allows the ban -- by name or by group -- silently undoes the pass.
-    if let Some(allow) = rustc_args[deny..]
+    // A later flag overrides an earlier one, so anything after the enabling
+    // flag that relaxes the ban silently undoes the pass. Allowing it is the
+    // obvious way; *downgrading* it to a warning is the quiet one, because
+    // `-A warnings` is already in this argv and a warn-level lint belongs to
+    // that group -- measured, the same fork reports five sites under `-D` and
+    // zero under `-W`.
+    if let Some(allow) = rustc_args[enabled + 2..]
         .iter()
         .position(|a| a == "-A" || a.starts_with("--allow") || a == "-W" || a.starts_with("--warn"))
     {
         anyhow::bail!(
-            "the fork lint argv relaxes the ban at position {} after denying it: {args:?}",
-            deny + allow
+            "the fork lint argv relaxes the ban at position {} after switching it on: {args:?}",
+            enabled + 2 + allow
         );
     }
     Ok(())
@@ -417,10 +434,15 @@ fn assert_denies_ban(args: &[String]) -> Result<()> {
 /// The `(file, method)` pair of every ban diagnostic in a `--message-format
 /// short` run.
 fn parse_unrouted(output: &str) -> Vec<(String, String)> {
-    const MARKER: &str = ": error: use of a disallowed method `";
+    // `warning:` in this pass; `error:` too, so the parser still reads a run
+    // that denied the lint rather than warning on it.
+    const MARKERS: [&str; 2] = [
+        ": warning: use of a disallowed method `",
+        ": error: use of a disallowed method `",
+    ];
     let mut out = Vec::new();
     for line in output.lines() {
-        let Some((location, rest)) = line.split_once(MARKER) else {
+        let Some((location, rest)) = MARKERS.iter().find_map(|m| line.split_once(m)) else {
             continue;
         };
         let Some(method) = rest.split('`').next() else {
@@ -1040,7 +1062,14 @@ fn assert_denies_warnings(args: &[&str]) -> Result<()> {
 fn resolves_on_this_platform(path: &str) -> bool {
     // `rustix::fs` is `cfg(not(windows))` as a whole, so it gates with the
     // rest of the Unix surface.
-    const UNIX_ONLY: [&str; 4] = ["std::os::unix::", "nix::", "libc::", "rustix::fs::"];
+    const UNIX_ONLY: [&str; 5] = [
+        "std::os::unix::",
+        "nix::",
+        "libc::",
+        "rustix::fs::",
+        // The `xattr` crate has no Windows implementation.
+        "xattr::",
+    ];
     const WINDOWS_ONLY: [&str; 1] = ["std::os::windows::"];
 
     // Entries that are Unix but not *every* Unix. `nix` and `libc` expose

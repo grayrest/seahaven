@@ -10,19 +10,11 @@
 # deliberately absent: they move for reasons that have nothing to do with
 # confinement, and a key that churns is a key nobody maintains.
 #
-# **Every line below is deliberate.** The backlog this file was created to hold
-# -- 133 calls that asked the host what they should have asked the namespace --
-# is empty. That is the state to keep it in: a new entry here should be argued
-# for in the same terms as the ones already listed, not added because a lint
-# went red.
-#
 # ---------------------------------------------------------------------------
-# Build scripts run at build time on the host, before any namespace exists, and
-# cannot see `brush_vfs` at all. Routing `sed/build.rs` simply did not compile,
-# which is the honest answer.
+# Deliberate, and not to be "fixed".
 #
 # `uu_df` reads the *host mount table*: `filesystem.rs` canonicalizes mount
-# device names and `df.rs` resolves those same names. `/dev/disk1s1` is host
+# device names and `df.rs` resolves those same names. That is host
 # introspection, not namespace access, and routing it would make the symlink
 # resolution never fire. `df` is not confined, by decision; `uucore`'s `fsext`
 # is the same class. See RESIDUAL-PATCHES.md.
@@ -30,24 +22,31 @@
 # `uucore::perms` is deliberately left on `walkdir`: unreachable from anything
 # bundled, and porting it needs a routed `chown` that does not exist.
 #
-# The `rustix` `*at` calls in `uu_mv` and `uucore::safe_traversal` sit below a
-# descriptor that was already rooted through the namespace and inherit its
-# confinement. Rooting is the patch; the `*at` calls under it are meant to be
-# unchanged.
+# The `*at` calls in `uu_mv` and `uucore::safe_traversal` sit below a descriptor
+# that was already rooted through the namespace and inherit its confinement.
+# Rooting is the patch; the `*at` calls under it are meant to be unchanged.
+#
+# `uucore::fsxattr`'s two `list_deref` calls are `has_acl` and its sibling,
+# which `ls -l` calls once per entry. The rest of that module now works on
+# descriptors the vfs opened; these stay on the path deliberately, because
+# routing them means an open per file listed where the path form is a single
+# `getxattr`. What leaks is whether a file has attributes, not their contents.
 #
 # `mkfifo`, `mknod`, `utimensat`, `UnixListener::bind` and a child's
 # `Command::current_dir` have no facade equivalent. The ban list says "not
-# expressible in the namespace yet" for each, and means it. Each is a real hole
-# for the day something needs it, recorded rather than papered over: a FIFO or
-# device node created through `cp -a` or `mv` across mounts lands on the host,
-# and `find -exec` runs its child in the host's working directory.
+# expressible in the namespace yet" for each, and means it.
 #
-# `tempfile` and `env::temp_dir` are scratch space, which D38 places outside
-# the namespace on purpose.
+# `tempfile` and `env::temp_dir` in `uu_sort` and `uu_tac` are scratch space,
+# which D38 places outside the namespace on purpose. `sed`'s temp file is *not*
+# in this class -- see the backlog.
+#
+# Build scripts are exempted at the source instead of here, with a
+# `#![allow(clippy::disallowed_methods)]` and the reason: a denied lint is an
+# error, and an error in a build script aborts the crate before its library is
+# analysed. That is not hypothetical -- it hid `uucore`'s and `sed`'s entire
+# libraries from this gate until 2026-08-21.
 # ---------------------------------------------------------------------------
-
 findutils/src/find/matchers/exec.rs std::process::Command::current_dir 2
-sed/build.rs std::fs::File::create 1
 uu_cp/src/cp.rs nix::sys::stat::mknod 1
 uu_cp/src/cp.rs nix::unistd::mkfifo 1
 uu_cp/src/cp.rs std::os::unix::net::UnixListener::bind 1
@@ -63,9 +62,35 @@ uu_sort/src/sort.rs std::env::temp_dir 1
 uu_sort/src/tmp_dir.rs tempfile::Builder::tempdir_in 1
 uu_tac/src/tac.rs tempfile::tempfile 1
 uu_touch/src/touch.rs rustix::fs::utimensat 1
-uucore/build.rs std::fs::File::create 1
-uucore/build.rs std::fs::read_dir 3
-uucore/build.rs std::fs::read_to_string 3
-uucore/build.rs std::path::Path::exists 3
-uucore/build.rs std::path::Path::is_dir 2
-uucore/build.rs std::path::Path::is_file 1
+uucore/src/lib/features/fsext.rs std::fs::metadata 1
+uucore/src/lib/features/fsxattr.rs xattr::list_deref 2
+uucore/src/lib/features/perms.rs libc::lchown 1
+uucore/src/lib/features/perms.rs std::path::Path::is_symlink 1
+uucore/src/lib/features/perms.rs std::path::Path::metadata 1
+uucore/src/lib/features/safe_traversal.rs nix::fcntl::openat 2
+uucore/src/lib/features/safe_traversal.rs nix::sys::stat::fchmodat 1
+uucore/src/lib/features/safe_traversal.rs nix::sys::stat::fstatat 1
+uucore/src/lib/features/safe_traversal.rs nix::sys::stat::mkdirat 1
+uucore/src/lib/features/safe_traversal.rs nix::unistd::unlinkat 1
+
+# ---------------------------------------------------------------------------
+# The backlog: calls that should go through `brush_vfs::ambient` and do not yet.
+#
+# Every one of these became visible only when the build-script exemption above
+# stopped aborting `uucore` and `sed`. They have been unrouted the whole time;
+# the gate could not see them.
+#
+# `sed/src/sed/named_writer.rs` is the sharp one and should be treated like
+# `uu_ln`'s `symlink` was: it is the `w` command's output file, so
+# `sed 's/x/y/w out.txt'` writes to a host path. `in_place.rs` is `sed -i`'s
+# replacement file, created *next to the target* rather than as scratch, so D38
+# does not cover it.
+# ---------------------------------------------------------------------------
+sed/src/sed/in_place.rs tempfile::NamedTempFile::new_in 1
+sed/src/sed/named_writer.rs std::fs::OpenOptions::new 1
+sed/src/sed/named_writer.rs std::fs::OpenOptions::open 1
+uucore/src/lib/features/checksum/compute.rs std::path::Path::is_dir 1
+uucore/src/lib/mods/io.rs std::fs::OpenOptions::open 1
+uucore/src/lib/mods/locale.rs std::fs::read_to_string 1
+uucore/src/lib/mods/locale.rs std::path::Path::canonicalize 1
+uucore/src/lib/mods/locale.rs std::path::Path::exists 3

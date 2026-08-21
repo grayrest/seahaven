@@ -1,3 +1,13 @@
+// FLATLAND DIVERGENCE: a build script runs at build time on the host, before
+// any namespace exists, and cannot see `brush_vfs` at all -- routing it does not
+// compile. The exemption is here rather than in `forks/UNROUTED.txt` because
+// `cargo xtask check lint` denies the ban, a denied lint is an error, and an
+// error in a build script aborts the crate before its library is ever analysed.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "build-time host code; see the note above"
+)]
+
 // This file is part of the uutils coreutils package.
 //
 // For the full copyright and license information, please view the LICENSE

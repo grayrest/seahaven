@@ -28,16 +28,32 @@ fn is_xattr_unsupported(_err: &std::io::Error) -> bool {
     false
 }
 
+/// A descriptor for `path`, opened through the namespace rather than resolved
+/// by the kernel from the path itself.
+///
+/// FLATLAND DIVERGENCE. `xattr`'s path functions -- `list`, `get`, `set`,
+/// `list_deref` -- resolve on the host, so under a mount they address a file
+/// outside it. The crate also ships a descriptor form, `xattr::FileExt`, and
+/// `brush_vfs`'s contract *is* descriptors: `Vfs::open_with` hands back a
+/// `std::fs::File`. So this is a rewrite in place rather than a lost
+/// capability, which is what the decision log corrected when it moved `xattr`
+/// out of the "cannot be expressed" class -- the original check had been made
+/// against `cap-fs-ext`'s API surface, which is not the contract.
+///
+/// Read-only, and deliberately: `fsetxattr` checks the *inode's* permissions
+/// rather than the descriptor's access mode, so a read-only fd can still set an
+/// attribute. Measured rather than assumed, because it decides the design --
+/// a directory cannot be opened for writing at all, and `cp -r` copies
+/// attributes onto directories.
+fn xattr_fd<P: AsRef<Path>>(path: P) -> std::io::Result<std::fs::File> {
+    brush_vfs::ambient::open(path)
+}
+
 /// Copies extended attributes (xattrs) from one path to another.
 /// All errors propagate, including `ENOTSUP` / `EOPNOTSUPP`; for
 /// best-effort callers see [`copy_xattrs_ignore_unsupported`].
 pub fn copy_xattrs<P: AsRef<Path>>(source: P, dest: P) -> std::io::Result<()> {
-    for attr_name in xattr::list(&source)? {
-        if let Some(value) = xattr::get(&source, &attr_name)? {
-            xattr::set(&dest, &attr_name, &value)?;
-        }
-    }
-    Ok(())
+    copy_xattrs_fd(&xattr_fd(source)?, &xattr_fd(dest)?)
 }
 
 /// Like [`copy_xattrs`], but maps `ENOTSUP` / `EOPNOTSUPP` to `Ok(())`
@@ -78,11 +94,13 @@ pub fn copy_xattrs_fd_ignore_unsupported(
 /// Like `copy_xattrs`, but skips the security.selinux attribute.
 #[cfg(unix)]
 pub fn copy_xattrs_skip_selinux<P: AsRef<Path>>(source: P, dest: P) -> std::io::Result<()> {
-    for attr_name in xattr::list(&source)? {
+    use xattr::FileExt;
+    let (source, dest) = (xattr_fd(source)?, xattr_fd(dest)?);
+    for attr_name in source.list_xattr()? {
         if attr_name.as_bytes() != b"security.selinux"
-            && let Some(value) = xattr::get(&source, &attr_name)?
+            && let Some(value) = source.get_xattr(&attr_name)?
         {
-            xattr::set(&dest, &attr_name, &value)?;
+            dest.set_xattr(&attr_name, &value)?;
         }
     }
     Ok(())
@@ -102,10 +120,16 @@ pub fn copy_xattrs_skip_selinux<P: AsRef<Path>>(source: P, dest: P) -> std::io::
 /// failures here when `mode` is the only thing being preserved.
 #[cfg(unix)]
 pub fn copy_acls<P: AsRef<Path>>(source: P, dest: P) {
+    use xattr::FileExt;
+    let (Ok(source), Ok(dest)) = (xattr_fd(source), xattr_fd(dest)) else {
+        // Best-effort, as the attribute calls below: a path that will not open
+        // has nothing to copy.
+        return;
+    };
     for name in ["system.posix_acl_access", "system.posix_acl_default"] {
-        if let Ok(Some(value)) = xattr::get(&source, name) {
+        if let Ok(Some(value)) = source.get_xattr(name) {
             // Best-effort: silently skip if dest doesn't support ACL xattrs.
-            let _ = xattr::set(&dest, name, &value);
+            let _ = dest.set_xattr(name, &value);
         }
     }
 }
@@ -120,9 +144,11 @@ pub fn copy_acls<P: AsRef<Path>>(source: P, dest: P) {
 ///
 /// A result containing a HashMap of attributes names and values, or an error.
 pub fn retrieve_xattrs<P: AsRef<Path>>(source: P) -> std::io::Result<FxHashMap<OsString, Vec<u8>>> {
+    use xattr::FileExt;
+    let source = xattr_fd(source)?;
     let mut attrs = FxHashMap::default();
-    for attr_name in xattr::list(&source)? {
-        if let Some(value) = xattr::get(&source, &attr_name)? {
+    for attr_name in source.list_xattr()? {
+        if let Some(value) = source.get_xattr(&attr_name)? {
             attrs.insert(attr_name, value);
         }
     }
@@ -143,8 +169,10 @@ pub fn apply_xattrs<P: AsRef<Path>>(
     dest: P,
     xattrs: FxHashMap<OsString, Vec<u8>>,
 ) -> std::io::Result<()> {
+    use xattr::FileExt;
+    let dest = xattr_fd(dest)?;
     for (attr, value) in xattrs {
-        xattr::set(&dest, &attr, &value)?;
+        dest.set_xattr(&attr, &value)?;
     }
     Ok(())
 }
@@ -159,6 +187,16 @@ pub fn apply_xattrs<P: AsRef<Path>>(
 ///
 /// `true` if the file has extended attributes (indicating an ACL), `false` otherwise.
 pub fn has_acl<P: AsRef<Path>>(file: P) -> bool {
+    // FLATLAND DIVERGENCE, by omission: this one stays on the host path, and
+    // the sibling below with it. `ls -l` calls it once per entry, and the
+    // comment on the next line is upstream counting syscalls -- routing it
+    // means opening a descriptor for every file listed, where the path form is
+    // a single `getxattr`. What it leaks is whether a file outside the mount
+    // has attributes, not their contents and not a handle to it; that is worth
+    // less than a descriptor per entry in the shell's most-used listing.
+    //
+    // Recorded in `forks/UNROUTED.txt`, where the ban on `xattr`'s path
+    // functions keeps it from being joined by a third without a decision.
     // don't use exacl here, it is doing more getxattr call then needed
     xattr::list_deref(file).is_ok_and(|acl| {
         // if we have extra attributes, we have an acl

@@ -311,6 +311,20 @@ fn rustix_fs_linux_only() {
     );
 }
 
+/// `xattr`'s path surface. The crate's `FileExt` form is deliberately *not*
+/// banned: a descriptor the vfs opened is the routed answer.
+#[cfg(unix)]
+fn xattr_by_path() {
+    xattr::list(path());
+    xattr::get(path(), "user.x");
+    xattr::set(path(), "user.x", b"v");
+    xattr::remove(path(), "user.x");
+    xattr::list_deref(path());
+    xattr::get_deref(path(), "user.x");
+    xattr::set_deref(path(), "user.x", b"v");
+    xattr::remove_deref(path(), "user.x");
+}
+
 /// Scratch space outside every mount, and a host path handed to a child.
 fn scratch_and_children() {
     tempfile::tempfile();

@@ -212,6 +212,20 @@ disallowed-methods = [
   { path = "rustix::fs::fclonefileat", reason = "read and write through brush_vfs::Vfs", allow-invalid = true },
   { path = "rustix::fs::getpath", reason = "the host's layout is not the namespace's", allow-invalid = true },
 
+  # `xattr`'s path surface. The crate is not banned outright, because its
+  # *descriptor* form is the routed answer -- `xattr::FileExt` on a `File` the
+  # vfs opened -- and the decision log records that moving `xattr` out of the
+  # "cannot be expressed" class was a correction, not a concession. These are
+  # the path functions that resolve on the host instead.
+  { path = "xattr::list", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::get", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::set", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::remove", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::list_deref", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::get_deref", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::set_deref", reason = "use xattr::FileExt on a file the vfs opened" },
+  { path = "xattr::remove_deref", reason = "use xattr::FileExt on a file the vfs opened" },
+
   # A unix socket is named by a host path like anything else, and `bind`
   # *creates* a file outside every mount.
   { path = "std::os::unix::net::UnixStream::connect", reason = "not expressible in the namespace yet" },
