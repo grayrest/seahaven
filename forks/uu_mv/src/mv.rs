@@ -32,7 +32,13 @@ use std::os::unix;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(windows)]
 use std::os::windows;
-use std::path::{Path, PathBuf, absolute};
+// FLATLAND DIVERGENCE: `std::path::absolute` is `getcwd(2)` plus a join, so
+// under a mount it rooted both operands of every same-file comparison at the
+// *host* working directory and `mv f.txt g.txt` failed naming a host path.
+// The facade's version takes the session's cwd and the virtual-path grammar;
+// the name is unchanged, so the five call sites below are.
+use brush_vfs::ambient::absolute;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 use crate::hardlink::{
@@ -203,7 +209,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         .map(OsString::from);
 
     if let Some(ref maybe_dir) = target_dir
-        && !Path::new(&maybe_dir).is_dir()
+        && !brush_vfs::ambient::is_dir(Path::new(&maybe_dir))
     {
         return Err(MvError::TargetNotADirectory(maybe_dir.quote().to_string()).into());
     }
@@ -401,7 +407,9 @@ fn handle_two_paths(source: &Path, target: &Path, opts: &Options) -> UResult<()>
     // `source.is_dir() && !source.is_symlink()` without the extra `stat` calls.
     let source_is_dir = source_metadata.is_dir();
     let target_is_dir = match brush_vfs::ambient::symlink_metadata(&(target)) {
-        Ok(metadata) if metadata.is_symlink() => brush_vfs::ambient::canonicalize(target).is_ok_and(|p| p.is_dir()),
+        Ok(metadata) if metadata.is_symlink() => {
+            brush_vfs::ambient::canonicalize(target).is_ok_and(|p| brush_vfs::ambient::is_dir(p))
+        }
         Ok(metadata) => metadata.is_dir(),
         Err(_) => false,
     };
@@ -418,7 +426,7 @@ fn handle_two_paths(source: &Path, target: &Path, opts: &Options) -> UResult<()>
 
     if target_is_dir {
         if opts.no_target_dir {
-            if source.is_dir() {
+            if brush_vfs::ambient::is_dir(source) {
                 #[cfg(unix)]
                 let (mut hardlink_tracker, hardlink_scanner) = create_hardlink_context();
                 #[cfg(unix)]
@@ -549,12 +557,12 @@ fn assert_not_same_file(
         && (canonicalized_source.eq(&canonicalized_target)
             || source.eq(Path::new("."))
             || source.ends_with("/.")
-            || source.is_file())
+            || brush_vfs::ambient::is_file(source))
     {
         return Err(MvError::SameFile(source.quote().to_string(), target_display()).into());
     } else if (same_file || canonicalized_target.starts_with(canonicalized_source))
         // don't error if we're moving a symlink of a directory into itself
-        && !source.is_symlink()
+        && !brush_vfs::ambient::is_symlink(source)
     {
         return Err(
             MvError::SelfTargetSubdirectory(source.quote().to_string(), target_display()).into(),
@@ -680,7 +688,7 @@ fn move_files_into_dir(files: &[PathBuf], target_dir: &Path, options: &Options) 
         (tracker, scanner)
     };
 
-    if !target_dir.is_dir() {
+    if !brush_vfs::ambient::is_dir(target_dir) {
         return Err(MvError::NotADirectory(target_dir.quote().to_string()).into());
     }
 
@@ -838,7 +846,7 @@ fn rename(
         .is_ok_and(|metadata| metadata.is_dir())
     {
         // normalize behavior between *nix and windows
-        if from.is_dir() {
+        if brush_vfs::ambient::is_dir(from) {
             if is_empty_dir(to) {
                 brush_vfs::ambient::remove_dir(to)?;
             } else {
@@ -921,7 +929,8 @@ fn rename_with_fallback(
         // 2. On Windows, if the target file exists and source file is opened by another process
         //    (MoveFileExW fails with "Access Denied" even if the source file has FILE_SHARE_DELETE permission)
         let should_fallback =
-            matches!(err.raw_os_error(), Some(EXDEV)) || (from.is_file() && can_delete_file(from));
+            matches!(err.raw_os_error(), Some(EXDEV))
+                || (brush_vfs::ambient::is_file(from) && can_delete_file(from));
         if !should_fallback {
             return Err(err);
         }
@@ -999,7 +1008,7 @@ fn rename_symlink_fallback(from: &Path, to: &Path) -> io::Result<()> {
 
     // On AlreadyExists, fall through to atomic temp-and-rename so the
     // destination is replaced rather than the call failing.
-    match unix::fs::symlink(&path_symlink_points_to, to) {
+    match brush_vfs::ambient::symlink(&path_symlink_points_to, to) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             #[cfg(not(target_os = "redox"))]
@@ -1031,7 +1040,7 @@ fn rename_symlink_fallback(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(all(unix, not(target_os = "redox")))]
 fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
     use io::Read;
-    use rustix::fs::{AtFlags, CWD, Mode, OFlags, openat, renameat, symlinkat, unlinkat};
+    use rustix::fs::{AtFlags, renameat, symlinkat, unlinkat};
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
@@ -1048,12 +1057,14 @@ fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid destination path"))?;
 
-    let dir_fd = openat(
-        CWD,
-        parent,
-        OFlags::DIRECTORY | OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    )?;
+    // FLATLAND DIVERGENCE: rooted. `openat(CWD, parent, ..)` anchored the whole
+    // sequence on the *host* process's working directory -- the single ambient
+    // entry point for this function, and invisible to the `std::fs`-shaped
+    // codemod. The root is now resolved through the namespace and every `*at`
+    // call below inherits the confinement of the descriptor it starts from,
+    // exactly as `safe_traversal::DirFd::open` does. `NOFOLLOW` becomes the
+    // facade's `follow = false`.
+    let dir_fd = brush_vfs::ambient::open_dir_fd(parent, false)?;
 
     let mut urandom = brush_vfs::ambient::open("/dev/urandom")?;
 
@@ -1256,7 +1267,7 @@ fn copy_dir_contents_recursive(
             pb.set_message(from_path.to_string_lossy().to_string());
         }
 
-        if from_path.is_symlink() {
+        if brush_vfs::ambient::is_symlink(&from_path) {
             // Handle symlinks first, before checking is_dir() which follows symlinks.
             // This prevents symlinks to directories from being expanded into full copies.
             #[cfg(unix)]
@@ -1274,7 +1285,7 @@ fn copy_dir_contents_recursive(
             }
 
             print_verbose(&from_path, &to_path);
-        } else if from_path.is_dir() {
+        } else if brush_vfs::ambient::is_dir(&from_path) {
             // Recursively copy subdirectory (only real directories, not symlinks)
             create_dir_fail_closed(&to_path)?;
 
@@ -1318,7 +1329,7 @@ fn copy_dir_contents_recursive(
         }
 
         if let Some(pb) = progress_bar
-            && let Ok(metadata) = from_path.metadata()
+            && let Ok(metadata) = brush_vfs::ambient::metadata(&from_path)
         {
             pb.inc(metadata.len());
         }
@@ -1345,7 +1356,7 @@ fn copy_file_with_hardlinks_helper(
         return Ok(());
     }
 
-    if from.is_symlink() {
+    if brush_vfs::ambient::is_symlink(from) {
         // Copy a symlink file (no-follow).
         // rename_symlink_fallback already preserves ownership and removes the source.
         rename_symlink_fallback(from, to)?;
@@ -1376,7 +1387,7 @@ fn rename_file_fallback(
     #[cfg(unix)] hardlink_scanner: Option<&HardlinkGroupScanner>,
 ) -> io::Result<()> {
     // Remove existing target file if it exists
-    if to.is_symlink() {
+    if brush_vfs::ambient::is_symlink(to) {
         brush_vfs::ambient::remove_file(to).map_err(|err| {
             let inter_device_msg = translate!("mv-error-inter-device-move-failed", "from" => from.quote(), "to" => to.quote(), "err" => err);
             io::Error::new(err.kind(), inter_device_msg)
@@ -1508,7 +1519,7 @@ fn is_empty_dir(path: &Path) -> bool {
 /// Check if file is writable, returning the mode for potential reuse.
 #[cfg(unix)]
 fn is_writable(path: &Path) -> (bool, Option<u32>) {
-    if let Ok(metadata) = path.metadata() {
+    if let Ok(metadata) = brush_vfs::ambient::metadata(path) {
         let mode = metadata.permissions().mode();
         // Check if user write bit is set
         ((mode & 0o200) != 0, Some(mode))
@@ -1520,7 +1531,7 @@ fn is_writable(path: &Path) -> (bool, Option<u32>) {
 /// Check if file is writable.
 #[cfg(not(unix))]
 fn is_writable(path: &Path) -> (bool, Option<u32>) {
-    if let Ok(metadata) = path.metadata() {
+    if let Ok(metadata) = brush_vfs::ambient::metadata(path) {
         (!metadata.permissions().readonly(), None)
     } else {
         (false, None) // If we can't get metadata, prompt user to be safe
@@ -1530,7 +1541,7 @@ fn is_writable(path: &Path) -> (bool, Option<u32>) {
 #[cfg(unix)]
 fn get_interactive_prompt(to: &Path, cached_mode: Option<u32>) -> String {
     // Use cached mode if available, otherwise fetch it
-    let mode = cached_mode.or_else(|| to.metadata().ok().map(|m| m.permissions().mode()));
+    let mode = cached_mode.or_else(|| brush_vfs::ambient::metadata(to).ok().map(|m| m.permissions().mode()));
     if let Some(mode) = mode {
         let file_mode = mode & 0o777;
         // Check if file is not writable by user

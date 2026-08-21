@@ -41,12 +41,21 @@ Guarded by upstream's own
 invisible to the `std::fs`-shaped codemod. Routed onto `ambient::open_with`,
 carrying `nofollow` and `DEST_INITIAL_MODE`.
 
-## `uucore/src/lib/features/fs.rs` — `rustix` stat, and the cwd base
+## `uucore/src/lib/features/fs.rs` — `rustix` stat, the cwd base, and the root
 
 `FileInformation::from_path` used `rustix::fs::{stat,lstat}`; the type now uses
 the `std::fs::Metadata` representation it already had for WASI. Separately,
 `canonicalize` built its absolute base from the *host* process cwd while
 checking existence against the namespace — now `ambient::current_dir()`.
+
+`canonicalize` also probed each accumulated prefix for a symlink starting with
+`/`. On a host filesystem that is a free `Ok(None)`, since no root is a symlink;
+the *virtual* root is not backed by any host object at all (D6), so the probe
+returned NotFound and the function failed on its own first component. Every
+absolute path went through there, which is why `mv` could not move a file
+between two paths in the same mount. The root is now pushed and not probed —
+skipped rather than special-cased in the error handling, because the question is
+meaningless rather than unanswerable.
 
 ## `uucore/src/lib/features/safe_traversal.rs` — `nix::fcntl::open`
 
@@ -145,6 +154,49 @@ The `#[cfg(windows)]` arm is deliberately untouched. It dispatches
 `symlink_dir` / `symlink_file`, a distinction `Vfs::symlink` does not take and
 which cap-std resolves its own way; routing it is a change to Windows behaviour
 this repository cannot test and has no failing case for.
+
+## `uu_mv` — the absolute base, twenty predicates, and one descriptor
+
+The largest single fork patch, and the one where the D34 carve-out compounds:
+`mv` asks the filesystem what kind of thing each operand is at nearly every
+step, and each answer came from the host.
+
+`std::path::absolute` is the interesting one, because it is not a predicate.
+It is `getcwd(2)` plus a join, so both operands of every same-file comparison
+were rooted at the *host* working directory — `mv f.txt g.txt` under a mount
+failed naming a host path component. There was no facade function for it, so
+one was added: `brush_vfs::ambient::absolute` takes the session's cwd and the
+virtual-path grammar, which also means the result is normalised and a path
+that leaves the namespace is an error rather than a string. The name is
+unchanged, so the five call sites are.
+
+Then twenty inherent `Path::{is_dir, is_file, is_symlink, metadata}` calls
+across `mv.rs` and `hardlink.rs`, routed onto their facade equivalents. These
+decided which *form* of the command line was being run, whether the target was
+a directory, whether either side was a symlink, and which error to report — so
+the visible failures ranged from `target 'dir': Not a directory` for a plain
+directory to silently taking the wrong branch.
+
+`create_symlink_replace` is the `DirFd` shape again. It mirrors GNU's
+`force_symlinkat`: open the destination's parent once and operate through `*at`
+so a concurrent rename of the parent cannot redirect the operation. The `openat`
+that opened that parent anchored on `CWD` — the host process's directory, the
+single ambient entry point for the whole sequence. It is now rooted through
+`ambient::open_dir_fd`, and the `symlinkat`/`renameat`/`unlinkat` below it are
+unchanged, inheriting the confinement of the descriptor they start from, exactly
+as `safe_traversal` does.
+
+`nix::unistd::mkfifo` is left alone, in both fallbacks that use it. There is no
+facade equivalent — the ban list says "not expressible in the namespace yet" and
+means it — and both sites sit behind an `EXDEV` cross-device fallback that a
+single mount cannot reach, so there is no failing case to point at either. It is
+a real hole for a future multi-mount `mv` of a FIFO, and it is recorded here
+rather than fixed blind.
+
+Pinned by four cases in `brush-shell/tests/cases/brush/sandbox.yaml`, and by a
+differential check while developing: every `mv` form tried produced byte-identical
+output under a restrictive mount and under the identity policy, which is the
+oracle that isolates confinement from upstream behaviour.
 
 ## `uucore::perms` — left on `walkdir`, deliberately
 

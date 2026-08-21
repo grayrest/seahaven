@@ -404,7 +404,26 @@ pub fn canonicalize<P: AsRef<Path>>(
                 result.push(s);
                 continue;
             }
-            OwningComponent::RootDir | OwningComponent::Normal(..) => {
+            // FLATLAND DIVERGENCE: the root is pushed but never probed. The
+            // loop below asks `resolve_symlink` whether each accumulated prefix
+            // is a link, starting with `/`. On a host filesystem that is a free
+            // `Ok(None)` -- `/` is a directory and cannot be a symlink -- but
+            // the *virtual* root is not backed by any host object at all (D6:
+            // it exists because something was mounted under it, and nothing on
+            // any host is it), so the probe returned NotFound and canonicalize
+            // failed on its own first component. Every absolute path went
+            // through here, which is why `mv` could not move a file between two
+            // paths in the same mount.
+            //
+            // Skipping the probe rather than special-casing the error, because
+            // the question is meaningless rather than unanswerable: no root is
+            // a symlink on any filesystem, so this is a probe that never had
+            // anything to find.
+            OwningComponent::RootDir => {
+                result.push(part.as_os_str());
+                continue;
+            }
+            OwningComponent::Normal(..) => {
                 result.push(part.as_os_str());
             }
             OwningComponent::CurDir => {}

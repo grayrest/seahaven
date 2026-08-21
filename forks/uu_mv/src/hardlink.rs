@@ -121,7 +121,7 @@ impl HardlinkTracker {
     ) -> Option<PathBuf> {
         use std::os::unix::fs::MetadataExt;
 
-        let metadata = match source.metadata() {
+        let metadata = match brush_vfs::ambient::metadata(source) {
             Ok(meta) => meta,
             Err(e) => {
                 // Gracefully handle metadata errors by logging and continuing without hardlink tracking
@@ -215,11 +215,11 @@ impl HardlinkGroupScanner {
     fn scan_single_path(&mut self, path: &Path) -> io::Result<()> {
         use std::os::unix::fs::MetadataExt;
 
-        if path.is_dir() {
+        if brush_vfs::ambient::is_dir(path) {
             // Recursively scan directory contents
             self.scan_directory_recursive(path)?;
         } else {
-            let metadata = path.metadata()?;
+            let metadata = brush_vfs::ambient::metadata(path)?;
             if metadata.nlink() > 1 {
                 let key = (metadata.dev(), metadata.ino());
                 self.hardlink_groups
@@ -240,10 +240,10 @@ impl HardlinkGroupScanner {
             let entry = entry?;
             let path = entry.path();
 
-            if path.is_dir() {
+            if brush_vfs::ambient::is_dir(&path) {
                 self.scan_directory_recursive(&path)?;
             } else {
-                let metadata = path.metadata()?;
+                let metadata = brush_vfs::ambient::metadata(&path)?;
                 if metadata.nlink() > 1 {
                     let key = (metadata.dev(), metadata.ino());
                     self.hardlink_groups.entry(key).or_default().push(path);

@@ -118,6 +118,29 @@ pub fn current_dir() -> io::Result<PathBuf> {
     Ok(PathBuf::from(current()?.cwd().as_str()))
 }
 
+/// A caller's path made absolute against the session's working directory,
+/// still expressed virtually. Mirrors `std::path::absolute`.
+///
+/// The host's version is `getcwd(2)` plus a join, so routed code that used it
+/// built a host-rooted prefix and then asked the namespace about it -- the same
+/// half-virtual shape [`current_dir`] exists to fix, one layer up. `uu_mv`
+/// is the motivating case: it makes both operands absolute before comparing
+/// them for same-file detection, and under a mount every one of those
+/// comparisons started with the host's working directory.
+///
+/// Unlike the host's version this applies the virtual-path grammar, so the
+/// result is already normalised and a path that leaves the namespace is an
+/// error rather than a string. That is the direction a confined caller wants
+/// to fail in.
+///
+/// # Errors
+/// If no session is installed, if the path is not UTF-8, or if it does not
+/// resolve within the namespace.
+pub fn absolute(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let session = current()?;
+    Ok(PathBuf::from(resolve(&session, path)?.as_str()))
+}
+
 /// Opens a directory as a capability, for `*at`-anchored traversal.
 ///
 /// The narrow exception to the path-based facade; see [`crate::dir`] and D3's
@@ -609,6 +632,35 @@ mod tests {
         assert!(exists("/work/note"));
         assert_eq!(read("note").unwrap(), b"x");
         uninstall();
+    }
+
+    #[test]
+    fn absolute_roots_a_relative_path_at_the_session_cwd() {
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = tempfile::tempdir().unwrap();
+        install_over(tmp.path());
+
+        // The host's `std::path::absolute` would answer with the *process*
+        // working directory, which is what `uu_mv` was doing wrong.
+        assert_eq!(absolute("note").unwrap(), Path::new("/work/note"));
+        assert_eq!(absolute("/work/note").unwrap(), Path::new("/work/note"));
+        // The grammar applies, so the result is already normalised.
+        assert_eq!(absolute("./sub/../note").unwrap(), Path::new("/work/note"));
+        // And a path that leaves the namespace is an error rather than a
+        // string, which is the direction a confined caller wants to fail in.
+        assert!(absolute("/work/../../etc/passwd").is_err());
+        uninstall();
+    }
+
+    #[test]
+    fn absolute_fails_closed_with_no_session() {
+        let _g = GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        uninstall();
+        assert!(absolute("note").is_err());
     }
 
     #[test]

@@ -397,3 +397,83 @@ cases:
         contents: "x\n"
       - path: "sub/d/keep.txt"
         contents: "k\n"
+
+  - name: "mv moves a file within the namespace"
+    # `uucore::fs::canonicalize` probed each accumulated prefix for a symlink
+    # starting with `/`, and the virtual root is not backed by any host object
+    # (D6), so it failed on its own first component: `mv: no such file or
+    # directory: /`. Every absolute path went through there.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && mv f.txt moved.txt && cat moved.txt"
+    expected_exit_code: 0
+    expected_stdout: "x\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
+
+  - name: "mv resolves a relative operand in the namespace, not the host"
+    # Separately from the root: `std::path::absolute` is `getcwd(2)` plus a
+    # join, so both operands of the same-file comparison were rooted at the
+    # *host* working directory and `mv` failed naming a host path component.
+    # The mount is a subdirectory precisely so the two working directories
+    # differ.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && mv f.txt d/ && cat d/f.txt"
+    expected_exit_code: 0
+    expected_stdout: "x\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
+      - path: "sub/d/keep.txt"
+        contents: "k\n"
+
+  - name: "mv into a directory operand, and onto an existing file"
+    # The multi-operand form asked the host whether the last operand was a
+    # directory and answered "no" for every virtual path, so `mv a b dir`
+    # reported `target 'dir': Not a directory`.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && mv f.txt g.txt d && cat d/f.txt d/g.txt && mv d/f.txt d/g.txt && cat d/g.txt"
+    expected_exit_code: 0
+    expected_stdout: "x\ny\nx\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
+      - path: "sub/g.txt"
+        contents: "y\n"
+      - path: "sub/d/keep.txt"
+        contents: "k\n"
+
+  - name: "mv still refuses to move a file onto itself"
+    # The same-file check runs on the canonicalized pair, so it has to keep
+    # working once both sides are resolved through the namespace rather than
+    # against the host. Asserted on the message rather than the exit code:
+    # unrouted this also exited 1, but for the wrong reason -- `no such file or
+    # directory: /` -- so the code alone does not tell the two apart.
+    args:
+      - "--mount"
+      - "/work:sub"
+      - "--closed-world"
+      - "-c"
+      - "cd /work && mv f.txt f.txt"
+    expected_exit_code: 1
+    expected_stdout: ""
+    expected_stderr: "mv: 'f.txt' and 'f.txt' are the same file\n"
+    incompatible_platforms: ["no-bundled-coreutils"]
+    test_files:
+      - path: "sub/f.txt"
+        contents: "x\n"
