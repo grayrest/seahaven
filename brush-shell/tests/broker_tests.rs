@@ -205,3 +205,48 @@ fn exec_cannot_be_used_to_reach_an_unbrokered_bundled_child() {
         "exec produced an unconfined bundled child: {stdout:?}"
     );
 }
+
+/// D15: the shell's working directory is a session fact, not a process fact.
+mod working_directory {
+    use super::{Command, Jail, confined, jail};
+
+    #[test]
+    fn a_bundled_child_resolves_relative_paths_against_the_session_cwd() {
+        // The parent no longer sets a host cwd for a bundled dispatch, so the
+        // child's *process* cwd is wherever the launcher started -- outside the
+        // mount entirely. A relative path resolving correctly therefore proves
+        // the cwd came over the handshake, not from the process.
+        let j = jail();
+        let (code, stdout, stderr) = confined(&j, "cd /work && cat inside.txt");
+        assert_eq!(code, Some(0), "stderr: {stderr:?}");
+        assert_eq!(stdout.trim(), "needle");
+    }
+
+    #[test]
+    fn an_external_command_still_follows_the_shells_cd() {
+        // The regression guard. Deleting `current_dir` for *every* external
+        // command -- which D15 as written asks for -- makes this report the
+        // launcher's directory instead, and fails 7 compatibility cases.
+        let shell_path = assert_cmd::cargo::cargo_bin!("brush");
+        let output = Command::new(shell_path)
+            .args(["--norc", "--noprofile", "-c", "cd /tmp && /bin/pwd"])
+            .output()
+            .expect("failed to spawn brush");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // macOS resolves /tmp to /private/tmp, so compare on the suffix.
+        assert!(
+            stdout.trim().ends_with("/tmp"),
+            "an external command must run where the shell says it is, got {stdout:?}"
+        );
+    }
+
+    #[test]
+    fn a_confined_shell_reports_the_virtual_cwd() {
+        // Not the host directory backing it, which is the leak a host cwd
+        // would make easy.
+        let j: Jail = jail();
+        let (code, stdout, stderr) = confined(&j, "cd /work && pwd");
+        assert_eq!(code, Some(0), "stderr: {stderr:?}");
+        assert_eq!(stdout.trim(), "/work");
+    }
+}

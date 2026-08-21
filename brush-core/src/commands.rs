@@ -251,17 +251,30 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     // Pass through args.
     cmd.args(args);
 
-    // Use the shell's current working dir, translated the same way: the child
-    // resolves it against the host, so it has to be the host directory the
-    // namespace's cwd actually names.
-    let host_cwd = context
-        .shell
-        .host_path_for_execution(context.shell.working_dir())?;
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "a child process needs a host directory; the namespace chose which one"
-    )]
-    cmd.current_dir(&host_cwd);
+    // D15: the shell's working directory is a *session* fact, and a bundled
+    // dispatch now receives the session itself (D24). Setting a host cwd for
+    // one as well would be a second answer to the same question -- and the
+    // wrong one exactly when the two disagree, which is whenever the virtual
+    // cwd is a path the host spells differently or not at all.
+    //
+    // Every other external command is a host program with no session, so a host
+    // directory is the only thing it can be told. Deleting the line for those
+    // too was measured: `cd /tmp && /bin/pwd` reports the launcher's directory
+    // instead of `/tmp`, and 7 compatibility cases fail. What D15 objected to
+    // was handing `current_dir` a *virtual* path; `host_path_for_execution`
+    // resolves through the namespace, so what reaches the kernel is the host
+    // directory the namespace chose rather than a spelling that happened to
+    // work.
+    if !bundled_dispatch {
+        let host_cwd = context
+            .shell
+            .host_path_for_execution(context.shell.working_dir())?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a host program with no session needs a host directory; the namespace chose which one"
+        )]
+        cmd.current_dir(&host_cwd);
+    }
 
     // Start with a clear environment.
     cmd.env_clear();

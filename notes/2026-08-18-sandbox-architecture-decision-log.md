@@ -569,6 +569,36 @@ env, stdio, clock/RNG, locale)`. Roc's `Env.set_cwd!` becomes `Session.set_cwd!`
 a process-global cwd cannot express `[working-directory(...)]` under `--jobs`,
 which is a latent bug in rocjust today.
 
+**Corrected — "deleted, not adapted" was right about the bug and wrong about the
+fix, and both halves were already handled before this entry was revisited.** The
+working-directory guard now asks `session().vfs().exists()`, so it is the
+namespace that answers. And `current_dir` was *adapted*: it takes
+`host_path_for_execution(working_dir())`, which resolves through the namespace
+rather than passing the virtual spelling through. The premise the deletion rested
+on — that a virtual path satisfies neither — stopped being true at that point.
+
+**Deleting it outright was tried and measured.** `cd /tmp && /bin/pwd` reports
+the launcher's directory instead of `/tmp`, and **7 compatibility cases fail**.
+An external command is a host program with no session; a host directory is the
+only thing it can be told, and removing that leaves it with whatever directory
+the launcher happened to start in.
+
+**So the line is deleted for the one caller that no longer needs it: a bundled
+dispatch, which receives the cwd over D24's handshake.** Setting a host cwd for
+it as well would be a second answer to the same question, and the wrong one
+exactly when the two disagree. That is the entry's actual property — the cwd is a
+session fact — established everywhere a session exists, rather than a deletion
+that removes the mechanism from callers that have no replacement for it.
+
+The evidence the session's cwd is what a bundled child uses: its *process* cwd is
+now the launcher's, outside the mount entirely, and `cd /work && cat inside.txt`
+still resolves.
+
+**Not finished here.** The `(env, stdio, clock/RNG, locale)` members of a session
+belong to D21, D14 and D33; the handshake could carry them and does not. And the
+rocjust half — `Env.set_cwd!` becoming `Session.set_cwd!` — is that project's, not
+this one's.
+
 ## D16 — Launcher sets the ceiling; a manifest may only narrow it
 
 A repo-local manifest is attacker-controlled input. The launcher's config defines
