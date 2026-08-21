@@ -744,7 +744,66 @@ fn check_build(sh: &Shell, verbose: bool) -> Result<()> {
     cmd!(sh, "cargo {args...}")
         .run()
         .context("Build check failed")?;
+
+    check_cross_platform(sh, verbose)?;
+
     eprintln!("Build check passed.");
+    Ok(())
+}
+
+/// Targets checked in addition to the host, and the crate set checked for them.
+///
+/// Not the whole workspace: `libfuzzer-sys` and `onig_sys` are C libraries that
+/// need a cross toolchain the average dev box does not have, and `onig_sys`
+/// arrives through `uu_expr`, so a workspace-wide cross check would fail on
+/// setup rather than on code. These are the crates that carry the sandbox, which
+/// is where a platform assumption actually costs something.
+const CROSS_TARGETS: &[&str] = &["x86_64-pc-windows-gnu"];
+
+/// Crates whose platform assumptions are worth catching before CI does.
+const CROSS_CRATES: &[&str] = &[
+    "brush-vfs",
+    "brush-core",
+    "brush-builtins",
+    "brush-parser",
+    "brush-interactive",
+    "brush-shell",
+    "brush-coreutils-builtins",
+];
+
+/// Checks the sandbox crates against non-host targets.
+///
+/// A native-only check is how `brush-vfs` came to not compile for Windows at
+/// all: `std::os::fd` in a signature and a `libc` constant in an expression,
+/// neither visible from macOS, both caught by CI or a user rather than by the
+/// person who wrote them. Cross-checking is cheap next to that.
+///
+/// Skips with a warning when the target's std is not installed, rather than
+/// failing: a contributor who has not run `rustup target add` should not be
+/// blocked, and CI installs the targets it cares about.
+fn check_cross_platform(sh: &Shell, verbose: bool) -> Result<()> {
+    let installed = cmd!(sh, "rustup target list --installed")
+        .quiet()
+        .read()
+        .unwrap_or_default();
+
+    for target in CROSS_TARGETS {
+        if !installed.lines().any(|l| l.trim() == *target) {
+            eprintln!(
+                "  skipping {target}: not installed (`rustup target add {target}` to enable)"
+            );
+            continue;
+        }
+        eprintln!("  checking {target}...");
+        for krate in CROSS_CRATES {
+            if verbose {
+                eprintln!("    cargo check -p {krate} --target {target}");
+            }
+            cmd!(sh, "cargo check --quiet -p {krate} --target {target}")
+                .run()
+                .with_context(|| format!("{krate} does not compile for {target}"))?;
+        }
+    }
     Ok(())
 }
 
