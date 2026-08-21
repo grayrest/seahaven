@@ -401,18 +401,68 @@ fn check_forks(sh: &Shell, verbose: bool) -> Result<()> {
             );
         }
         let _guard = sh.push_dir(&dir);
-        let output = if let Some(features) = features {
-            cmd!(sh, "cargo test --features {features}")
-                .ignore_status()
-                .quiet()
-                .read()
-        } else {
-            cmd!(sh, "cargo test").ignore_status().quiet().read()
-        }
-        .with_context(|| format!("running fork {name}'s suite"))?;
 
-        let failed = parse_test_failures(&output);
+        // Compile the fork before asking what its tests did.
+        //
+        // `cargo test` builds only what it is about to run, and 20 of these
+        // forks have nothing to run: upstream sets `[lib] test = false` when
+        // its tests live in a workspace `tests/` directory, which the fork does
+        // not vendor. For those, `cargo test` compiles *nothing at all* and
+        // exits 0, so a fork could stop compiling entirely and still be counted
+        // green. `--all-targets` asks for the lib and its `cfg(test)` build
+        // regardless of that flag.
+        let checked = cargo(sh, &["check", "--all-targets"], features)
+            .with_context(|| format!("checking fork {name}"))?;
+        let check_stderr = String::from_utf8_lossy(&checked.stderr);
+        if verbose {
+            eprint!("{check_stderr}");
+        }
+        if !checked.status.success() {
+            anyhow::bail!(
+                "fork {name} does not compile -- `cargo check --all-targets` exited with {}:\n{}",
+                checked.status,
+                tail(&check_stderr, 40),
+            );
+        }
+
+        // `output` rather than `read`: the exit status is the only thing that
+        // separates "the suite ran and some tests failed" from "the suite never
+        // ran", and `read` discards it. Capturing stderr too keeps 52 forks'
+        // build warnings out of the terminal -- the noise a real error has to
+        // compete with -- and hands it back on the failure path below.
+        let output = cargo(sh, &["test"], features)
+            .with_context(|| format!("running fork {name}'s suite"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if verbose {
+            eprint!("{stderr}");
+        }
+
+        let failed = parse_test_failures(&stdout);
         let known = known_failures(&dir);
+
+        // A suite that never ran is not a suite that passed. `cargo test` exits
+        // non-zero both for a failing test and for a fork that does not build,
+        // and only the first is what `known-test-failures.txt` describes. The
+        // discriminator is whether the run named a failing test: a build error
+        // names none, so without this the fork counts as green while running
+        // nothing at all. That is not hypothetical -- `forks/sed` sat behind a
+        // passing gate with its whole suite uncompilable, because upstream's
+        // own `ctor` dependency collided with the one `vendor-fork` injected.
+        //
+        // Checked before the known-failure comparison below, which a build
+        // error would otherwise fail with a much more confusing message: every
+        // entry in the list "now passes", because nothing ran.
+        if !output.status.success() && failed.is_empty() {
+            anyhow::bail!(
+                "fork {name}'s suite did not run to completion: `cargo test` exited with \
+                 {} but named no failing test, so this is a build or harness failure rather \
+                 than a test result:\n{}",
+                output.status,
+                tail(&stderr, 40),
+            );
+        }
 
         let unexpected: Vec<&String> = failed.iter().filter(|t| !known.contains(*t)).collect();
         // D13's mirror rule: an entry that no longer fails is itself an error,
@@ -477,6 +527,30 @@ fn parse_test_failures(output: &str) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+/// Runs a cargo subcommand in the shell's current directory, capturing both
+/// streams and the exit status, with the fork's feature set appended if it has
+/// one.
+fn cargo(sh: &Shell, args: &[&str], features: Option<&str>) -> Result<std::process::Output> {
+    let mut argv: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+    if let Some(features) = features {
+        argv.push("--features".to_owned());
+        argv.push(features.to_owned());
+    }
+    Ok(cmd!(sh, "cargo {argv...}")
+        .ignore_status()
+        .quiet()
+        .output()?)
+}
+
+/// The last `n` lines of `text`.
+///
+/// A build log is far too long to put in an error message whole, and the part
+/// that says what went wrong is at the end.
+fn tail(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
 }
 
 /// A fork's recorded known-failing upstream tests.
