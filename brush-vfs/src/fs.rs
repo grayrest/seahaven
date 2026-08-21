@@ -2411,6 +2411,60 @@ mod tests {
     }
 
     #[test]
+    fn the_namespaces_own_directories_are_not_directories() {
+        // A **documented limit**, pinned so it cannot drift into an accident.
+        //
+        // Every path in this namespace is backed by a host object, and the
+        // namespace's own shape is not: `/` exists because `/work` and `/ro`
+        // were mounted, and nothing on any host is it. `locate` steps *through*
+        // such a directory -- that is what `has_mount_below` is for -- but only
+        // when more components follow, so it can be traversed and never named.
+        //
+        // The consequence a reader will meet first is that `cd /`, `[ -d / ]`
+        // and `echo /*` all fail in a confined shell. See D6 for why this is
+        // accepted rather than fixed, and `Shell::set_mounts`, which lands the
+        // shell at the shallowest mount point precisely because the root it
+        // would prefer does not exist.
+        let f = fixture();
+        assert!(
+            f.vfs.facts(&vp("/"), true).is_none(),
+            "the virtual root is not a directory when nothing is mounted at it"
+        );
+        assert!(!f.vfs.exists(&vp("/")));
+        assert!(f.vfs.read_dir_names(&vp("/")).is_err());
+
+        // And the mount points beneath it resolve perfectly well, which is what
+        // makes the limit surprising rather than obviously consistent.
+        assert!(f.vfs.facts(&vp("/work"), true).is_some_and(|x| x.is_dir));
+        assert!(f.vfs.facts(&vp("/ro"), true).is_some_and(|x| x.is_dir));
+    }
+
+    #[test]
+    fn a_mount_point_ancestor_is_not_a_directory_either() {
+        // The same limit one level down: `/deep` exists only because
+        // `/deep/nested` is mounted.
+        let root = tempfile::tempdir().expect("temp dir");
+        let host = root.path().join("host");
+        std::fs::create_dir(&host).expect("mkdir host");
+        std::fs::write(host.join("f.txt"), b"x").expect("write");
+
+        let vfs = Vfs::new(
+            MountTable::builder()
+                .mount("/deep/nested", &host, Access::ReadWrite)
+                .unwrap()
+                .build()
+                .expect("builds"),
+        );
+
+        assert!(vfs.facts(&vp("/deep"), true).is_none());
+        assert!(!vfs.exists(&vp("/deep")));
+
+        // Traversal *through* it works, which is the asymmetry: the walk knows
+        // the directory is real and every other caller does not.
+        assert!(vfs.exists(&vp("/deep/nested/f.txt")));
+    }
+
+    #[test]
     fn a_read_only_mount_is_never_writable() {
         let f = fixture();
         let w = AccessModes {

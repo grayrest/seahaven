@@ -386,6 +386,41 @@ a single real subtree and WASI-style real preopens — both leak host layout, so
 nothing is hermetic and Windows drive letters reach scripts. Virtualisation makes
 host paths *unnameable*: an escape has no syntax.
 
+**Corrected — "the union is the app's `/`" overstates it, and the difference is
+a shipped limit rather than a bug.** Every path this namespace resolves is
+backed by a host object, and the namespace's *own shape* is not. `/` exists
+because `/work` was mounted; nothing on any host is `/`. So under any policy
+that does not mount `/` itself:
+
+```
+brush --mount /work:DIR:rw -c '[ -d / ]'    # false
+brush --mount /work:DIR:rw -c 'cd /'        # no such file or directory
+brush --mount /work:DIR:rw -c 'echo /*'     # /*, unexpanded
+```
+
+The same holds for any ancestor of a mount point: `--mount /deep/nested:DIR`
+makes `/deep/nested` a directory and leaves `/deep` nothing at all.
+
+`locate` already knows better and only halfway. Its `has_mount_below` branch
+steps *through* such a directory, because a walk must — but the branch is
+guarded on more components following, so these paths can be traversed and never
+named. `Shell::set_mounts` works around the consequence directly: it probes
+`exists(&root)` and, when the root is not there, lands the shell at the
+shallowest mount point, "the closest thing to a root the policy offers".
+
+**Synthesising them was considered and declined.** It would make the sentence
+above true and remove that workaround, at the price of inventing metadata —
+there is no inode, so mode, times and ids would have to be fabricated, and
+`test -ef` and `-nt` would compare fabrications. The narrower alternative,
+forbidding policies that need synthetic directories, was also declined: it
+outlaws `--mount /work:DIR` on its own, which is the documented form and what
+every compatibility case uses.
+
+So the limit is accepted and **pinned by tests rather than left to be
+rediscovered** — two in `brush-vfs/src/fs.rs`'s suite and two in
+`tests/cases/brush/sandbox.yaml` — because a surprising behaviour with no test
+is one a later reader repairs without knowing it was a decision.
+
 **Corrected — three leaks in that claim.** `echo ~root` names a host path
 (`expansion.rs:1050` → passwd DB). Same class, all function calls rather than
 variables so D21's policy does not reach them: `prompt.rs:87,96,118` (`\u`, root

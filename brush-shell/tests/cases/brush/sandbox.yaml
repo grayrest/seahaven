@@ -119,6 +119,24 @@ cases:
     expected_exit_code: 0
     expected_stdout: "same\ndone\n"
 
+  - name: "The virtual root is not a directory"
+    # A documented limit, not an oversight -- see D6. Every path in the
+    # namespace is backed by a host object, and the root is not: it exists
+    # because /work was mounted, and nothing on any host is it. Pinned here
+    # because the failure is surprising enough that a future reader would
+    # reasonably take it for a bug and "fix" it without reading D6.
+    args: ["--mount", "/work:.", "-c", "[ -d / ] && echo yes || echo no"]
+    expected_exit_code: 0
+    expected_stdout: "no\n"
+
+  - name: "cd cannot enter the virtual root"
+    # Which is why `Shell::set_mounts` lands the shell at the shallowest mount
+    # point rather than at `/`.
+    args: ["--mount", "/work:.", "-c", "cd /"]
+    expected_exit_code: 1
+    expected_stdout: ""
+    ignore_stderr: true
+
   - name: "cd navigates within the namespace"
     args:
       - "--mount"
