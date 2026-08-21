@@ -7,6 +7,7 @@ mod brushctl;
 mod builtinallowlist;
 pub mod bundled;
 pub mod config;
+pub mod discovery;
 pub mod entry;
 mod error_formatter;
 pub mod events;
