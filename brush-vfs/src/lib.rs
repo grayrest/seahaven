@@ -21,6 +21,6 @@ pub mod session;
 pub mod walk;
 
 pub use fs::{AccessModes, FileFacts, OpenMode, Vfs};
-pub use mount::{Access, Mount, MountError, MountTable};
+pub use mount::{Access, Mount, MountError, MountHandle, MountLoan, MountTable};
 pub use path::{PathError, VirtualPath};
 pub use session::{Policy, Session};

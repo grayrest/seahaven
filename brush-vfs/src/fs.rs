@@ -914,7 +914,18 @@ impl Vfs {
     /// namespace.
     pub fn host_path(&self, path: &VirtualPath) -> std::io::Result<PathBuf> {
         let located = self.locate_follow(path)?;
-        Ok(located.mount.canonical_host_path().join(&located.relative))
+        // A namespace assembled from broker-received handles (D24) has no host
+        // paths at all, so there is nothing to translate to. Erroring is the
+        // whole point: a confined child cannot name the host, and the one
+        // caller of this -- translating a program's path for `exec` -- is
+        // something such a child never does.
+        let root = located.mount.canonical_host_path().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "this namespace was received as capabilities and has no host paths",
+            )
+        })?;
+        Ok(root.join(&located.relative))
     }
 
     /// Reads a symlink's target verbatim, without resolving it.
@@ -1421,6 +1432,7 @@ mod tests {
             .find(|m| m.mount_point().as_str() == "/work")
             .expect("/work is mounted")
             .host_path()
+            .expect("a mount built from a host directory has a host path")
             .to_path_buf()
     }
 
