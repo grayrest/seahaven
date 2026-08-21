@@ -69,9 +69,16 @@ experimental = [
     "experimental-parser",
 ]
 experimental-builtins = ["dep:brush-experimental-builtins"]
+# All four uutils projects D4 names, not just coreutils. The name is kept for
+# the feature's existing consumers; what it covers is every bundled utility.
+# Without `findutils.all` and `textutils.all` the crates are forked, routed and
+# registered and then unreachable, so `find`, `grep` and `sed` fall through to
+# the host's copies -- which a closed world refuses rather than confines.
 experimental-bundled-coreutils = [
     "dep:brush-coreutils-builtins",
     "brush-coreutils-builtins/coreutils.all",
+    "brush-coreutils-builtins/findutils.all",
+    "brush-coreutils-builtins/textutils.all",
 ]
 experimental-load = ["dep:serde_json", "brush-core/serde"]
 experimental-parser = [
