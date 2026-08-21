@@ -15,7 +15,8 @@ use std::io::{self, stderr, stdout, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::SystemTime;
-use walkdir::WalkDir;
+// FLATLAND DIVERGENCE (D13 residual patch): see matchers/entry.rs.
+use brush_vfs::ambient::walk;
 
 pub struct Config {
     same_file_system: bool,
@@ -211,7 +212,7 @@ fn process_dir(
     matcher: &dyn matchers::Matcher,
     quit: &mut bool,
 ) -> i32 {
-    let mut walkdir = WalkDir::new(dir)
+    let mut walkdir = walk(dir)
         .contents_first(config.depth_first)
         .max_depth(config.max_depth)
         .min_depth(config.min_depth)

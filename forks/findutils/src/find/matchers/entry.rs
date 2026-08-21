@@ -10,7 +10,11 @@ use std::io::{self, ErrorKind};
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 
-use walkdir::DirEntry;
+// FLATLAND DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
+// and reads them itself, so `find` enumerated the host tree whatever the
+// namespace said. `brush_vfs::walk` mirrors its API and stays inside it. See
+// `plans/2026-08-21-vfs-walker.md`.
+use brush_vfs::walk::DirEntry;
 
 use super::Follow;
 
@@ -165,14 +169,14 @@ impl From<&io::Error> for WalkError {
     }
 }
 
-impl From<walkdir::Error> for WalkError {
-    fn from(e: walkdir::Error) -> Self {
+impl From<brush_vfs::walk::Error> for WalkError {
+    fn from(e: brush_vfs::walk::Error) -> Self {
         Self::from(&e)
     }
 }
 
-impl From<&walkdir::Error> for WalkError {
-    fn from(e: &walkdir::Error) -> Self {
+impl From<&brush_vfs::walk::Error> for WalkError {
+    fn from(e: &brush_vfs::walk::Error) -> Self {
         Self {
             path: e.path().map(std::borrow::ToOwned::to_owned),
             depth: Some(e.depth()),
@@ -215,10 +219,10 @@ impl WalkEntry {
         }
     }
 
-    /// Convert a [walkdir::DirEntry] to a [WalkEntry].  Errors due to broken symbolic links will be
+    /// Convert a [`DirEntry`] to a [`WalkEntry`].  Errors due to broken symbolic links will be
     /// converted to valid entries, but other errors will be propagated.
     pub fn from_walkdir(
-        result: walkdir::Result<DirEntry>,
+        result: Result<DirEntry, brush_vfs::walk::Error>,
         follow: Follow,
     ) -> Result<Self, WalkError> {
         let result = result.map_err(WalkError::from);

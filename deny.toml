@@ -105,17 +105,31 @@ allow = []
 #     until it is added here on purpose.
 deny = [
   # Recursive directory traversal with no directory handle to anchor it.
+  #
+  # Down to one code path that could use it, from four. `find`, `grep -r` and
+  # `cp -r` now walk through `brush_vfs::walk`, which descends by directory
+  # capability and yields virtual paths, so their dependency on this crate is
+  # gone rather than exempted.
   { crate = "walkdir", wrappers = [
     # Test and benchmark infrastructure.
     "brush-shell",
     "brush-test-harness",
     "criterion",
-    "globwalk",
     "insta",
-    # The bundled coreutils, and what they pull in.
+    # The reference implementation the walk is differentially tested against:
+    # a dev-dependency of `brush-vfs`, and the most legitimate use of it here.
+    "brush-vfs",
+    # `sed`'s dev-dependencies reach it through `assert_fs`; nothing shipped does.
+    "globwalk",
     "ignore",
+    # `uu_tail -f` watches files, which has no namespace expression at all.
     "notify",
-    "uu_cp",
+    # `uucore::perms::dive_into`, which is unreachable from anything bundled:
+    # `chmod`, `chown` and `chgrp` are not in the coreutils set, and on Linux
+    # `perms` uses the vfs-rooted `DirFd` path regardless. Porting it needs a
+    # routed `chown` -- `libc::chown` takes a host path, so a virtual one from
+    # the walk would be wrong -- which is real trusted-boundary code written for
+    # a caller that does not exist. Left, and this comment is why.
     "uucore",
   ] },
   # Extended attributes, addressed by path; no `*at` form is exposed. This one

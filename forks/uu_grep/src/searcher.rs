@@ -17,7 +17,11 @@ use std::mem::ManuallyDrop;
 use std::ops::ControlFlow;
 use std::path::Path;
 use uucore::error::{ExitCode, FromIo, UResult};
-use walkdir::WalkDir;
+// FLATLAND DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
+// and reads them itself, so `grep -r` enumerated the host tree even when every
+// read was refused. `brush_vfs::walk` mirrors its API and stays in the
+// namespace. See `plans/2026-08-21-vfs-walker.md`.
+use brush_vfs::ambient::walk;
 
 pub struct Searcher<'a> {
     config: &'a Config<'a>,
@@ -133,7 +137,7 @@ impl<'a> Searcher<'a> {
         start: &Path,
         strip_root: bool,
     ) -> ControlFlow<()> {
-        let mut walker = WalkDir::new(start)
+        let mut walker = walk(start)
             .follow_links(self.config.follow_symlinks)
             .into_iter();
 

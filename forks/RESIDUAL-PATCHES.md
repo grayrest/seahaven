@@ -52,13 +52,27 @@ them in signatures, so the names follow the calls. Everything else the codemod
 touches keeps its `std` type, which is what makes it an identifier swap rather
 than a type swap (D34).
 
-## `findutils` — an exemption and a known divergence, not a patch
+## `findutils`, `uu_cp`, `uu_grep` — the walk
 
-`find` is **not registered** in the bundled command set. Its `std::fs` sites are
-routed, but its traversal is `walkdir`, which reads directories itself and is
-banned in `deny.toml` for that reason. An unconfined `find` is worse than no
-`find`. `known-test-failures.txt` records the one upstream test that diverges
+Each swapped `walkdir` for `brush_vfs::walk`, which mirrors its API, so the
+change is an import and a constructor per crate. `uu_cp` also swaps the error
+type its `CpError::WalkDirErr` wraps, and `findutils` swaps the entry and error
+types its `WalkEntry` adapter converts from. Their `walkdir` dependency is
+removed from the generated manifest, which is why `deny.toml` no longer lists
+them.
+
+`findutils/known-test-failures.txt` records the one upstream test that diverges
 under routing, macOS only.
+
+## `uucore::perms` — left on `walkdir`, deliberately
+
+`dive_into` is the last walk in the fork set that is not routed, and it stays
+that way. It is unreachable from anything bundled: `chmod`, `chown` and `chgrp`
+are not in the coreutils set, and on Linux `perms` takes the vfs-rooted `DirFd`
+path regardless. Porting it would need a routed `chown` -- `libc::chown` takes a
+host path, so a virtual one from the walk would be wrong -- which is real
+trusted-boundary code written for a caller that does not exist. `deny.toml` says
+the same thing next to the entry.
 
 ## `uu_df` — an exemption, not a patch
 

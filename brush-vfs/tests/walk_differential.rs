@@ -296,3 +296,55 @@ fn skip_current_dir_abandons_the_rest_of_that_directory() {
     assert_eq!(collect_ours, collect_reference, "skip_current_dir disagrees");
     brush_vfs::ambient::uninstall();
 }
+
+#[test]
+fn a_walk_rooted_outside_the_mount_enumerates_nothing() {
+    // Gate 3, and the reason the milestone exists. `walkdir` reads directories
+    // itself, so `grep -r` and `find` over a host path listed the tree and only
+    // then failed each read -- content contained, structure not. An exit code
+    // cannot tell that apart from never having looked, so this asserts on what
+    // the walk *yielded*.
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let outside = fixture();
+    let jail = tempfile::tempdir().unwrap();
+    install(jail.path());
+
+    for root in [
+        outside.path().to_string_lossy().into_owned(),
+        "/etc".to_string(),
+        "/work/../..".to_string(),
+    ] {
+        let items = from_vfs(Path::new("/work"), brush_vfs::ambient::walk(&root));
+        let entries = items
+            .iter()
+            .filter(|i| matches!(i, Item::Entry { .. }))
+            .count();
+        assert_eq!(entries, 0, "walking {root} yielded {entries} entries: {items:?}");
+        assert!(
+            matches!(items.as_slice(), [Item::Err { .. }]),
+            "walking {root} should report exactly one error and stop: {items:?}"
+        );
+    }
+
+    // For contrast: the same walk inside the mount does yield entries, so the
+    // assertion above is not passing because the walker yields nothing at all.
+    let inside = from_vfs(Path::new("/work"), brush_vfs::ambient::walk("/work"));
+    assert!(
+        inside.iter().any(|i| matches!(i, Item::Entry { .. })),
+        "the walker must still walk what it is allowed to"
+    );
+
+    brush_vfs::ambient::uninstall();
+}
+
+#[test]
+fn a_walk_with_no_session_yields_one_error_and_stops() {
+    let _g = GUARD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    brush_vfs::ambient::uninstall();
+
+    let items = from_vfs(Path::new("/work"), brush_vfs::ambient::walk("/work"));
+    assert!(
+        matches!(items.as_slice(), [Item::Err { .. }]),
+        "fail closed: {items:?}"
+    );
+}

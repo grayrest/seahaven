@@ -122,6 +122,33 @@ fn lint_args(verbose: bool) -> Vec<&'static str> {
     args
 }
 
+/// Fails when `deny.toml`'s `wrappers` lists no longer describe the tree.
+///
+/// `cargo-deny` reports a `wrappers` entry that is not a real parent, and a real
+/// parent that is not listed, as `unmatched-wrapper` and `unused-wrapper` --
+/// **warnings**, so it exits 0 while saying the inventory is wrong.
+///
+/// That inventory is not decoration. Each entry records a dependency that is
+/// knowingly unrouted, so a stale one is a claim about confinement that stopped
+/// being true. It went stale exactly this way once already: `findutils` and
+/// `uu_grep` became parents of `walkdir` and nothing failed.
+fn assert_no_unmatched_wrappers(output: &str) -> Result<()> {
+    let stale: Vec<&str> = output
+        .lines()
+        .filter(|l| l.contains("unmatched-wrapper") || l.contains("unused-wrapper"))
+        .collect();
+    anyhow::ensure!(
+        stale.is_empty(),
+        "deny.toml's wrappers no longer describe the tree ({} issue(s)). These are \
+         warnings to cargo-deny, which exits 0, but each entry records a dependency \
+         that is knowingly unrouted -- so a stale one is a confinement claim that \
+         stopped being true:\n  {}",
+        stale.len(),
+        stale.join("\n  ")
+    );
+    Ok(())
+}
+
 /// Path of the crate that must fail to lint, relative to the workspace root.
 const BAN_FIXTURE: &str = "xtask/fixtures/banned-fs-access";
 
@@ -677,10 +704,19 @@ fn check_deps(sh: &Shell, verbose: bool) -> Result<()> {
     if verbose {
         eprintln!("Running: cargo deny --all-features check all");
     }
-    cmd!(sh, "cargo deny --all-features check all")
-        .run()
-        .context("Dependency check failed")?;
+    // Captured rather than streamed, because the interesting failure is a
+    // *warning*; see `assert_no_unmatched_wrappers`.
+    let output = cmd!(sh, "cargo deny --all-features check all")
+        .ignore_status()
+        .read_stderr()
+        .context("Failed to run cargo-deny")?;
+    eprint!("{output}");
+    anyhow::ensure!(
+        !output.contains("error["),
+        "Dependency check failed"
+    );
 
+    assert_no_unmatched_wrappers(&output)?;
     check_vfs_has_no_features()?;
 
     eprintln!("Dependency check passed.");

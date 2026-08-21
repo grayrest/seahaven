@@ -33,9 +33,6 @@ version = "69"
 [dependencies.uucore]
 version = "0.8.0"
 
-[dependencies.walkdir]
-version = "2.5"
-
 [dev-dependencies.criterion]
 package = "codspeed-criterion-compat"
 version = "4.7.0"

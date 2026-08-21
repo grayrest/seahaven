@@ -24,7 +24,11 @@ use uucore::fs::{
 use uucore::show;
 use uucore::translate;
 use uucore::uio_error;
-use walkdir::{DirEntry, WalkDir};
+// FLATLAND DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
+// and reads them itself, so `cp -r` enumerated the host tree regardless of the
+// namespace. `brush_vfs::walk` mirrors its API and stays inside it.
+use brush_vfs::ambient::walk;
+use brush_vfs::walk::DirEntry;
 
 #[cfg(all(feature = "selinux", any(target_os = "linux", target_os = "android")))]
 use crate::set_selinux_context;
@@ -465,7 +469,7 @@ pub(crate) fn copy_directory(
     let mut dirs_needing_permissions: Vec<DirNeedingPermissions> = Vec::new();
 
     // Traverse the contents of the directory, copying each one.
-    for direntry_result in WalkDir::new(root)
+    for direntry_result in walk(root)
         .same_file_system(options.one_file_system)
         .follow_links(options.dereference)
     {

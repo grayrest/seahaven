@@ -263,10 +263,9 @@ pub fn bundled_commands() -> HashMap<String, fn(Vec<OsString>) -> i32> {
     // The other three uutils projects (D4). Each has its own entry shape.
     register_at!(m, "textutils.grep", "grep", "grep", uu_grep::uumain);
     register_at!(m, "textutils.sed", "sed", "sed", sed::sed::uumain);
-    // `find` is not registered; see the note on `findutils.all` in Cargo.toml.
-    // The fork exists and is routed, but its walk is `walkdir` and is not
-    // confined, and `find` is the one utility whose whole purpose is
-    // enumerating the filesystem.
+    register_findutils!(m, "findutils.find", "find", |args: &[&str]| {
+        findutils::find::find_main(args, &findutils::find::StandardDependencies::new())
+    });
     register_findutils!(m, "findutils.xargs", "xargs", findutils::xargs::xargs_main);
 
     m

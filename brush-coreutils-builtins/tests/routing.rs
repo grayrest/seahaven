@@ -299,13 +299,16 @@ fn findutils_and_textutils_are_confined() {
         "xargs must not read an argument file outside the mount"
     );
 
-    // `find` is deliberately not registered -- its walk is walkdir and is not
-    // confined. If it ever appears here without a vfs-backed walker, that is
-    // the regression this asserts.
-    assert!(
-        !cmds.contains_key("find"),
-        "find must not be bundled until its traversal is confined"
+    // `find` is the case the walker was built for. Rooted outside the mount it
+    // must enumerate *nothing* -- asserted on output rather than exit code,
+    // because "enumerated then refused every read" and "never enumerated" are
+    // the same exit code and only one of them is confinement.
+    assert_ne!(
+        run("find", &[&outside]),
+        0,
+        "find must not walk a host tree outside the mount"
     );
+    assert_eq!(run("find", &["/work"]), 0, "find in-mount");
 
     brush_vfs::ambient::uninstall();
 }

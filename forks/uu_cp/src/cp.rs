@@ -73,9 +73,12 @@ pub enum CpError {
     #[error("{}", translate!("cp-error-not-all-files-copied"))]
     NotAllFilesCopied,
 
-    /// Simple [`walkdir::Error`] wrapper
+    /// Simple walk-error wrapper.
+    ///
+    /// FLATLAND DIVERGENCE (D13 residual patch): the walk is `brush_vfs::walk`,
+    /// whose `Error` mirrors `walkdir::Error`.
     #[error("{0}")]
-    WalkDirErr(#[from] walkdir::Error),
+    WalkDirErr(#[from] brush_vfs::walk::Error),
 
     /// Simple [`StripPrefixError`] wrapper
     #[error(transparent)]
