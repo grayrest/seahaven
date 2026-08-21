@@ -49,9 +49,16 @@ jobs:
           tool: cargo-fuzz
 
       - name: Run ${{ matrix.target }}
+        env:
+          # Bound to the environment rather than spliced into the script. A
+          # `workflow_dispatch` input is text supplied by whoever triggered the
+          # run, and interpolating it into `run:` makes that text *code* --
+          # `900" ; curl ... ; "` would execute. As `$DURATION_SECONDS` the
+          # shell reads it as a value, whatever it contains.
+          DURATION_SECONDS: ${{ inputs.duration_seconds || '900' }}
         run: |
           cargo +nightly fuzz run "${{ matrix.target }}" \
-            -- -max_total_time="${{ inputs.duration_seconds || '900' }}" \
+            -- -max_total_time="$DURATION_SECONDS" \
                -print_final_stats=1
 
       # The corpus in the repository is a seed, not the whole of what the run

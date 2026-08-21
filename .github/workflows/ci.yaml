@@ -745,7 +745,15 @@ jobs:
 
     name: "OS target tests (${{ matrix.description }})"
     runs-on: ubuntu-24.04
-    container: ${{ matrix.container }}
+    # The floating tags are the point of this job, so the unpinned-images audit
+    # is suppressed rather than satisfied. It tests the shell against the
+    # distributions' *current* userland -- the Tumbleweed entry says as much
+    # above, "to make sure we get a recent enough version of bash" -- and
+    # pinning each image by digest would freeze exactly the drift the job exists
+    # to catch, turning a rolling-distro check into a snapshot that ages out
+    # silently. The images are official distro repositories, and the job builds
+    # nothing that is published: it runs the test suite and reports.
+    container: ${{ matrix.container }} # zizmor: ignore[unpinned-images]
     needs: build
     env:
       # Reference: https://github.com/Azure/azure-cli/issues/29835
