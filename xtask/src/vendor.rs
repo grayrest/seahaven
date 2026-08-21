@@ -394,6 +394,17 @@ fn write_manifest(src: &Path, dest: &Path, name: &str) -> Result<()> {
     // fork is not a member of; upstream's own lint levels are irrelevant here.
     manifest.remove("lints");
 
+    // `[lib] test = false` is upstream saying "my tests are not in this target"
+    // -- true there, where they live in a workspace `tests/` directory, and
+    // false here, where the fork carries only the lib and everything testable
+    // is inside it. Left in place it does not merely skip tests: `cargo test`
+    // finds no target at all, compiles *nothing*, and exits 0, so the fork
+    // counts as green in D13's health metric while its inline `cfg(test)`
+    // modules and the generated identity session are never even built.
+    if let Some(toml::Value::Table(lib)) = manifest.get_mut("lib") {
+        lib.remove("test");
+    }
+
     if let Some(toml::Value::Table(package)) = manifest.get_mut("package") {
         // The README is not vendored, so a reference to it would fail to package.
         package.remove("readme");

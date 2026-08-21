@@ -35,7 +35,6 @@ version = "0.8"
 doctest = false
 name = "uu_ptx"
 path = "src/ptx.rs"
-test = false
 
 [package]
 autobenches = false

@@ -37,7 +37,6 @@ version = "0.8"
 doctest = false
 name = "uu_sum"
 path = "src/sum.rs"
-test = false
 
 [package]
 autobenches = false

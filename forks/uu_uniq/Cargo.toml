@@ -41,7 +41,6 @@ version = "0.10.0"
 doctest = false
 name = "uu_uniq"
 path = "src/uniq.rs"
-test = false
 
 [package]
 autobenches = false

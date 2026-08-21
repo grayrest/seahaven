@@ -56,7 +56,6 @@ version = "0.10.0"
 doctest = false
 name = "uu_wc"
 path = "src/wc.rs"
-test = false
 
 [package]
 autobenches = false

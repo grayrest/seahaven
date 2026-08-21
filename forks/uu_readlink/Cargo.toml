@@ -30,7 +30,6 @@ version = "0.8"
 doctest = false
 name = "uu_readlink"
 path = "src/readlink.rs"
-test = false
 
 [package]
 autobenches = false

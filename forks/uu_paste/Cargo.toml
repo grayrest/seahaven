@@ -30,7 +30,6 @@ version = "0.8"
 doctest = false
 name = "uu_paste"
 path = "src/paste.rs"
-test = false
 
 [package]
 autobenches = false

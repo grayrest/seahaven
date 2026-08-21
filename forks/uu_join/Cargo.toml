@@ -47,7 +47,6 @@ version = "0.10.0"
 doctest = false
 name = "uu_join"
 path = "src/join.rs"
-test = false
 
 [package]
 autobenches = false

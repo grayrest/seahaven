@@ -29,7 +29,6 @@ version = "0.8"
 doctest = false
 name = "uu_link"
 path = "src/link.rs"
-test = false
 
 [package]
 autobenches = false

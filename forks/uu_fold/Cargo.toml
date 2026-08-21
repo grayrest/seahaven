@@ -43,7 +43,6 @@ version = "0.10.0"
 doctest = false
 name = "uu_fold"
 path = "src/fold.rs"
-test = false
 
 [package]
 autobenches = false

@@ -42,7 +42,6 @@ version = "0.8"
 doctest = false
 name = "uu_nproc"
 path = "src/nproc.rs"
-test = false
 
 [package]
 autobenches = false

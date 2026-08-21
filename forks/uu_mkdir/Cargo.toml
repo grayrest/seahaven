@@ -38,7 +38,6 @@ smack = ["uucore/smack"]
 doctest = false
 name = "uu_mkdir"
 path = "src/mkdir.rs"
-test = false
 
 [package]
 autobenches = false

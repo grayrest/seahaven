@@ -36,7 +36,6 @@ version = "0.8"
 doctest = false
 name = "uu_ln"
 path = "src/ln.rs"
-test = false
 
 [package]
 autobenches = false

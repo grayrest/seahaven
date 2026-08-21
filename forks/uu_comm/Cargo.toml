@@ -30,7 +30,6 @@ version = "0.8"
 doctest = false
 name = "uu_comm"
 path = "src/comm.rs"
-test = false
 
 [package]
 autobenches = false

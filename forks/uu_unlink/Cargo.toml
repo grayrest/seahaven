@@ -29,7 +29,6 @@ version = "0.8"
 doctest = false
 name = "uu_unlink"
 path = "src/unlink.rs"
-test = false
 
 [package]
 autobenches = false

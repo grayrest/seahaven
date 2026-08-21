@@ -46,7 +46,6 @@ version = "0.10.0"
 doctest = false
 name = "uu_tsort"
 path = "src/tsort.rs"
-test = false
 
 [package]
 autobenches = false

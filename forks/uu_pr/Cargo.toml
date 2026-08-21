@@ -45,7 +45,6 @@ version = "0.8"
 doctest = false
 name = "uu_pr"
 path = "src/pr.rs"
-test = false
 
 [package]
 autobenches = false
