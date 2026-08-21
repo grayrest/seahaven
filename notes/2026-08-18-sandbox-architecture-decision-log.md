@@ -327,12 +327,22 @@ Two walls the batch exposed, each an owner decision before the remaining ~95:
    the workspace. `df` had been passing the confinement sweep incidentally,
    which is worse than failing it, so it is excluded by name with its reason.
 
-   **`findutils`, `grep` and `sed` are done too, and they were a different kind
-   of work.** They are not dependencies of this workspace, so forking them began
-   with a decision to bundle — new dependencies, new feature flags, new registry
-   entries — rather than with routing. `findutils` supplies two utilities,
-   `find` and `xargs`. The fork set is 52 crates and all 52 upstream suites are
-   green.
+   **`findutils`, `grep` and `sed` are forked and routed, and they were a
+   different kind of work.** They are not dependencies of this workspace, so
+   forking them began with a decision to bundle — new dependencies, new feature
+   flags, new registry entries — rather than with routing. `findutils` supplies
+   two utilities, `find` and `xargs`. The fork set is 52 crates and all 52
+   upstream suites are green.
+
+   **They are not reachable from the binary, and that is an oversight rather
+   than a decision.** `brush-coreutils-builtins` gained `findutils.all` and
+   `textutils.all`, and its confinement sweep exercises all four under
+   `--all-features`; `brush-shell`'s `experimental-bundled-coreutils` was never
+   widened past `coreutils.all`. Measured on a build with `--features
+   experimental`: `type -t cat` says `builtin` and `type -t find`, `xargs`,
+   `grep` and `sed` all say `file` — the host's copies, which a closed world
+   then refuses. Wiring the feature through changes what the shipped binary
+   contains, so it is called out here rather than done in passing.
 
    **`find` was held back, and the reason generalises.** It is a *traversal*,
    not an open: routing every open it makes would still have let it enumerate
