@@ -67,6 +67,21 @@ pub(crate) const ELOOP: i32 = 40;
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 pub(crate) const ELOOP: i32 = 62;
 
+/// The error a refused symlink produces.
+///
+/// `ELOOP` where the platform has one; elsewhere the message form
+/// [`is_symlink_loop`] already recognizes, so the two stay in agreement.
+fn symlink_loop_error() -> std::io::Error {
+    #[cfg(unix)]
+    {
+        std::io::Error::from_raw_os_error(ELOOP)
+    }
+    #[cfg(not(unix))]
+    {
+        std::io::Error::other(SYMLINK_LOOP_MESSAGE)
+    }
+}
+
 /// Whether an error reports a symlink loop.
 ///
 /// Two sources produce one: the walk's own hop counter, which sees a cycle that
@@ -663,7 +678,7 @@ impl Vfs {
         // cap-std's own beneath-the-root re-check still refuses an escape. What
         // is lost is only the caller's stricter intent, not confinement.
         if mode.nofollow && self.is_symlink(path) {
-            return Err(std::io::Error::from_raw_os_error(ELOOP));
+            return Err(symlink_loop_error());
         }
 
         self.at(path, true, |located| {

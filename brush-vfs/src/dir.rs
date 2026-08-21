@@ -117,6 +117,10 @@ impl Dir {
     /// directory entry names today.
     ///
     /// Do not reach for this to avoid a missing method. Add the method.
+    ///
+    /// Unix only, because a `DirFd` is: `uucore::safe_traversal` is itself
+    /// `#[cfg(unix)]`. Nothing else on this type is platform-specific.
+    #[cfg(unix)]
     #[must_use]
     pub fn into_owned_fd_for_at_traversal(self) -> std::os::fd::OwnedFd {
         use std::os::fd::OwnedFd;
