@@ -159,6 +159,59 @@ disallowed-methods = [
   { path = "nix::sys::stat::mknod", reason = "not expressible in the namespace yet" },
   { path = "nix::sys::statvfs::statvfs", reason = "the host's filesystem layout is not the namespace's" },
 
+  # `rustix` is the third spelling, and the one upstream uutils actually reach
+  # for -- which is how `uu_ln`'s `symlink` survived a ban list that already
+  # named the `std`, `nix` and `libc` forms of the same call. Same rule as the
+  # `nix`/`libc` twinning: an ability banned in two spellings and free in a
+  # third is not banned.
+  #
+  # `rustix::fs` is `cfg(not(windows))` as a whole, so these are gated like the
+  # `nix::` entries. `openat2` is deliberately absent: it exists only under the
+  # `linux_raw` backend, so an entry for it would be silently inert under the
+  # libc backend, which is the failure mode this list exists to prevent.
+  { path = "rustix::fs::open", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "rustix::fs::openat", reason = "use brush_vfs::Vfs::open_with" },
+  { path = "rustix::fs::stat", reason = "use brush_vfs::Vfs::facts" },
+  { path = "rustix::fs::lstat", reason = "use brush_vfs::Vfs::facts with follow=false" },
+  { path = "rustix::fs::statat", reason = "use brush_vfs::Vfs::facts" },
+  { path = "rustix::fs::readlink", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "rustix::fs::readlinkat", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "rustix::fs::readlinkat_raw", reason = "use brush_vfs::Vfs::read_link" },
+  { path = "rustix::fs::rename", reason = "use brush_vfs::Vfs::rename" },
+  { path = "rustix::fs::renameat", reason = "use brush_vfs::Vfs::rename" },
+  { path = "rustix::fs::renameat_with", reason = "use brush_vfs::Vfs::rename" },
+  { path = "rustix::fs::unlink", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "rustix::fs::unlinkat", reason = "use brush_vfs::Vfs::remove_file" },
+  { path = "rustix::fs::rmdir", reason = "use brush_vfs::Vfs::remove_dir" },
+  { path = "rustix::fs::link", reason = "not expressible in the namespace yet" },
+  { path = "rustix::fs::linkat", reason = "not expressible in the namespace yet" },
+  { path = "rustix::fs::symlink", reason = "use brush_vfs::Vfs::symlink, which validates the target" },
+  { path = "rustix::fs::symlinkat", reason = "use brush_vfs::Vfs::symlink, which validates the target" },
+  { path = "rustix::fs::mkdir", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "rustix::fs::mkdirat", reason = "use brush_vfs::Vfs::create_dir_all" },
+  { path = "rustix::fs::access", reason = "use brush_vfs::Vfs::access" },
+  { path = "rustix::fs::accessat", reason = "use brush_vfs::Vfs::access" },
+  { path = "rustix::fs::statfs", reason = "the host's filesystem layout is not the namespace's" },
+  { path = "rustix::fs::statvfs", reason = "the host's filesystem layout is not the namespace's" },
+  { path = "rustix::fs::chmod", reason = "not expressible in the namespace yet" },
+  { path = "rustix::fs::chmodat", reason = "not expressible in the namespace yet" },
+  { path = "rustix::fs::chown", reason = "not expressible in the namespace yet" },
+  { path = "rustix::fs::chownat", reason = "not expressible in the namespace yet" },
+  { path = "rustix::fs::utimensat", reason = "not expressible in the namespace yet" },
+  # Present on some unixes and not others. `allow-invalid` because on the
+  # platform without the function clippy would otherwise warn "does not refer to
+  # a reachable function" in every crate it lints -- noise that also trains a
+  # reader to ignore the one warning that means a typo. What it costs is the
+  # typo check, and `cargo xtask check ban` pays that back: it knows which of
+  # these resolve where, and still requires each to fire on the platform that
+  # has it. The fixture gates its uses with the same cfg rustix gates the
+  # function with.
+  { path = "rustix::fs::mknodat", reason = "not expressible in the namespace yet", allow-invalid = true },
+  { path = "rustix::fs::mkfifoat", reason = "not expressible in the namespace yet", allow-invalid = true },
+  { path = "rustix::fs::statx", reason = "use brush_vfs::Vfs::facts", allow-invalid = true },
+  { path = "rustix::fs::fclonefileat", reason = "read and write through brush_vfs::Vfs", allow-invalid = true },
+  { path = "rustix::fs::getpath", reason = "the host's layout is not the namespace's", allow-invalid = true },
+
   # A unix socket is named by a host path like anything else, and `bind`
   # *creates* a file outside every mount.
   { path = "std::os::unix::net::UnixStream::connect", reason = "not expressible in the namespace yet" },

@@ -690,8 +690,29 @@ fn assert_denies_warnings(args: &[&str]) -> Result<()> {
 /// absent by design rather than by mistake. The alternative, one ban list per
 /// platform, would put the Unix surface out of a Windows reader's sight.
 fn resolves_on_this_platform(path: &str) -> bool {
-    const UNIX_ONLY: [&str; 3] = ["std::os::unix::", "nix::", "libc::"];
+    // `rustix::fs` is `cfg(not(windows))` as a whole, so it gates with the
+    // rest of the Unix surface.
+    const UNIX_ONLY: [&str; 4] = ["std::os::unix::", "nix::", "libc::", "rustix::fs::"];
     const WINDOWS_ONLY: [&str; 1] = ["std::os::windows::"];
+
+    // Entries that are Unix but not *every* Unix. `nix` and `libc` expose
+    // their whole surface everywhere and paper over the gaps; `rustix` gates
+    // per function, so a handful of its bans can only fire on one platform.
+    // Naming them here rather than dropping them keeps the ban complete on the
+    // platform that has the call, instead of complete on neither.
+    const NOT_ON_APPLE: [&str; 2] = ["rustix::fs::mknodat", "rustix::fs::mkfifoat"];
+    const APPLE_ONLY: [&str; 2] = ["rustix::fs::fclonefileat", "rustix::fs::getpath"];
+    const LINUX_ONLY: [&str; 1] = ["rustix::fs::statx"];
+
+    if NOT_ON_APPLE.contains(&path) {
+        return cfg!(unix) && !cfg!(target_vendor = "apple");
+    }
+    if APPLE_ONLY.contains(&path) {
+        return cfg!(target_vendor = "apple");
+    }
+    if LINUX_ONLY.contains(&path) {
+        return cfg!(target_os = "linux");
+    }
 
     if UNIX_ONLY.iter().any(|prefix| path.starts_with(prefix)) {
         return cfg!(unix);

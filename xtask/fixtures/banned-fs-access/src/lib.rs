@@ -228,6 +228,89 @@ fn below_std() {
     std::os::unix::net::SocketAddr::from_pathname(path());
 }
 
+/// `rustix`, the third spelling of the Unix surface. Its `fs` module is
+/// `cfg(not(windows))`, and it gates several functions per platform, so the
+/// uses that cannot exist everywhere carry the same gate the function does --
+/// `resolves_on_this_platform` applies the matching one when deciding which
+/// bans must fire.
+#[cfg(unix)]
+fn rustix_fs() {
+    use rustix::fs::{
+        Access, AtFlags, CWD, Mode, OFlags, RenameFlags, Timestamps, access, accessat, chmod,
+        chmodat, chown, chownat, link, linkat, lstat, mkdir, mkdirat, open, openat, readlink,
+        readlinkat, readlinkat_raw, rename, renameat, renameat_with, rmdir, stat, statat, statfs,
+        statvfs, symlink, symlinkat, unlink, unlinkat, utimensat,
+    };
+
+    fn timestamps() -> Timestamps {
+        unimplemented!()
+    }
+
+    open(path(), OFlags::empty(), Mode::empty());
+    openat(CWD, path(), OFlags::empty(), Mode::empty());
+    stat(path());
+    lstat(path());
+    statat(CWD, path(), AtFlags::empty());
+    readlink(path(), Vec::new());
+    readlinkat(CWD, path(), Vec::new());
+    readlinkat_raw(CWD, path(), &mut [0u8; 1][..]);
+    rename(path(), path());
+    renameat(CWD, path(), CWD, path());
+    renameat_with(CWD, path(), CWD, path(), RenameFlags::empty());
+    unlink(path());
+    unlinkat(CWD, path(), AtFlags::empty());
+    rmdir(path());
+    link(path(), path());
+    linkat(CWD, path(), CWD, path(), AtFlags::empty());
+    symlink(path(), path());
+    symlinkat(path(), CWD, path());
+    mkdir(path(), Mode::empty());
+    mkdirat(CWD, path(), Mode::empty());
+    access(path(), Access::EXISTS);
+    accessat(CWD, path(), Access::EXISTS, AtFlags::empty());
+    statfs(path());
+    statvfs(path());
+    chmod(path(), Mode::empty());
+    chmodat(CWD, path(), Mode::empty(), AtFlags::empty());
+    chown(path(), None, None);
+    chownat(CWD, path(), None, None, AtFlags::empty());
+    utimensat(CWD, path(), &timestamps(), AtFlags::empty());
+}
+
+/// The `rustix` entries that only some unixes have.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn rustix_fs_not_on_apple() {
+    rustix::fs::mknodat(
+        rustix::fs::CWD,
+        path(),
+        rustix::fs::FileType::Fifo,
+        rustix::fs::Mode::empty(),
+        0,
+    );
+    rustix::fs::mkfifoat(rustix::fs::CWD, path(), rustix::fs::Mode::empty());
+}
+
+#[cfg(target_vendor = "apple")]
+fn rustix_fs_apple_only() {
+    rustix::fs::fclonefileat(
+        std::io::stdin(),
+        rustix::fs::CWD,
+        path(),
+        rustix::fs::CloneFlags::empty(),
+    );
+    rustix::fs::getpath(std::io::stdin());
+}
+
+#[cfg(target_os = "linux")]
+fn rustix_fs_linux_only() {
+    rustix::fs::statx(
+        rustix::fs::CWD,
+        path(),
+        rustix::fs::AtFlags::empty(),
+        rustix::fs::StatxFlags::empty(),
+    );
+}
+
 /// Scratch space outside every mount, and a host path handed to a child.
 fn scratch_and_children() {
     tempfile::tempfile();

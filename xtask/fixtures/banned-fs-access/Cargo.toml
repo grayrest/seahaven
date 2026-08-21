@@ -18,6 +18,7 @@ path = "src/lib.rs"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 nix = { version = "0.31", features = ["fs", "dir", "user", "time", "feature"] }
+rustix = { version = "1.1", features = ["fs", "alloc"] }
 
 [dependencies]
 tempfile = "3"
