@@ -1,0 +1,25 @@
+[package]
+name = "brush-broker-exec"
+description = "The broker-backed Executor: the platform's process-execution seam, bound to brush-core's D24 broker"
+version = "0.1.0"
+categories.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+brush-platform = { version = "0.1.0", path = "../brush-platform" }
+brush-core = { version = "0.5.0", path = "../brush-core" }
+brush-vfs = { version = "0.1.0", path = "../brush-vfs" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

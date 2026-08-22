@@ -32,19 +32,24 @@ for. `cargo xtask check platform` builds it so it does not rot.
   They catch structural marshalling bugs and -- through the system allocator's
   abort on a double free -- release-discipline bugs. Run with `cargo test`.
 
+- **The broker-backed `Executor` is wired.** `main` is this binary's own bundled
+  trampoline (D30): it registers the coreutils (`brush_shell::bundled`) and takes
+  the `--invoke-bundled` dispatch fast path before any Roc code, and the
+  installed session carries a `brush_broker_exec::BrokerExecutor` over the same
+  namespace. So a confined `Cmd` runs a bundled utility by re-invoking this
+  binary, served this session's mounts (D24) — the executor itself is proven end
+  to end in `brush-broker-exec`'s tests.
+
 ## What remains (the link)
 
-- The **broker-backed `Executor`** (D2's predicate, D24's broker), which crosses
-  into `brush-core`; until it is wired, `Cmd` execution is `Unsupported`,
-  uniformly.
 - The **link and run**: producing the platform's `targets/libhost.a`, building
   rocjust against it, and running its differential harness end to end.
 
-The remaining piece exercises the **true ABI** -- the calling convention across
-the language boundary, and leak-freedom under a real workload -- which the
-host-side tests reach up to but not through. Miri over `cargo test` is the
-intended leak gate for the marshalling once the glue's manual allocation
-arithmetic is vetted against it.
+That exercises the **true ABI** -- the calling convention across the language
+boundary, and leak-freedom under a real workload -- which the host-side tests
+reach up to but not through. Miri over `cargo test` is the intended leak gate for
+the marshalling once the glue's manual allocation arithmetic is vetted against
+it.
 
 ## Regenerating the glue
 

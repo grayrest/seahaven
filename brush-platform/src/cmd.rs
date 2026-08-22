@@ -21,10 +21,11 @@
 //! Actually running a process under a closed world crosses D2's predicate and
 //! D24's broker, both of which live in `brush-core`. This crate does not depend
 //! on `brush-core` and does not spawn host processes — so execution is a trait,
-//! [`Executor`], injected into the host. The broker-backed implementation is the
-//! link step's (step 9), where `brush-core` is present; until then a test
-//! executor drives the shape. This is the same move the whole platform makes:
-//! the contract is a trait here, the binding is elsewhere.
+//! [`Executor`], injected into the host. The broker-backed implementation lives
+//! in `brush-broker-exec`, which binds this trait to `brush-core`'s D24 broker;
+//! a test double drives the shape here where no process is wanted. This is the
+//! same move the whole platform makes: the contract is a trait here, the binding
+//! is elsewhere.
 
 use crate::effects::Effect;
 use crate::error::PlatformError;

@@ -906,6 +906,19 @@ spawn anything, which makes the no-exec invariant load-bearing rather than
 incidental — as is its sibling, that the parent never places `--inherited-fds` on
 a child's command line (`entry.rs:522-527` turns any integer into a dup'd fd).
 
+**The Roc platform binds to this broker** through `brush-broker-exec`, the
+implementor of the platform's `Executor` seam (the platform plan's step 5/9).
+A guest's `Cmd` becomes a bundled dispatch: the executor re-invokes the trusted
+launcher as `<launcher> --invoke-bundled <name>` (D2 by construction — it never
+runs the guest's program directly) and serves that child the guest's session
+over exactly this handshake. The ordering the shell established is reused
+verbatim — `Rendezvous::create`, spawn, then `serve` with the child's pid,
+before collecting output — and confinement is proven through the boundary: with
+only `/work` served, an in-mount `cat` reads and a `cat /etc/hosts` fails with
+nothing escaping. The Roc host is its own trampoline (D30): its `main` dispatches
+`--invoke-bundled` before any Roc code runs, so the same binary is both the guest
+and the confined child.
+
 ## D25 — Parallelism is `spawn` + `wait_any`, not a blocking exec
 
 A single Wasmtime instance has one call in flight and Roc has no async or threads,

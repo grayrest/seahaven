@@ -411,6 +411,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "brush-broker-exec"
+version = "0.1.0"
+dependencies = [
+ "brush-core",
+ "brush-platform",
+ "brush-vfs",
+ "tempfile",
+]
+
+[[package]]
 name = "brush-builtins"
 version = "0.2.0"
 dependencies = [

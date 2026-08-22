@@ -151,13 +151,29 @@ unsafe extern "C" {
     fn roc_main(args: RocList<OsStr>) -> i32;
 }
 
-/// The process entrypoint. Installs the session, runs the Roc app, exits.
+/// The process entrypoint. Dispatches a bundled utility if invoked as one;
+/// otherwise installs the session and runs the Roc app.
+///
+/// This binary is its own bundled trampoline (D30): a confined `Cmd` runs a
+/// utility by re-invoking *this* executable as `<self> --invoke-bundled <name>`,
+/// and that re-invocation is caught here — before any Roc code runs — by the
+/// launcher's `maybe_dispatch`. The child receives the parent's namespace over
+/// the broker (D24) and runs one utility confined to it. A normal invocation
+/// falls through to `roc_main`.
 ///
 /// Gated out of test builds: the test harness supplies its own `main`, and the
 /// marshalling tests install a fixture session directly rather than through this.
 #[cfg(not(test))]
 #[unsafe(no_mangle)]
 pub extern "C" fn main(argc: i32, argv: *const *const c_char) -> i32 {
+    // Register the bundled coreutils, then take the dispatch fast path if this
+    // is a `--invoke-bundled` re-invocation. Both must happen before any Roc
+    // code, exactly as the shell's own entrypoint orders them.
+    brush_shell::bundled::install_default_providers();
+    if let Some(code) = brush_shell::bundled::maybe_dispatch() {
+        return code;
+    }
+
     install_identity_session();
     let host = roc_host();
     let args = build_args_list(argc, argv, &host);
@@ -222,14 +238,27 @@ fn os_str_empty() -> OsStr {
 }
 
 #[cfg(not(test))]
-/// Installs an identity session so the pipeline can run. A launcher replaces
-/// this with a session derived from a grant (D44) at the confined tier.
+/// Installs an identity session so the pipeline can run, with the broker-backed
+/// executor bound so `Cmd` effects run confined children (D24). A launcher
+/// replaces the identity policy with a grant-derived one (D44) at the confined
+/// tier; the executor it installs is the same.
 fn install_identity_session() {
     let Ok(mounts) = Policy::identity() else {
         return;
     };
     let session = Session::new(std::sync::Arc::new(Vfs::new(mounts)));
-    let platform = VfsPlatform::new(session, SessionFacts::neutral());
+
+    // The executor serves this same namespace to every child and re-invokes this
+    // binary as the trampoline (see `main`). Without it, `Cmd` is `Unsupported`;
+    // with it, a bundled utility runs confined to the session's mounts.
+    let mut platform = VfsPlatform::new(session.clone(), SessionFacts::neutral());
+    if let Ok(executor) = brush_broker_exec::BrokerExecutor::for_current_exe(
+        session,
+        brush_shell::bundled::DISPATCH_FLAG,
+    ) {
+        platform = platform.with_executor(Box::new(executor));
+    }
+
     SESSION.with_borrow_mut(|slot| *slot = Some(platform));
 }
 

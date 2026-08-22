@@ -7,6 +7,7 @@ members = [
     "brush-core",
     "brush-vfs",
     "brush-platform",
+    "brush-broker-exec",
     "brush-builtins",
     "brush-coreutils-builtins",
     "brush-experimental-builtins",

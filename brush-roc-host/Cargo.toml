@@ -18,6 +18,15 @@ crate-type = ["staticlib"]
 [dependencies]
 brush-platform = { path = "../brush-platform" }
 brush-vfs = { path = "../brush-vfs" }
+brush-broker-exec = { path = "../brush-broker-exec" }
+# The launcher, for its two trampoline halves: `bundled::install_default_providers`
+# + `maybe_dispatch` (this binary dispatches its own bundled utilities, D30), and
+# `bundled::DISPATCH_FLAG` (the executor re-invokes through it). Default features
+# off -- the host is not interactive, so it wants the coreutils registry and none
+# of the reedline/interactive UI.
+brush-shell = { path = "../brush-shell", default-features = false, features = [
+    "experimental-bundled-coreutils",
+] }
 libc = "0.2"
 
 [dev-dependencies]
