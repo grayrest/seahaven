@@ -1,2 +1,5 @@
 target/
 mutants.out*/
+
+# Prebuilt Roc host archives -- build artifacts, regenerated from brush-roc-host
+platform/targets/

@@ -15,18 +15,27 @@ publish = false
 name = "host"
 crate-type = ["staticlib"]
 
+[features]
+# The broker-backed executor (D24) and the bundled-dispatch trampoline (D30),
+# pulling the launcher + coreutils into the linked binary. On by default -- it
+# is the real artifact -- but separable: linking it needs several GB of memory
+# (the whole shell), so a memory-constrained machine can build the effect
+# surface without it (`--no-default-features`) and `Cmd` is `Unsupported`, which
+# the executor's own end-to-end tests already cover.
+default = ["broker-executor"]
+broker-executor = ["dep:brush-broker-exec", "dep:brush-shell"]
+
 [dependencies]
 brush-platform = { path = "../brush-platform" }
 brush-vfs = { path = "../brush-vfs" }
-brush-broker-exec = { path = "../brush-broker-exec" }
+brush-broker-exec = { path = "../brush-broker-exec", optional = true }
 # The launcher, for its two trampoline halves: `bundled::install_default_providers`
 # + `maybe_dispatch` (this binary dispatches its own bundled utilities, D30), and
-# `bundled::DISPATCH_FLAG` (the executor re-invokes through it). Default features
-# off -- the host is not interactive, so it wants the coreutils registry and none
-# of the reedline/interactive UI.
+# `bundled::DISPATCH_FLAG` (the executor re-invokes through it). The coreutils
+# registry, without the reedline/interactive UI the host does not use.
 brush-shell = { path = "../brush-shell", default-features = false, features = [
     "experimental-bundled-coreutils",
-] }
+], optional = true }
 libc = "0.2"
 
 [dev-dependencies]

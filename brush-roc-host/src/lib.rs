@@ -35,7 +35,7 @@ use brush_platform::{PlatformEffects, VfsPlatform};
 
 // Used only by the `#[cfg(not(test))]` entrypoint below.
 #[cfg(not(test))]
-use brush_platform::SessionFacts;
+use brush_platform::{PlatformTarget, SessionFacts, TargetArch, TargetOs};
 #[cfg(not(test))]
 use brush_vfs::{Policy, Session, Vfs};
 #[cfg(not(test))]
@@ -168,16 +168,45 @@ unsafe extern "C" {
 pub extern "C" fn main(argc: i32, argv: *const *const c_char) -> i32 {
     // Register the bundled coreutils, then take the dispatch fast path if this
     // is a `--invoke-bundled` re-invocation. Both must happen before any Roc
-    // code, exactly as the shell's own entrypoint orders them.
-    brush_shell::bundled::install_default_providers();
-    if let Some(code) = brush_shell::bundled::maybe_dispatch() {
-        return code;
+    // code, exactly as the shell's own entrypoint orders them. Absent without
+    // the `broker-executor` feature, where `Cmd` is `Unsupported` and there is
+    // nothing to dispatch.
+    #[cfg(feature = "broker-executor")]
+    {
+        brush_shell::bundled::install_default_providers();
+        if let Some(code) = brush_shell::bundled::maybe_dispatch() {
+            return code;
+        }
     }
 
     install_identity_session();
     let host = roc_host();
     let args = build_args_list(argc, argv, &host);
-    unsafe { roc_main(args) }
+    let code = unsafe { roc_main(args) };
+
+    // Drain the guest's buffered output to the real streams (D28). The stdio
+    // effects append to the session's output log rather than a descriptor -- the
+    // buffering the guest cannot defeat -- so the *host* is the only thing that
+    // can emit it, and this is where it does, once, before exit.
+    flush_guest_output();
+    code
+}
+
+/// Writes the session's buffered stdout and stderr (D28) to the real streams.
+///
+/// stdout and stderr are kept separate on the wire (D28), so each goes to its
+/// own descriptor; a caller comparing them apart -- rocjust's harness does -- sees
+/// exactly what the guest wrote to each.
+#[cfg(not(test))]
+fn flush_guest_output() {
+    use std::io::Write as _;
+    let (out, err) = with_session((Vec::new(), Vec::new()), |s| {
+        (s.output().stdout(), s.output().stderr())
+    });
+    let _ = std::io::stdout().write_all(&out);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().write_all(&err);
+    let _ = std::io::stderr().flush();
 }
 
 #[cfg(not(test))]
@@ -242,16 +271,34 @@ fn os_str_empty() -> OsStr {
 /// executor bound so `Cmd` effects run confined children (D24). A launcher
 /// replaces the identity policy with a grant-derived one (D44) at the confined
 /// tier; the executor it installs is the same.
+///
+/// This is the **unconfined** tier: with no launcher to choose a grant, the
+/// session starts where the process is and reports the host's own environment
+/// and platform (see [`host_identity_facts`]). Confinement here is exactly the
+/// execution model — `Cmd` still routes through the broker (or is `Unsupported`
+/// without it) — and nothing else, which is what makes an identity run a clean
+/// baseline for what the execution boundary alone costs.
 fn install_identity_session() {
     let Ok(mounts) = Policy::identity() else {
         return;
     };
-    let session = Session::new(std::sync::Arc::new(Vfs::new(mounts)));
+    let mut session = Session::new(std::sync::Arc::new(Vfs::new(mounts)));
+
+    // Start the session where the process actually is, so relative paths and a
+    // CLI's upward file discovery resolve as they would unconfined. Under
+    // identity the host and virtual spellings coincide.
+    if let Ok(cwd) = std::env::current_dir() {
+        let _ = session.set_cwd(&cwd.to_string_lossy());
+    }
+
+    #[cfg_attr(not(feature = "broker-executor"), expect(unused_mut))]
+    let mut platform = VfsPlatform::new(session.clone(), host_identity_facts());
 
     // The executor serves this same namespace to every child and re-invokes this
-    // binary as the trampoline (see `main`). Without it, `Cmd` is `Unsupported`;
-    // with it, a bundled utility runs confined to the session's mounts.
-    let mut platform = VfsPlatform::new(session.clone(), SessionFacts::neutral());
+    // binary as the trampoline (see `main`). Without the `broker-executor`
+    // feature, `Cmd` is `Unsupported`; with it, a bundled utility runs confined
+    // to the session's mounts.
+    #[cfg(feature = "broker-executor")]
     if let Ok(executor) = brush_broker_exec::BrokerExecutor::for_current_exe(
         session,
         brush_shell::bundled::DISPATCH_FLAG,
@@ -260,6 +307,38 @@ fn install_identity_session() {
     }
 
     SESSION.with_borrow_mut(|slot| *slot = Some(platform));
+}
+
+/// The facts an unconfined identity session reports: the host's own.
+///
+/// The confined tier's launcher chooses these by policy (D21); the identity tier
+/// has no launcher, so it reports the truth — the real environment, platform,
+/// pid and parallelism — which is what an unconfined CLI would see. Reading the
+/// host directly is exactly what identity means, and is why the confined tier
+/// exists to *not* do it.
+#[cfg(not(test))]
+fn host_identity_facts() -> SessionFacts {
+    let os = match std::env::consts::OS {
+        "linux" => TargetOs::Linux,
+        "macos" => TargetOs::MacOs,
+        "windows" => TargetOs::Windows,
+        other => TargetOs::Other(other.to_owned()),
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86" => TargetArch::X86,
+        "x86_64" => TargetArch::X64,
+        "arm" => TargetArch::Arm,
+        "aarch64" => TargetArch::Aarch64,
+        other => TargetArch::Other(other.to_owned()),
+    };
+    SessionFacts {
+        env: std::env::vars().collect(),
+        platform: PlatformTarget { os, arch },
+        pid: i64::from(std::process::id()),
+        num_cpus: std::thread::available_parallelism()
+            .map_or(1, |n| i64::try_from(n.get()).unwrap_or(1)),
+        temp_dir: std::env::temp_dir().to_string_lossy().into_owned(),
+    }
 }
 
 // --- Scalar effects (no refcounted marshalling) ----------------------------
