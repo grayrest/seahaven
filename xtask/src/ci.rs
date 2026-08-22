@@ -170,6 +170,10 @@ fn run_pre_commit(args: &PreCommitArgs, verbose: bool) -> Result<()> {
             Box::new(|| check::run(&CheckCommand::Forks, verbose)),
         ),
         (
+            "Roc platform type-check",
+            Box::new(|| check::run(&CheckCommand::Platform, verbose)),
+        ),
+        (
             "Unit tests",
             Box::new(|| test::run(&make_unit_test_command(), verbose)),
         ),

@@ -49,6 +49,8 @@ pub enum CheckCommand {
     Forks,
     /// Prove confinement is invisible, by differential (D4, D24).
     Confinement,
+    /// Type-check the Roc platform sources with `roc check` (the platform milestone).
+    Platform,
 }
 
 /// Run a check command.
@@ -71,6 +73,7 @@ pub fn run(cmd: &CheckCommand, verbose: bool) -> Result<()> {
         CheckCommand::UucoreFeatures => check_uucore_features(&sh, verbose),
         CheckCommand::Forks => check_forks(&sh, verbose),
         CheckCommand::Confinement => check_confinement(&sh, verbose),
+        CheckCommand::Platform => check_platform(&sh, verbose),
     }
 }
 
@@ -1406,6 +1409,39 @@ fn check_workflows(sh: &Shell, verbose: bool) -> Result<()> {
         .run()
         .context("Workflow check failed. Install zizmor with: pip install zizmor")?;
     eprintln!("Workflow check passed.");
+    Ok(())
+}
+
+/// Type-checks the Roc platform sources with `roc check`.
+///
+/// The platform milestone's Roc half (`platform/`) is a set of Roc modules that
+/// `cargo` never sees, exactly like `forks/` -- so it needs its own gate or it
+/// rots. `roc check` typechecks the platform standalone, without the built host,
+/// which is why this runs here rather than only at link time. Skipped with a
+/// note when `roc` is not installed, so a contributor without the toolchain is
+/// not blocked; a machine that has it (CI, the maintainer's) enforces it.
+fn check_platform(sh: &Shell, verbose: bool) -> Result<()> {
+    eprintln!("Type-checking the Roc platform...");
+    if cmd!(sh, "roc version")
+        .quiet()
+        .ignore_stdout()
+        .ignore_stderr()
+        .run()
+        .is_err()
+    {
+        eprintln!("  skipping: `roc` is not installed");
+        return Ok(());
+    }
+    let root = crate::common::find_workspace_root()?;
+    let main = root.join("platform").join("main.roc");
+    if verbose {
+        eprintln!("Running: roc check {}", main.display());
+    }
+    let main = main.to_string_lossy().to_string();
+    cmd!(sh, "roc check {main}")
+        .run()
+        .context("the Roc platform does not type-check")?;
+    eprintln!("Platform check passed.");
     Ok(())
 }
 
