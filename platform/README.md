@@ -1,4 +1,4 @@
-# flatland's Roc platform
+# seahaven's Roc platform
 
 The Roc side of the platform milestone (`plans/2026-08-22-platform.md`, step 7):
 `main.roc` (the platform header), `Host.roc` (the hosted-effect declarations),
@@ -10,8 +10,8 @@ and one module per exposed name. rocjust builds against this in place of
 The module sources (`Path.roc`, `Cmd.roc`, `Env.roc`, the stream modules,
 `OsStr.roc`, `IOErr.roc`, `Regex.roc`, `Signal.roc`, `Tty.roc`, `Random.roc`,
 `Utc.roc`, `InternalDateTime.roc`) are adapted from the maintainer's `basic-cli`
-fork, which flatland exists to replace as rocjust's platform. `Host.roc` and
-`main.roc` are trimmed to flatland's confined surface: the network effects are
+fork, which seahaven exists to replace as rocjust's platform. `Host.roc` and
+`main.roc` are trimmed to seahaven's confined surface: the network effects are
 gone by D9, and `sqlite`, `sleep`, `locale`, `http`, `tcp` and the file-reader
 handle are simply not in rocjust's surface. What remains is the ~50 effects the
 thirteen exposed modules reference.

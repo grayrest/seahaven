@@ -1,6 +1,6 @@
-# Flatland sandbox architecture — decision log
+# Seahaven sandbox architecture — decision log
 
-Companion to `plans/2026-08-18-vfs-foundation.md`. Flatland is a fork of `brush`
+Companion to `plans/2026-08-18-vfs-foundation.md`. Seahaven is a fork of `brush`
 becoming the platform under `~/dev/roc/rocjust`.
 
 **Two boundaries against two different adversaries.** Wasmtime contains the Roc

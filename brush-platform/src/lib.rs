@@ -1,6 +1,6 @@
 //! The Roc platform's hosted effects, expressed once as a Rust trait (D18).
 //!
-//! flatland is meant to replace `basic-cli` as `rocjust`'s platform. `basic-cli`
+//! seahaven is meant to replace `basic-cli` as `rocjust`'s platform. `basic-cli`
 //! exposes ~72 *hosted effects* — `file_read_utf8!`, `dir_list!`, `cmd_exec!`
 //! and the rest — as `extern "C"` functions the Roc compiler links. This crate
 //! is the same surface, minus what a closed world removes, routed through the

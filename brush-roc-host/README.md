@@ -1,6 +1,6 @@
 # brush-roc-host
 
-The Rust host for flatland's Roc platform (step 9 of
+The Rust host for seahaven's Roc platform (step 9 of
 `plans/2026-08-22-platform.md`). A `staticlib` the Roc compiler links with a
 compiled Roc app to produce the final binary.
 

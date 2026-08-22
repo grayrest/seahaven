@@ -1,4 +1,4 @@
-# flatland: a confined recursive walk
+# seahaven: a confined recursive walk
 
 The last piece of D4. Four forks traverse with `walkdir`, which opens
 directories by path and reads them itself, so the namespace never sees the

@@ -1,4 +1,4 @@
-# flatland: a default-deny builtin allowlist
+# seahaven: a default-deny builtin allowlist
 
 D11. Every boundary built so far governs what code may *reach* — the vfs
 decides what a builtin may open (D3, D6), and the closed world decides what may

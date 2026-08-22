@@ -1,4 +1,4 @@
-## flatland: the confined platform for rocjust.
+## seahaven: the confined platform for rocjust.
 ##
 ## A native command-line platform with a filesystem, process, environment,
 ## signal, clock and RNG surface -- every effect routed through the sandbox

@@ -1,4 +1,4 @@
-# flatland: route brush's filesystem through a vfs
+# seahaven: route brush's filesystem through a vfs
 
 First milestone of the sandbox architecture in
 `notes/2026-08-18-sandbox-architecture-decision-log.md`. It builds **only** the

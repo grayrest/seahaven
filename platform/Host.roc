@@ -2,7 +2,7 @@ import IOErr exposing [IOErr]
 
 ## Declare the hosted effects and ABI-safe data exchanged with the native host.
 ##
-## flatland's platform. Adapted from `basic-cli`'s `Host.roc`, trimmed to the
+## seahaven's platform. Adapted from `basic-cli`'s `Host.roc`, trimmed to the
 ## effects a confined recipe runner needs: the network effects are gone by D9,
 ## and `sqlite`, `sleep`, `locale` and the file-reader handle are simply not in
 ## rocjust's surface. What remains is the ~50 effects the thirteen exposed
