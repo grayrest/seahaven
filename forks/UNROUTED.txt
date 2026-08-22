@@ -38,8 +38,17 @@
 # expressible in the namespace yet" for each, and means it.
 #
 # `tempfile` and `env::temp_dir` in `uu_sort` and `uu_tac` are scratch space,
-# which D38 places outside the namespace on purpose. `sed`'s temp file is *not*
-# in this class -- see the backlog.
+# which D38 places outside the namespace on purpose. `sed -i`'s replacement file
+# was *not* in this class -- it is created next to the file being edited and
+# renamed over it -- and is routed.
+#
+# `uucore::io`'s `open_file` takes a caller-supplied `std::fs::OpenOptions` and
+# opens with it. It cannot be routed as written: `OpenOptions` does not expose
+# the flags it was built with, so there is nothing to translate into an
+# `OpenMode`. It is also unreachable from anything bundled -- `uu_dd` is the
+# only consumer of that type and only ever constructs it from `io::stdout()`.
+# Routing it means changing its signature to take an `OpenMode`, which is a
+# change to uucore's public API for a caller that does not exist.
 #
 # Build scripts are exempted at the source instead of here, with a
 # `#![allow(clippy::disallowed_methods)]` and the reason: a denied lint is an
@@ -72,22 +81,14 @@ uucore/src/lib/features/safe_traversal.rs nix::sys::stat::fchmodat 1
 uucore/src/lib/features/safe_traversal.rs nix::sys::stat::fstatat 1
 uucore/src/lib/features/safe_traversal.rs nix::sys::stat::mkdirat 1
 uucore/src/lib/features/safe_traversal.rs nix::unistd::unlinkat 1
+uucore/src/lib/mods/io.rs std::fs::OpenOptions::open 1
 
 # ---------------------------------------------------------------------------
-# The backlog: calls that should go through `brush_vfs::ambient` and do not yet.
+# The backlog is empty. Every line above is deliberate, with its reason.
 #
-# Every one of these became visible only when the build-script exemption above
-# stopped aborting `uucore` and `sed`. They have been unrouted the whole time;
-# the gate could not see them.
-#
-# `sed/src/sed/in_place.rs` is `sed -i`'s replacement file, created *next to the
-# target* rather than as scratch, so D38 does not cover it. Its sibling in
-# `named_writer.rs` -- the `w` command's output file, which wrote to a host path
-# -- is routed.
+# It was empty once before and that was wrong: the ten entries this section held
+# had been invisible because a denied lint in `uucore`'s and `sed`'s build
+# scripts aborted those crates before their libraries were analysed. If this
+# section is empty again, that is a claim about the gate as much as about the
+# code -- worth re-checking after any change to how `check lint` invokes clippy.
 # ---------------------------------------------------------------------------
-sed/src/sed/in_place.rs tempfile::NamedTempFile::new_in 1
-uucore/src/lib/features/checksum/compute.rs std::path::Path::is_dir 1
-uucore/src/lib/mods/io.rs std::fs::OpenOptions::open 1
-uucore/src/lib/mods/locale.rs std::fs::read_to_string 1
-uucore/src/lib/mods/locale.rs std::path::Path::canonicalize 1
-uucore/src/lib/mods/locale.rs std::path::Path::exists 3

@@ -17,12 +17,91 @@ use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use tempfile::NamedTempFile;
 use uucore::display::Quotable;
 use uucore::error::{FromIo, UIoError, UResult, USimpleError};
 
 use crate::sed::command::ProcessingContext;
 use crate::sed::fast_io::OutputBuffer;
+
+/// FLATLAND DIVERGENCE: `sed -i`'s replacement file, inside the namespace.
+///
+/// This is *not* the scratch space D38 places outside the namespace. The
+/// replacement is created next to the file being edited and renamed over it, so
+/// it is namespace content from the moment it exists. `NamedTempFile::new_in`
+/// creates through `std::fs`, so under a mount `sed -i` built the replacement on
+/// the host and then renamed a file that had never been in the mount.
+///
+/// The name is derived rather than random, because randomness is not available:
+/// the sandbox's `/dev` is synthetic (D20) and carries `null` and `fd`, not
+/// `urandom`. `O_EXCL` -- `with_create_new` -- is what makes a derived name
+/// safe, and is the real protection either way: it refuses an existing entry and
+/// refuses to follow a symlink planted at the path, which is the attack a random
+/// name defends against. The counter makes a second `sed` in the same process
+/// and directory pick a different name rather than collide.
+struct NamespacedTempFile {
+    path: PathBuf,
+    persisted: bool,
+}
+
+impl NamespacedTempFile {
+    /// Creates a uniquely-named file in `dir`, through the namespace.
+    fn new_in(dir: &Path) -> std::io::Result<Self> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+        let pid = std::process::id();
+        for _ in 0..64 {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = dir.join(format!(".sed{pid}-{n}.tmp"));
+            match brush_vfs::ambient::open_with(
+                &path,
+                brush_vfs::OpenMode::write().with_create_new(true),
+            ) {
+                Ok(_) => {
+                    return Ok(Self {
+                        path,
+                        persisted: false,
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique temporary name in the destination directory",
+        ))
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// A second handle on the same file, as `NamedTempFile::reopen` gives.
+    fn reopen(&self) -> std::io::Result<fs::File> {
+        brush_vfs::ambient::open_with(
+            &self.path,
+            brush_vfs::OpenMode::write().with_truncate(false),
+        )
+    }
+
+    /// Renames the temporary over `dest`, as `NamedTempFile::persist` does.
+    fn persist(mut self, dest: &Path) -> std::io::Result<()> {
+        brush_vfs::ambient::rename(&self.path, dest)?;
+        self.persisted = true;
+        Ok(())
+    }
+}
+
+impl Drop for NamespacedTempFile {
+    fn drop(&mut self) {
+        if !self.persisted {
+            // Best-effort, as `NamedTempFile`'s own drop is: a temporary that
+            // cannot be removed is not worth failing an edit that succeeded.
+            let _ = brush_vfs::ambient::remove_file(&self.path);
+        }
+    }
+}
 
 /// Context for in-place editing
 pub struct InPlace {
@@ -30,7 +109,7 @@ pub struct InPlace {
     pub in_place: bool,
     pub in_place_suffix: Option<String>,
     pub follow_symlinks: bool,
-    pub temp_file: Option<NamedTempFile>,
+    temp_file: Option<NamespacedTempFile>,
     pub original_path: Option<PathBuf>,
 }
 
@@ -89,7 +168,7 @@ impl InPlace {
         }
 
         let dir = file_name.parent().unwrap_or_else(|| Path::new("."));
-        let temp_file = NamedTempFile::new_in(dir)
+        let temp_file = NamespacedTempFile::new_in(dir)
             .map_err_context(|| format!("error creating temporary file in {}", dir.quote()))?;
 
         // TODO: On Unix use fchown(metadata.{uid,dig}) and fchmod(mode)
@@ -103,7 +182,7 @@ impl InPlace {
         }
 
         let output = OutputBuffer::new(Box::new(
-            temp_file.reopen().expect("reopening NamedTempFile"),
+            temp_file.reopen().expect("reopening the temporary file"),
         ));
         self.output = output;
         self.temp_file = Some(temp_file);
@@ -156,18 +235,16 @@ impl InPlace {
         }
 
         // Atomically replace the original
-        match temp.persist(&orig) {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(UIoError::new(
-                    e.error.kind(),
-                    format!(
-                        "error persisting temporary file {} to {}",
-                        e.file.path().quote(),
-                        orig.quote()
-                    ),
-                ));
-            }
+        let temp_path = temp.path().to_path_buf();
+        if let Err(e) = temp.persist(&orig) {
+            return Err(UIoError::new(
+                e.kind(),
+                format!(
+                    "error persisting temporary file {} to {}",
+                    temp_path.quote(),
+                    orig.quote()
+                ),
+            ));
         }
 
         Ok(())

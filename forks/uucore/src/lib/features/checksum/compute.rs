@@ -253,7 +253,12 @@ where
                 Box::new(stdin_buf) as Box<dyn io::Read>
             } else {
                 let filepath = Path::new(filename);
-                if filepath.is_dir() {
+                // FLATLAND DIVERGENCE: routed. `cksum`, `md5sum` and the
+                // `sha*sum` family all reach this, and on the host answer
+                // it said "not a directory" for every path in a mount --
+                // so a directory argument was read as a file instead of
+                // reporting `is a directory`.
+                if brush_vfs::ambient::is_dir(filepath) {
                     show!(USimpleError::new(
                         1,
                         translate!(

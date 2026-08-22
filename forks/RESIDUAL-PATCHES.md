@@ -63,6 +63,41 @@ between two paths in the same mount. The root is now pushed and not probed —
 skipped rather than special-cased in the error handling, because the question is
 meaningless rather than unanswerable.
 
+## `sed/src/sed/in_place.rs` — a temporary inside the namespace
+
+`sed -i` builds its replacement next to the file being edited and renames it
+over the original, so the temporary is namespace content from the moment it
+exists — *not* the scratch space D38 places outside. `NamedTempFile::new_in`
+creates through `std::fs`, so under a mount the replacement was built on the
+host and `persist` then renamed a file that had never been in the mount.
+
+Replaced with a small `NamespacedTempFile` carrying only the four operations the
+call site uses: create, `path`, `reopen`, `persist`, plus a `Drop` that removes
+an unpersisted one.
+
+The name is derived from the pid and a counter rather than random, because
+randomness is not reachable: the sandbox's `/dev` is synthetic (D20) and carries
+`null` and `fd`, not `urandom` — measured, not assumed. `O_EXCL` is what makes a
+derived name safe, and is the real protection either way: it refuses an existing
+entry and refuses to follow a symlink planted at the path, which is the attack a
+random name defends against. Worth knowing that `uu_mv`'s `create_symlink_replace`
+still reads `/dev/urandom` and so cannot work under a mount at all; it sits
+behind a fallback a single mount does not reach.
+
+## `uucore` — `locale.rs` and `checksum/compute.rs`
+
+`locale.rs` looks for the program's own `.ftl` catalogs on disk and falls back to
+the ones embedded at build time. In this tree the on-disk lookup never resolves
+— `forks/` cannot reproduce the sibling layout upstream expects, which is why
+`build.rs` was replaced with a scan of the vendored `locales/` in the first place
+— so routing the four lookups changes no behaviour and stops a confined process
+reading host paths at startup to decide how to spell an error message. Upstream's
+own `test_setup_localization_fallback_to_embedded` is the guard.
+
+`checksum/compute.rs`'s `Path::is_dir` decides whether an argument is a directory
+before reading it. On the host answer it was "no" for every path in a mount, so
+`cksum d` read a directory as a file instead of reporting `is a directory`.
+
 ## `sed/src/sed/named_writer.rs` — the `w` command's output file
 
 An `OpenOptions` chain on a path named in the *script*, not on the command

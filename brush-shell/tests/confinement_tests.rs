@@ -141,6 +141,22 @@ const CASES: &[Case] = &[
         TREE,
     ),
     case(
+        "sed -i with a backup suffix",
+        // Exercises the replacement file: created next to the target, renamed
+        // over it, with the original moved aside first. It was built on the
+        // host through `NamedTempFile`, so the rename moved a file that had
+        // never been in the mount.
+        "sed -i'.bak' -e 's/bravo/BRAVO/' f.txt && cat f.txt && cat f.txt.bak",
+        TREE,
+    ),
+    case(
+        "cksum reports a directory as one",
+        // `Path::is_dir` on the host answered "no" for every path in a mount,
+        // so a directory argument was read as a file instead.
+        "cksum d; echo rc=$?",
+        TREE,
+    ),
+    case(
         "sed's w command writes inside the namespace",
         // The `w` output file is named in the *script*, so an unrouted open
         // wrote it wherever the host resolved that name -- exit 0, file

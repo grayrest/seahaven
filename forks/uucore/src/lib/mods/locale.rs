@@ -125,8 +125,15 @@ thread_local! {
 /// Helper function to find the uucore locales directory from a utility's locales directory
 fn find_uucore_locales_dir(utility_locales_dir: &Path) -> Option<PathBuf> {
     // Normalize the path to get absolute path
-    let normalized_dir = utility_locales_dir
-        .canonicalize()
+    // FLATLAND DIVERGENCE: routed, as the three lookups below. These find the
+    // program's own `.ftl` catalogs on disk, and every one of them falls back
+    // to the catalogs embedded at build time when it comes up empty -- which is
+    // what already happens in this tree, because `forks/` cannot reproduce the
+    // sibling layout upstream expects (see RESIDUAL-PATCHES.md on
+    // `uucore/build.rs`). So routing them changes no behaviour here and stops a
+    // confined process reading host paths at startup to decide how to spell an
+    // error message.
+    let normalized_dir = brush_vfs::ambient::canonicalize(utility_locales_dir)
         .unwrap_or_else(|_| utility_locales_dir.to_path_buf());
 
     // Walk up: locales -> printenv -> uu -> src
@@ -138,7 +145,7 @@ fn find_uucore_locales_dir(utility_locales_dir: &Path) -> Option<PathBuf> {
         .join("locales");
 
     // Only return if the directory actually exists
-    uucore_locales.exists().then_some(uucore_locales)
+    brush_vfs::ambient::exists(&uucore_locales).then_some(uucore_locales)
 }
 
 /// Create a bundle that combines common and utility-specific strings
@@ -155,7 +162,7 @@ fn create_bundle(
     let mut try_add_resource_from = |dir_opt: Option<PathBuf>| -> bool {
         if let Some(resource) = dir_opt
             .map(|dir| dir.join(format!("{locale}.ftl")))
-            .and_then(|locale_path| fs::read_to_string(locale_path).ok())
+            .and_then(|locale_path| brush_vfs::ambient::read_to_string(locale_path).ok())
             // On parse errors, use the partial resource which contains all
             // successfully parsed messages
             .map(|ftl| FluentResource::try_new(ftl).unwrap_or_else(|(partial, _)| partial))
@@ -573,13 +580,13 @@ fn get_locales_dir(p: &str) -> Result<PathBuf, LocalizationError> {
             .join(p)
             .join("locales");
 
-        if dev_path.exists() {
+        if brush_vfs::ambient::exists(&dev_path) {
             return Ok(dev_path);
         }
 
         // Fallback for development if the expected path doesn't exist
         let fallback_dev_path = PathBuf::from(manifest_dir).join(p);
-        if fallback_dev_path.exists() {
+        if brush_vfs::ambient::exists(&fallback_dev_path) {
             return Ok(fallback_dev_path);
         }
 
