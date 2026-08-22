@@ -10,6 +10,7 @@ use crate::cmd::{
 use crate::effects::{Effect, ExecOutput, PathKind, PlatformEffects};
 use crate::error::PlatformError;
 use crate::facts::{EXE_PATH, PlatformTarget, SessionFacts};
+use crate::runtime::{Clock, Rng, SignalQueue, SystemClock, SystemRng};
 use crate::stdio::{Stdio, Stream};
 
 /// A host that routes every effect through a [`brush_vfs::Session`].
@@ -31,14 +32,22 @@ pub struct VfsPlatform {
     jobs: std::collections::BTreeMap<u64, Finished>,
     /// The next handle id. Monotonic, never reused -- see `JobHandle`.
     next_handle: u64,
+    /// Signals the guest has caught but not read (D36).
+    signals: SignalQueue,
+    /// The session's clock (D15); the default reads real time.
+    clock: Box<dyn Clock>,
+    /// The session's RNG (D15); the default is real entropy.
+    rng: Box<dyn Rng>,
 }
 
 impl VfsPlatform {
     /// Wraps a session and its policy-chosen facts as a platform host.
     ///
-    /// stdin is empty; use [`with_stdin`](Self::with_stdin) to pipe bytes in.
+    /// stdin is empty and the clock and RNG are the real ones; use the
+    /// `with_*` builders to change any of that. Not `const`: the default clock
+    /// and RNG are boxed.
     #[must_use]
-    pub const fn new(session: Session, facts: SessionFacts) -> Self {
+    pub fn new(session: Session, facts: SessionFacts) -> Self {
         Self {
             session,
             facts,
@@ -46,7 +55,30 @@ impl VfsPlatform {
             executor: None,
             jobs: std::collections::BTreeMap::new(),
             next_handle: 0,
+            signals: SignalQueue::new(),
+            clock: Box::new(SystemClock),
+            rng: Box::new(SystemRng),
         }
+    }
+
+    /// Replaces the session clock — D14's hermetic mode pins time this way.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Box<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Replaces the session RNG — D14's hermetic mode seeds it this way.
+    #[must_use]
+    pub fn with_rng(mut self, rng: Box<dyn Rng>) -> Self {
+        self.rng = rng;
+        self
+    }
+
+    /// Delivers a signal into the guest's queue (the sandbox's path, not the
+    /// host's). Dropped if the guest has not installed a handler.
+    pub fn deliver_signal(&mut self, sig: i64) {
+        self.signals.deliver(sig);
     }
 
     /// Supplies the bytes the job reads from stdin.
@@ -395,6 +427,28 @@ impl PlatformEffects for VfsPlatform {
 
     fn cmd_exec_output_inherit_stdin(&mut self, cmd: &Cmd) -> Effect<ExecOutput> {
         self.exec_capturing(cmd, StdinMode::Inherit)
+    }
+
+    fn signal_install(&mut self) {
+        self.signals.install();
+    }
+
+    fn signal_take(&mut self) -> i64 {
+        self.signals.take()
+    }
+
+    fn utc_now(&self) -> Effect<u128> {
+        self.clock
+            .now_nanos()
+            .ok_or_else(|| PlatformError::Other("clock is before the epoch".to_owned()))
+    }
+
+    fn tz_offset_seconds(&self) -> i64 {
+        self.clock.tz_offset_seconds()
+    }
+
+    fn random_seed_u64(&mut self) -> Effect<u64> {
+        Ok(self.rng.next_u64())
     }
 }
 

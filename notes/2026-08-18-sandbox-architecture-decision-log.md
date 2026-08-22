@@ -1573,3 +1573,37 @@ Bounded by what it is: this discloses host *layout* -- which filesystem a mount
 sits on, and stable per-file identifiers -- in the same class as the D6 leaks
 the launcher milestone closed. It is not a filesystem escape; no inode number
 opens anything.
+
+## D47 — Signals are a sandbox-fed queue; the host's are not forwarded
+
+The platform milestone reached signals (rocjust imports `Signal.install!`,
+`Signal.take!`, `Signal.name`) and nothing in this log covered them. The
+decision, made in `plans/2026-08-22-platform.md` step 6 and implemented as
+`brush_platform::runtime::SignalQueue`:
+
+A confined guest does **not** receive the host's signal disposition. `install!`
+arms a queue and `take!` polls it, but the queue's only entry point is the
+*sandbox's* -- a job completing, D35's deadline, the launcher asking for
+shutdown. So in an ordinary run `take!` returns 0. This follows D36: with no
+terminal there is no `SIGWINCH` or `SIGTSTP` to mean anything, and forwarding
+`SIGINT` from the host would put a host-controlled event across the boundary,
+which is a decision with its own argument rather than a default.
+
+**The cost, stated because gate 8 will measure it.** rocjust's corpus has 9
+cases that send a real signal to the binary, and `signals.just` expects a
+SIGTERM forwarded to a child. Under this design those diverge, and the divergence
+is only measurable against a running rocjust (step 9). The mechanism is built;
+the measured delta waits on the link. This is the same shape as D25's warning:
+the decision is recorded before the number that proves it exists.
+
+**What is not decided here.** Whether a launcher should be *allowed* to forward a
+chosen host signal (a Ctrl-C that stops a build is what a recipe runner is for)
+is left open -- the queue can carry it the moment a launcher calls
+`deliver_signal`, so this entry forecloses nothing except the *default* being
+forwarding.
+
+The clock and RNG landed in the same step as session facts (D15) behind
+injectable `Clock`/`Rng` traits, real by default and pinnable for D14's hermetic
+mode. The RNG is unpredictable by default because rocjust names a temp directory
+from it; a fixed seed there is a path collision, so hermetic mode is the only
+place a seed belongs.

@@ -283,4 +283,34 @@ pub trait PlatformEffects {
     /// stderr (`basic-cli`'s `cmd_exec_output_inherit_stdin!`) — the form just's
     /// backticks need.
     fn cmd_exec_output_inherit_stdin(&mut self, cmd: &Cmd) -> Effect<ExecOutput>;
+
+    // --- Signals, clock, RNG (D36, D15, D14) ------------------------------
+
+    /// Arms the session's signal queue (`basic-cli`'s `signal_install_handler!`).
+    ///
+    /// Idempotent. The queue is fed by the sandbox — a job finishing, a
+    /// deadline, a shutdown request — not by the host's signals; see
+    /// [`SignalQueue`](crate::runtime::SignalQueue).
+    fn signal_install(&mut self);
+
+    /// The oldest caught signal, or `0` if none, clearing it
+    /// (`basic-cli`'s `signal_take!`). `0` in an ordinary run, since no host
+    /// signal is forwarded.
+    fn signal_take(&mut self) -> i64;
+
+    /// Nanoseconds since the Unix epoch (`basic-cli`'s `utc_now!`).
+    ///
+    /// From the session's clock (D15), not read directly — so hermetic mode can
+    /// pin it. `Err` only if the clock is before the epoch.
+    fn utc_now(&self) -> Effect<u128>;
+
+    /// The local timezone's offset from UTC in seconds
+    /// (`basic-cli`'s `env_tz_offset!`).
+    fn tz_offset_seconds(&self) -> i64;
+
+    /// A random `u64` (`basic-cli`'s `random_seed_u64!`).
+    ///
+    /// From the session's RNG, **unpredictable by default** — rocjust names a
+    /// temp directory from this, so a predictable value is a path hazard.
+    fn random_seed_u64(&mut self) -> Effect<u64>;
 }
