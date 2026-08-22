@@ -158,6 +158,32 @@ fn stdin_is_the_bytes_the_guest_supplied() {
 }
 
 #[test]
+fn an_unknown_command_fails_promptly_not_by_broker_timeout() {
+    // The dispatched child connects to the broker before it looks up the command
+    // name, so an unknown command is a prompt non-zero exit the parent collects
+    // -- not a child that exits without connecting and leaves the parent waiting
+    // out the 10s accept timeout, reported as a broker error.
+    let (_temp, work) = fixture();
+    let mut exec = executor(&work);
+
+    let start = std::time::Instant::now();
+    let result = exec
+        .run(&Cmd::new("definitely-not-a-bundled-utility"), b"")
+        .expect("an unknown command is a completed run, not a broker error");
+    let elapsed = start.elapsed();
+
+    assert_ne!(
+        result.exit,
+        Exit::Code(0),
+        "an unknown command exits non-zero"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "the run took {elapsed:?}; the broker accept timeout is 10s, so this is the timeout bug"
+    );
+}
+
+#[test]
 fn a_nonzero_exit_is_a_successful_run_not_an_error() {
     // A command that runs and exits non-zero is `Ok` with a non-zero code, not an
     // `Err` -- the error channel is for a command that could not be run at all.

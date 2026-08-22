@@ -122,6 +122,26 @@ pub fn maybe_dispatch() -> Option<i32> {
         return None;
     }
 
+    // Complete the broker handshake first, before anything below that could
+    // exit early (an empty argv, a non-UTF-8 name, an unknown command). The
+    // parent set up a one-shot rendezvous for *any* bundled dispatch and is
+    // blocked serving it (D24), authenticating this process by pid; the child
+    // it authenticates is the one that connects, so a child that exits without
+    // connecting leaves the parent waiting out its accept timeout. Connecting up
+    // front turns "unknown command" into a prompt non-zero exit the parent
+    // collects, rather than a timeout it reports as a broker failure.
+    //
+    // The session the util resolves against comes from the parent over the
+    // broker when there is one, and is the identity namespace otherwise -- a
+    // bundled command invoked by hand, from a shell that was confining nothing.
+    // A forked coreutil's filesystem access goes through `brush_vfs::ambient`
+    // (D4), which fails closed with no session installed. A handshake that was
+    // expected and failed is fatal rather than a fallback to identity.
+    if let Err(message) = install_dispatch_session() {
+        eprintln!("brush: {message}");
+        return Some(exit_code(ExecutionExitCode::CannotExecute));
+    }
+
     // Everything after `DISPATCH_FLAG` belongs to the bundled command. The
     // first such argument is the command name; subsequent arguments form its
     // argv (with the name itself supplied as argv[0] to match the convention
@@ -144,20 +164,6 @@ pub fn maybe_dispatch() -> Option<i32> {
         eprintln!("brush: unknown bundled command: {name_str}");
         return Some(exit_code(ExecutionExitCode::NotFound));
     };
-
-    // Give the routed utility a session to resolve against. A forked coreutil's
-    // filesystem access now goes through `brush_vfs::ambient` (D4), which fails
-    // closed with no session installed -- so without this the bundled command
-    // could open nothing.
-    //
-    // The session comes from the parent over the broker (D24) when there is
-    // one, and is the identity namespace otherwise -- a bundled command invoked
-    // by hand, from a shell that was confining nothing. A handshake that was
-    // expected and failed is fatal rather than a fallback to identity.
-    if let Err(message) = install_dispatch_session() {
-        eprintln!("brush: {message}");
-        return Some(exit_code(ExecutionExitCode::CannotExecute));
-    }
 
     let mut argv: Vec<OsString> = Vec::with_capacity(1 + args.len());
     argv.push(name.clone());
