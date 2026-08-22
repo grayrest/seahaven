@@ -35,7 +35,7 @@
 
 use std::path::Path;
 
-use brush_platform::{PathKind, PlatformEffects, PlatformError, VfsPlatform};
+use brush_platform::{PathKind, PlatformEffects, PlatformError, SessionFacts, VfsPlatform};
 use brush_vfs::{Access, MountTable, Policy, Session, Vfs, VirtualPath};
 
 /// A comparable summary of one effect's result. Path-bearing variants have had
@@ -83,7 +83,10 @@ fn confined(work: &Path) -> (VfsPlatform, String) {
         .expect("build");
     let mut session = Session::new(std::sync::Arc::new(Vfs::new(mounts)));
     session.set_cwd("/work").expect("cd /work");
-    (VfsPlatform::new(session), "/work".to_owned())
+    (
+        VfsPlatform::new(session, SessionFacts::neutral()),
+        "/work".to_owned(),
+    )
 }
 
 /// The identity host: the whole host filesystem, cwd inside the fixture.
@@ -92,7 +95,10 @@ fn identity(work: &Path) -> (VfsPlatform, String) {
     let mut session = Session::new(std::sync::Arc::new(Vfs::new(mounts)));
     let cwd = work.to_str().expect("utf-8 path");
     session.set_cwd(cwd).expect("cd into fixture");
-    (VfsPlatform::new(session), cwd.to_owned())
+    (
+        VfsPlatform::new(session, SessionFacts::neutral()),
+        cwd.to_owned(),
+    )
 }
 
 /// Strips the session root from a virtual path, so the two sides are comparable.
@@ -234,6 +240,107 @@ fn the_differential_notices_an_escape() {
         confined, identity,
         "the differential did not notice the escape"
     );
+}
+
+#[test]
+fn cwd_is_a_virtual_path_and_set_cwd_does_not_move_the_process() {
+    // Gate 5. The weaker assertion -- that two sessions have different cwds --
+    // passes while the guest is handed host layout. This asserts the answer is
+    // a *virtual* path, and that moving the session leaves the host process
+    // where it was (D15).
+    let (_temp, work) = fixture();
+    let (mut host, _) = confined(&work);
+
+    let before = std::env::current_dir().expect("host cwd");
+
+    assert_eq!(host.env_cwd(), "/work");
+    host.env_set_cwd("sub").expect("cd sub");
+    assert_eq!(
+        host.env_cwd(),
+        "/work/sub",
+        "cwd must be the virtual path, not a host one"
+    );
+    assert!(
+        !host.env_cwd().contains(work.to_str().expect("utf8")),
+        "cwd leaked a host path: {}",
+        host.env_cwd()
+    );
+
+    // The host process did not move.
+    assert_eq!(
+        std::env::current_dir().expect("host cwd"),
+        before,
+        "env_set_cwd moved the host process"
+    );
+
+    // An escape via set_cwd is refused, not silently followed to the host.
+    assert!(
+        host.env_set_cwd("../..").is_err() || host.env_cwd().starts_with("/work"),
+        "set_cwd walked out of the mount"
+    );
+}
+
+#[test]
+fn env_reads_the_policy_set_not_the_host_process() {
+    // The platform-crate analogue of the shell's host-leak tests. The effects
+    // read `SessionFacts`, which the launcher reduced to D21's classes -- so a
+    // variable the host process holds is not visible through `env_var` or
+    // `env_dict` unless policy put it there. Gate 7's "one policy object" is at
+    // the shell level; this pins that the effect layer reads the reduced set
+    // rather than reaching around it to `std::env`.
+    let (_temp, work) = fixture();
+    let (host, _) = confined(&work);
+
+    // The neutral facts carry no environment, and the host process's own
+    // variables (PATH is always set) are not reachable through the effects.
+    assert_eq!(host.env_var("PATH"), None, "env_var reached the host PATH");
+    assert!(
+        host.env_dict().is_empty(),
+        "env_dict returned host variables: {:?}",
+        host.env_dict()
+    );
+}
+
+#[test]
+fn declared_facts_are_reported_verbatim() {
+    // `platform!`, `pid!`, `num_cpus!`, `temp_dir!` and `exe_path!` are policy,
+    // not the machine. A launcher chooses them; the effect returns exactly what
+    // was chosen, which is what keeps `platform!` from disclosing the host.
+    use brush_platform::{PlatformTarget, TargetArch, TargetOs};
+
+    let (_temp, work) = fixture();
+    let mounts = MountTable::builder()
+        .mount("/work", &work, Access::ReadWrite)
+        .expect("mount")
+        .build()
+        .expect("build");
+    let mut session = Session::new(std::sync::Arc::new(Vfs::new(mounts)));
+    session.set_cwd("/work").expect("cd");
+
+    let mut facts = SessionFacts::neutral();
+    facts.platform = PlatformTarget {
+        os: TargetOs::MacOs,
+        arch: TargetArch::Aarch64,
+    };
+    facts.pid = 4242;
+    facts.num_cpus = 3;
+    facts
+        .env
+        .insert("JUST_CHOOSER".to_owned(), "fzf".to_owned());
+    let host = VfsPlatform::new(session, facts);
+
+    assert_eq!(
+        host.env_platform(),
+        PlatformTarget {
+            os: TargetOs::MacOs,
+            arch: TargetArch::Aarch64
+        }
+    );
+    assert_eq!(host.env_pid(), 4242);
+    assert_eq!(host.env_num_cpus(), 3);
+    assert_eq!(host.env_var("JUST_CHOOSER").as_deref(), Some("fzf"));
+    assert_eq!(host.env_exe_path(), "/bin/just");
+    assert_eq!(host.env_temp_dir(), "/tmp");
 }
 
 #[test]

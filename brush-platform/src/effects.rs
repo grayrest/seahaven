@@ -1,6 +1,7 @@
 //! The hosted-effect trait, and the value types that cross it.
 
 use crate::error::PlatformError;
+use crate::facts::PlatformTarget;
 
 /// The result every hosted effect returns.
 pub type Effect<T> = Result<T, PlatformError>;
@@ -112,4 +113,65 @@ pub trait PlatformEffects {
     ///
     /// `basic-cli`'s `dir_delete_all!`.
     fn dir_delete_all(&self, path: &str) -> Effect<()>;
+
+    // --- Environment (D21, D15, D22, D30) ---------------------------------
+
+    /// A single environment variable, or `None` when it is not set.
+    ///
+    /// `basic-cli`'s `env_var!` (whose `VarNotFound` the binding maps from
+    /// `None`). The environment is D21's synthesized and passthrough classes,
+    /// reduced by the launcher before the session was built — so a host secret
+    /// the guest never granted is simply not here to read.
+    fn env_var(&self, name: &str) -> Option<String>;
+
+    /// The whole environment, as name/value pairs.
+    ///
+    /// `basic-cli`'s `env_dict!`. Reads the *same* reduced set `env_var` does —
+    /// the property `host_leak_tests` pins at the shell level, that a denied
+    /// variable is absent from `dict!` and not merely from `var!`.
+    fn env_dict(&self) -> Vec<(String, String)>;
+
+    /// The session's working directory, as a **virtual** path (D15).
+    ///
+    /// `basic-cli`'s `env_cwd!`. It is the session's cwd, never the host
+    /// process's, and it is a virtual path — a host path here would be the D6
+    /// leak the launcher milestone spent itself closing.
+    fn env_cwd(&self) -> String;
+
+    /// Changes the session's working directory. Does **not** move the host
+    /// process (D15).
+    ///
+    /// `basic-cli`'s `env_set_cwd!`. The one env effect that mutates, which is
+    /// why it takes `&mut self`.
+    fn env_set_cwd(&mut self, path: &str) -> Effect<()>;
+
+    /// The virtual path temporary files belong under.
+    ///
+    /// `basic-cli`'s `env_temp_dir!`. Synthesized policy, not read from the
+    /// host: a bare namespace has no temp directory, and a launcher granting one
+    /// names it.
+    fn env_temp_dir(&self) -> String;
+
+    /// The virtual path of the running executable — `/bin/just` (D30).
+    ///
+    /// `basic-cli`'s `env_exe_path!`. See [`EXE_PATH`](crate::facts::EXE_PATH):
+    /// the name the closed world re-invokes through, correct before D22 builds
+    /// the directory it names.
+    fn env_exe_path(&self) -> String;
+
+    /// The platform the guest believes it is on — **declared, not the machine**.
+    ///
+    /// `basic-cli`'s `env_platform!`. See [`PlatformTarget`].
+    fn env_platform(&self) -> PlatformTarget;
+
+    /// This session's process id — session-scoped, not the host's.
+    ///
+    /// `basic-cli`'s `env_pid!`.
+    fn env_pid(&self) -> i64;
+
+    /// The parallelism the guest may assume — the job limit, not the host's
+    /// core count.
+    ///
+    /// `basic-cli`'s `env_num_cpus!`.
+    fn env_num_cpus(&self) -> i64;
 }

@@ -6,6 +6,7 @@ use brush_vfs::{AccessModes, Session, VirtualPath};
 
 use crate::effects::{Effect, PathKind, PlatformEffects};
 use crate::error::PlatformError;
+use crate::facts::{EXE_PATH, PlatformTarget, SessionFacts};
 
 /// A host that routes every effect through a [`brush_vfs::Session`].
 ///
@@ -16,13 +17,14 @@ use crate::error::PlatformError;
 /// it is a fact the compiler checks rather than a sentence.
 pub struct VfsPlatform {
     session: Session,
+    facts: SessionFacts,
 }
 
 impl VfsPlatform {
-    /// Wraps a session as a platform host.
+    /// Wraps a session and its policy-chosen facts as a platform host.
     #[must_use]
-    pub const fn new(session: Session) -> Self {
-        Self { session }
+    pub const fn new(session: Session, facts: SessionFacts) -> Self {
+        Self { session, facts }
     }
 
     /// The session this host resolves against.
@@ -157,6 +159,52 @@ impl PlatformEffects for VfsPlatform {
     fn dir_delete_all(&self, path: &str) -> Effect<()> {
         let vp = self.resolve(path)?;
         self.session.vfs().remove_dir_all(&vp).map_err(|e| io(&e))
+    }
+
+    fn env_var(&self, name: &str) -> Option<String> {
+        self.facts.env.get(name).cloned()
+    }
+
+    fn env_dict(&self) -> Vec<(String, String)> {
+        self.facts
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    fn env_cwd(&self) -> String {
+        // The session's cwd, which is a virtual path by construction -- a
+        // `VirtualPath` cannot hold a host path. So this is D6-clean without an
+        // extra check: there is no host cwd to accidentally return.
+        self.session.cwd().as_str().to_owned()
+    }
+
+    fn env_set_cwd(&mut self, path: &str) -> Effect<()> {
+        // Moves the *session*, not the process. `Session::set_cwd` never touches
+        // `std::env::set_current_dir`; the host process stays where it was,
+        // which is what D15 requires and what gate 5 checks.
+        self.session.set_cwd(path).map_err(|e| io(&e))
+    }
+
+    fn env_temp_dir(&self) -> String {
+        self.facts.temp_dir.clone()
+    }
+
+    fn env_exe_path(&self) -> String {
+        EXE_PATH.to_owned()
+    }
+
+    fn env_platform(&self) -> PlatformTarget {
+        self.facts.platform.clone()
+    }
+
+    fn env_pid(&self) -> i64 {
+        self.facts.pid
+    }
+
+    fn env_num_cpus(&self) -> i64 {
+        self.facts.num_cpus
     }
 }
 
