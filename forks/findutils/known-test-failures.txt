@@ -15,7 +15,7 @@
 # answer about something outside it. See the note on `symlink_metadata_at`.
 find::matchers::printf::tests::test_printf_special_types
 
-# FLATLAND DIVERGENCE, not an upstream failure. `-exec`, `-execdir`, `-ok` and
+# SEAHAVEN DIVERGENCE, not an upstream failure. `-exec`, `-execdir`, `-ok` and
 # `-okdir` are dropped: they spawned a child with `std::process::Command`, which
 # goes around D2's closed world entirely -- `/bin/echo` is refused directly with
 # exit 127 and runs fine through `find . -exec /bin/echo` -- and `-execdir`

@@ -6,9 +6,9 @@
 // spell-checker:ignore (ToDO) PSKIP linebreak ostream parasplit tabwidth xanti xprefix
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use std::ffi::OsString;
 use std::io::{BufReader, BufWriter, Read, Stdout, Write, stdin, stdout};

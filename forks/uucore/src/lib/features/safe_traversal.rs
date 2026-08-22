@@ -140,7 +140,7 @@ impl DirFd {
     /// # Arguments
     /// * `path` - The path to the directory to open
     /// * `symlink_behavior` - Whether to follow symlinks when opening
-    // FLATLAND DIVERGENCE: `nix::fcntl::open` took any host path outright --
+    // SEAHAVEN DIVERGENCE: `nix::fcntl::open` took any host path outright --
     // the single ambient entry point for the whole traversal, and invisible to
     // the `std::fs`-shaped codemod. The root is now resolved through the
     // namespace; every `*at` call below this point is unchanged and inherits

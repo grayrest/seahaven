@@ -11,9 +11,9 @@
 // spell-checker:ignore (misc) uppercased qsort getmonth juin juil
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 mod buffer_hint;
 mod check;
 mod chunks;
@@ -233,7 +233,7 @@ impl Output {
             let path = Path::new(name.as_ref());
             // This is different from `File::create()` because we don't truncate the output yet.
             // This allows using the output file as an input file.
-            // FLATLAND DIVERGENCE: routed, keeping the deliberate absence of
+            // SEAHAVEN DIVERGENCE: routed, keeping the deliberate absence of
             // truncation the comment above describes.
             let file = brush_vfs::ambient::open_with(
                 path,

@@ -4,9 +4,9 @@
 // file that was distributed with this source code.
 // spell-checker:ignore itotal iused iavail ipcent pcent tmpfs squashfs lofs sysfs
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 mod blocks;
 mod columns;
 mod filesystem;

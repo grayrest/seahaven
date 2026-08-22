@@ -6,9 +6,9 @@
 // spell-checker:ignore (words) wipesync prefill couldnt fillpattern
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::{Arg, ArgAction, Command};
 #[cfg(unix)]
 use libc::S_IWUSR;
@@ -699,7 +699,7 @@ fn wipe_file(
     }
 
     let total_passes = pass_sequence.len();
-    // FLATLAND DIVERGENCE: routed. Neither creating nor truncating: `shred`
+    // SEAHAVEN DIVERGENCE: routed. Neither creating nor truncating: `shred`
     // overwrites an existing file in place, and either would destroy the very
     // contents it is here to overwrite.
     let mut file = brush_vfs::ambient::open_with(
@@ -815,7 +815,7 @@ fn wipe_name(orig_path: &Path, verbose: bool, remove_method: RemoveMethod) -> Pa
 
                     if remove_method == RemoveMethod::WipeSync {
                         // Sync every file rename
-                        // FLATLAND DIVERGENCE: routed, as above.
+                        // SEAHAVEN DIVERGENCE: routed, as above.
                         let new_file = brush_vfs::ambient::open_with(
                             new_path.clone(),
                             brush_vfs::OpenMode::write()

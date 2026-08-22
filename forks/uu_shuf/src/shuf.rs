@@ -6,9 +6,9 @@
 // spell-checker:ignore (ToDO) cmdline evec nonrepeating seps shufable rvec fdata
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write, stdin, stdout};

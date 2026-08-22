@@ -25,7 +25,7 @@ use std::{
     io::{BufWriter, Stdout, Write},
 };
 
-// FLATLAND DIVERGENCE (D13 residual patch): see the note in ls.rs.
+// SEAHAVEN DIVERGENCE (D13 residual patch): see the note in ls.rs.
 use brush_vfs::ambient::DirEntry;
 
 use ansi_width::ansi_width;

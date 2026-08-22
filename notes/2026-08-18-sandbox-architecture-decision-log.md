@@ -843,7 +843,7 @@ Proposed and not contested. `ls /bin` lists the utilities, `command -v cat` answ
 ## D23 — The shell claims to be bash, and marks itself sandboxed
 
 `BASH`/`BASH_VERSION`/`BASH_VERSINFO` stay pinned to the implemented level: scripts
-use them as syntax gates and the syntax genuinely is bash's. `FLATLAND_SANDBOX`
+use them as syntax gates and the syntax genuinely is bash's. `SEAHAVEN_SANDBOX`
 gives code that needs to detect the restricted world an accurate signal instead of
 an inference from absence.
 

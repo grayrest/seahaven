@@ -6,9 +6,9 @@
 // spell-checker:ignore fname, ftype, tname, fpath, specfile, testfile, unspec, ifile, ofile, outfile, fullblock, urand, fileio, atoe, atoibm, behaviour, bmax, bremain, cflags, creat, ctable, ctty, datastructures, doesnt, etoa, fileout, fname, gnudd, iconvflags, iseek, nocache, noctty, noerror, nofollow, nolinks, nonblock, oconvflags, oseek, outfile, parseargs, rlen, rmax, rremain, rsofar, rstat, sigusr, wlen, wstat oconv canonicalized FADV DONTNEED ESPIPE SPIPE bufferedoutput, SETFL
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 mod blocks;
 mod bufferedoutput;
 mod conversion_tables;
@@ -370,7 +370,7 @@ impl<'a> Input<'a> {
     /// Instantiate this struct with the named file as a source.
     fn new_file(filename: &Path, settings: &'a Settings) -> UResult<Self> {
         let src = {
-            // FLATLAND DIVERGENCE: routed. `iflag=`/`oflag=` are literal
+            // SEAHAVEN DIVERGENCE: routed. `iflag=`/`oflag=` are literal
             // `open(2)` flags named by the user, so they are carried through
             // rather than dropped -- see `OpenMode::with_custom_flags`.
             #[allow(unused_mut)]
@@ -396,7 +396,7 @@ impl<'a> Input<'a> {
     /// Instantiate this struct with the named pipe as a source.
     #[cfg(unix)]
     fn new_fifo(filename: &Path, settings: &'a Settings) -> UResult<Self> {
-        // FLATLAND DIVERGENCE: routed, as the other three opens here.
+        // SEAHAVEN DIVERGENCE: routed, as the other three opens here.
         #[allow(unused_mut)]
         let mut mode = brush_vfs::OpenMode::read();
         #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -825,7 +825,7 @@ impl<'a> Output<'a> {
     /// Instantiate this struct with the named file as a destination.
     fn new_file(filename: &Path, settings: &'a Settings) -> UResult<Self> {
         fn open_dst(path: &Path, cflags: &OConvFlags, oflags: &OFlags) -> Result<File, io::Error> {
-            // FLATLAND DIVERGENCE: routed, as the source side. No truncate:
+            // SEAHAVEN DIVERGENCE: routed, as the source side. No truncate:
             // `dd` positions and overwrites rather than emptying the file.
             #[allow(unused_mut)]
             let mut mode = brush_vfs::OpenMode::write()
@@ -910,7 +910,7 @@ impl<'a> Output<'a> {
         }
         // At this point, we know there is at least one block to write
         // to the output, so we open the file for writing.
-        // FLATLAND DIVERGENCE: routed, as the other two.
+        // SEAHAVEN DIVERGENCE: routed, as the other two.
         #[allow(unused_mut)]
         let mut mode = brush_vfs::OpenMode::write()
             .with_truncate(false)

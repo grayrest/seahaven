@@ -1,4 +1,4 @@
-// FLATLAND DIVERGENCE: a build script runs at build time on the host, before
+// SEAHAVEN DIVERGENCE: a build script runs at build time on the host, before
 // any namespace exists, and cannot see `brush_vfs` at all -- routing it does not
 // compile. The exemption is here rather than in `forks/UNROUTED.txt` because
 // `cargo xtask check lint` denies the ban, a denied lint is an error, and an
@@ -227,7 +227,7 @@ fn embed_all_utility_locales(
 
 /// Embed utility locales from the catalogs vendored alongside this fork.
 ///
-/// FLATLAND DIVERGENCE from upstream — see `plans/2026-08-18-uucore-fork.md` §1.
+/// SEAHAVEN DIVERGENCE from upstream — see `plans/2026-08-18-uucore-fork.md` §1.
 /// This is the fork's only hand-written build-system edit; everything else here
 /// is pristine upstream or codemod output (D13).
 ///

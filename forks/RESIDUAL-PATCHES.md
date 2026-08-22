@@ -27,7 +27,7 @@ are never exercised by default and both `tests/routing.rs` and the `ls` cases in
 those features on, a lost routing patch is invisible to CI.
 
 Generated per fork and *not* listed here: `Cargo.toml`, `.gitignore`, the
-codemod's rewrites, and `src/**/flatland_test_session.rs` plus its `mod`
+codemod's rewrites, and `src/**/seahaven_test_session.rs` plus its `mod`
 declaration.
 
 ## `uucore/build.rs` — locale embedding

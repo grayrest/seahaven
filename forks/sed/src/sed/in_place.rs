@@ -23,7 +23,7 @@ use uucore::error::{FromIo, UIoError, UResult, USimpleError};
 use crate::sed::command::ProcessingContext;
 use crate::sed::fast_io::OutputBuffer;
 
-/// FLATLAND DIVERGENCE: `sed -i`'s replacement file, inside the namespace.
+/// SEAHAVEN DIVERGENCE: `sed -i`'s replacement file, inside the namespace.
 ///
 /// This is *not* the scratch space D38 places outside the namespace. The
 /// replacement is created next to the file being edited and renamed over it, so

@@ -40,7 +40,7 @@ pub const DEST_INITIAL_MODE: u32 = 0o600;
 /// `-P`). With `O_NOFOLLOW` set, an attacker who swaps the path to a
 /// symlink between the metadata check and this open gets `ELOOP`
 /// instead of redirecting the read.
-// FLATLAND DIVERGENCE: `rustix::fs::open` on a caller-supplied path is
+// SEAHAVEN DIVERGENCE: `rustix::fs::open` on a caller-supplied path is
 // ambient authority the `std::fs`-shaped codemod cannot see. Routed by hand
 // through the facade, which carries the same `O_NOFOLLOW` intent -- see
 // `plans/2026-08-18-uucore-fork.md` step 7. `O_RDONLY|O_CLOEXEC` is what the
@@ -63,7 +63,7 @@ pub fn open_source<P: AsRef<Path>>(path: P, nofollow: bool) -> io::Result<File> 
 /// who plants `path` as a symlink between the caller's check and this
 /// open can redirect the truncate (and the subsequent write) to any file
 /// the caller has permission to write.
-// FLATLAND DIVERGENCE: as `open_source`. `DEST_INITIAL_MODE` is carried
+// SEAHAVEN DIVERGENCE: as `open_source`. `DEST_INITIAL_MODE` is carried
 // through as the facade's create mode, so the 0o600 window this function
 // exists to close stays closed.
 pub fn create_dest_restrictive<P: AsRef<Path>>(path: P, nofollow: bool) -> io::Result<File> {

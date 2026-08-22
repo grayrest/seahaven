@@ -125,7 +125,7 @@ thread_local! {
 /// Helper function to find the uucore locales directory from a utility's locales directory
 fn find_uucore_locales_dir(utility_locales_dir: &Path) -> Option<PathBuf> {
     // Normalize the path to get absolute path
-    // FLATLAND DIVERGENCE: routed, as the three lookups below. These find the
+    // SEAHAVEN DIVERGENCE: routed, as the three lookups below. These find the
     // program's own `.ftl` catalogs on disk, and every one of them falls back
     // to the catalogs embedded at build time when it comes up empty -- which is
     // what already happens in this tree, because `forks/` cannot reproduce the

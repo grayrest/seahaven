@@ -17,7 +17,7 @@ use std::mem::ManuallyDrop;
 use std::ops::ControlFlow;
 use std::path::Path;
 use uucore::error::{ExitCode, FromIo, UResult};
-// FLATLAND DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
+// SEAHAVEN DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
 // and reads them itself, so `grep -r` enumerated the host tree even when every
 // read was refused. `brush_vfs::walk` mirrors its API and stays in the
 // namespace. See `plans/2026-08-21-vfs-walker.md`.
@@ -63,7 +63,7 @@ impl<'a> Searcher<'a> {
 
     /// Search the given path.
     pub fn process_path(&mut self, lb: &mut LineBuffer, path: &Path) -> ControlFlow<()> {
-        // FLATLAND DIVERGENCE: routed, for the reason given at the other
+        // SEAHAVEN DIVERGENCE: routed, for the reason given at the other
         // `is_dir` site in `lib.rs`.
         if brush_vfs::ambient::metadata(path).is_ok_and(|m| m.is_dir()) {
             match self.config.directory_mode {

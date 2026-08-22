@@ -35,7 +35,7 @@ pub struct NamedWriter {
 impl NamedWriter {
     /// Create a new writer, truncate the file, and register it for flushing.
     pub fn new(path: PathBuf, location: ScriptLocation) -> UResult<Rc<RefCell<Self>>> {
-        // FLATLAND DIVERGENCE: routed. This is the `w` command's output file,
+        // SEAHAVEN DIVERGENCE: routed. This is the `w` command's output file,
         // named in the *script* -- `sed 's/x/y/w out.txt'` -- so an unrouted
         // open writes wherever the host resolves that name. Under a mount it
         // exited 0 and created the file outside the namespace, which is the

@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! FLATLAND DIVERGENCE: `-exec`, `-execdir`, `-ok` and `-okdir` are dropped.
+//! SEAHAVEN DIVERGENCE: `-exec`, `-execdir`, `-ok` and `-okdir` are dropped.
 //!
 //! These spawned a child with `std::process::Command` directly, which goes
 //! around **both** boundaries this shell has:

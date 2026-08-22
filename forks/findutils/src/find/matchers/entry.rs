@@ -10,7 +10,7 @@ use std::io::{self, ErrorKind};
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 
-// FLATLAND DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
+// SEAHAVEN DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
 // and reads them itself, so `find` enumerated the host tree whatever the
 // namespace said. `brush_vfs::walk` mirrors its API and stays inside it. See
 // `plans/2026-08-21-vfs-walker.md`.

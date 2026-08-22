@@ -7,9 +7,9 @@
 // spell-checker:ignore (FORMATS) MMDDhhmm YYYYMMDDHHMM YYMMDDHHMM YYYYMMDDHHMMS CREAT ENXIO RDONLY utimensat
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 pub mod error;
 
 use clap::builder::{PossibleValue, ValueParser};
@@ -137,7 +137,7 @@ mod format {
     pub(crate) const YYYYMMDDHHMM_OFFSET: &str = "%Y-%m-%d %H:%M %z";
 }
 
-/// FLATLAND DIVERGENCE: `FileTime` as the `SystemTime` the facade takes.
+/// SEAHAVEN DIVERGENCE: `FileTime` as the `SystemTime` the facade takes.
 ///
 /// `filetime`'s path setters and `rustix::fs::utimensat(CWD, ..)` both resolve
 /// on the host, so under a mount they stamp a file outside the namespace --
@@ -466,7 +466,7 @@ pub fn touch(files: &[InputFile], opts: &Options) -> Result<(), TouchError> {
 /// [`touch_file`] and this open, the open follows it but must not zero the
 /// symlink's target. Matches GNU touch (issue #10019).
 fn create_without_truncate(path: &Path) -> std::io::Result<fs::File> {
-    // FLATLAND DIVERGENCE: routed, keeping the no-truncate the doc comment
+    // SEAHAVEN DIVERGENCE: routed, keeping the no-truncate the doc comment
     // above explains: an attacker who swaps `path` for a symlink between the
     // metadata check and this open must not get its target zeroed.
     brush_vfs::ambient::open_with(path, brush_vfs::OpenMode::write().with_truncate(false))
@@ -620,7 +620,7 @@ fn update_times(
     // The filename, access time (atime), and modification time (mtime) are provided as inputs.
 
     if opts.no_deref && !is_stdout {
-        // FLATLAND DIVERGENCE: routed, as `set_times_by_path` below.
+        // SEAHAVEN DIVERGENCE: routed, as `set_times_by_path` below.
         return brush_vfs::ambient::set_times(
             path,
             filetime_to_system_time(atime),
@@ -690,7 +690,7 @@ fn build_timestamps(atime: FileTime, mtime: FileTime) -> Timestamps {
 /// This never opens the file, so it does not block on special files such as
 /// FIFOs.
 fn set_times_by_path(path: &Path, atime: FileTime, mtime: FileTime) -> UResult<()> {
-    // FLATLAND DIVERGENCE: routed. `utimensat(CWD, ..)` anchors on the *host*
+    // SEAHAVEN DIVERGENCE: routed. `utimensat(CWD, ..)` anchors on the *host*
     // process's working directory. The facade sets times without opening, so
     // the doc comment above still holds: no block on a reader-less FIFO.
     brush_vfs::ambient::set_times(
@@ -720,7 +720,7 @@ fn set_times_by_path(path: &Path, atime: FileTime, mtime: FileTime) -> UResult<(
 /// access and modification times on the open FD (not by path), which also
 /// triggers `IN_CLOSE_WRITE` on Linux when the FD is closed.
 fn try_futimens_via_write_fd(path: &Path, atime: FileTime, mtime: FileTime) -> std::io::Result<()> {
-    // FLATLAND DIVERGENCE: routed. `O_NONBLOCK` is the facade's own
+    // SEAHAVEN DIVERGENCE: routed. `O_NONBLOCK` is the facade's own
     // `with_nonblock`, so the comment above still holds.
     let file = brush_vfs::ambient::open_with(
         path,

@@ -6,9 +6,9 @@
 // spell-checker:ignore (ToDO) srcpath targetpath EEXIST
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::{Arg, ArgAction, Command};
 use std::io::{self, Write, stdout};
 use uucore::display::Quotable;
@@ -24,7 +24,7 @@ use std::ffi::OsString;
 use std::fs;
 use thiserror::Error;
 
-// FLATLAND DIVERGENCE: routed. `std::os::unix::fs::symlink` writes to the
+// SEAHAVEN DIVERGENCE: routed. `std::os::unix::fs::symlink` writes to the
 // *host*, and the link name is resolved against the host process's working
 // directory -- so `cd /work && ln -s f.txt newlink` under a mount exited 0 and
 // created `newlink` outside the namespace entirely. The facade takes the same
@@ -293,7 +293,7 @@ pub fn exec(files: &[PathBuf], settings: &Settings) -> LnResult<()> {
             return link_files_in_dir(files, &PathBuf::from("."), settings);
         }
         let last_file = &PathBuf::from(files.last().unwrap());
-        // FLATLAND DIVERGENCE: routed, as every `is_dir`/`is_symlink` below.
+        // SEAHAVEN DIVERGENCE: routed, as every `is_dir`/`is_symlink` below.
         // These are inherent `Path` methods, outside what the codemod can see
         // (D34 bounds it to free functions), so they asked the host -- where
         // every virtual path answers "no". That silently changed which *form*
@@ -428,7 +428,7 @@ fn link(src: &Path, dst: &Path, settings: &Settings) -> LnResult<()> {
         src.into()
     };
 
-    // FLATLAND DIVERGENCE: routed. Worth naming separately: with `exists`
+    // SEAHAVEN DIVERGENCE: routed. Worth naming separately: with `exists`
     // routed and `is_symlink` not, `ln -sf` over an existing link in the mount
     // took the overwrite branch, removed the real link through the facade, and
     // then wrote the replacement to the host -- losing the file and escaping in
@@ -546,7 +546,7 @@ pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result
     }
 }
 
-// FLATLAND DIVERGENCE: routed, as the Unix import above. `rustix::fs::symlink`
+// SEAHAVEN DIVERGENCE: routed, as the Unix import above. `rustix::fs::symlink`
 // is the same host write in a third spelling.
 #[cfg(target_os = "wasi")]
 pub fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(src: P1, dst: P2) -> io::Result<()> {

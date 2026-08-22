@@ -6,9 +6,9 @@
 // spell-checker:ignore (ToDO) ugoa cmode RAII
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::builder::ValueParser;
 use clap::parser::ValuesRef;
 use clap::{Arg, ArgAction, ArgMatches, Command};
@@ -273,7 +273,7 @@ fn create_dir_with_mode(
 ) -> std::io::Result<()> {
     let _guard = UmaskGuard::set(shaped_umask);
 
-    // FLATLAND DIVERGENCE: routed. `DirBuilder` is the one directory create the
+    // SEAHAVEN DIVERGENCE: routed. `DirBuilder` is the one directory create the
     // facade's `create_dir_all` cannot express, because the mode has to be part
     // of the `mkdirat(2)` call rather than a `chmod` after it -- otherwise
     // `mkdir -m 700` has a window where the directory is world-readable, which

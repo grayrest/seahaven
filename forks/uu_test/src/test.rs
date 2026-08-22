@@ -6,9 +6,9 @@
 // spell-checker:ignore (vars) egid euid FiletestOp StrlenOp
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 pub(crate) mod error;
 mod parser;
 

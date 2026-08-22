@@ -15,7 +15,7 @@ use std::io::{self, stderr, stdout, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::SystemTime;
-// FLATLAND DIVERGENCE (D13 residual patch): see matchers/entry.rs.
+// SEAHAVEN DIVERGENCE (D13 residual patch): see matchers/entry.rs.
 use brush_vfs::ambient::walk;
 
 pub struct Config {

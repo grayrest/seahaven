@@ -253,7 +253,7 @@ where
                 Box::new(stdin_buf) as Box<dyn io::Read>
             } else {
                 let filepath = Path::new(filename);
-                // FLATLAND DIVERGENCE: routed. `cksum`, `md5sum` and the
+                // SEAHAVEN DIVERGENCE: routed. `cksum`, `md5sum` and the
                 // `sha*sum` family all reach this, and on the host answer
                 // it said "not a directory" for every path in a mount --
                 // so a directory argument was read as a file instead of

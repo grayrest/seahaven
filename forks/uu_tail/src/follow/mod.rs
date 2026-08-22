@@ -3,7 +3,7 @@
 // For the full copyright and license information, please view the LICENSE
 // file that was distributed with this source code.
 
-// FLATLAND DIVERGENCE: `tail -f` is dropped, and with it the `notify`
+// SEAHAVEN DIVERGENCE: `tail -f` is dropped, and with it the `notify`
 // dependency.
 //
 // Following a file means watching a *path* and being told when it changes.

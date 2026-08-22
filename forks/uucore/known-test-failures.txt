@@ -6,7 +6,7 @@
 # longer describe anything, and the health metric it exists to protect stops
 # measuring.
 #
-# Nothing here is a flatland divergence. Both were verified against the
+# Nothing here is a seahaven divergence. Both were verified against the
 # registry copy staged alongside its `uu_*-0.10.0` siblings, which fails them
 # identically -- so the routing changed neither. If a *routing* divergence ever
 # needs an entry, it names the decision that caused it, per D13.

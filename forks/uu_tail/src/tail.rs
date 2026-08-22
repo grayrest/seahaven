@@ -14,9 +14,9 @@
 // spell-checker:ignore (misc)
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 pub mod args;
 pub mod chunks;
 mod follow;
@@ -228,7 +228,7 @@ fn open_file(path: &Path, use_nonblock_for_fifo: bool) -> io::Result<File> {
     let is_fifo = brush_vfs::ambient::metadata(path).is_ok_and(|m| m.file_type().is_fifo());
 
     if is_fifo && use_nonblock_for_fifo {
-        // FLATLAND DIVERGENCE: routed. `O_NONBLOCK` is the facade's own
+        // SEAHAVEN DIVERGENCE: routed. `O_NONBLOCK` is the facade's own
         // `with_nonblock`; the flag is cleared just below exactly as before.
         let file = brush_vfs::ambient::open_with(
             path,

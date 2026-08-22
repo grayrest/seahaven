@@ -51,7 +51,7 @@ macro_rules! has {
 /// Information to uniquely identify a file
 #[derive(Clone)]
 pub struct FileInformation(
-    // FLATLAND DIVERGENCE: `std::fs::Metadata` on Unix too, rather than
+    // SEAHAVEN DIVERGENCE: `std::fs::Metadata` on Unix too, rather than
     // `rustix::fs::Stat`. `from_path` took a caller-supplied path straight to
     // `rustix::fs::stat`, which the `std::fs`-shaped codemod cannot see, and
     // there is no way to build a `Stat` from a routed result. The type already
@@ -89,7 +89,7 @@ impl FileInformation {
     pub fn from_path(path: impl AsRef<Path>, dereference: bool) -> IOResult<Self> {
         #[cfg(unix)]
         {
-            // FLATLAND DIVERGENCE: was `rustix::fs::{stat,lstat}` on the
+            // SEAHAVEN DIVERGENCE: was `rustix::fs::{stat,lstat}` on the
             // caller's path -- the dedup/identity entry point for cp, du, ls
             // and cmp, and ambient authority the codemod cannot see.
             let metadata = if dereference {
@@ -147,7 +147,7 @@ impl FileInformation {
     }
 
     pub fn number_of_links(&self) -> u64 {
-        // FLATLAND DIVERGENCE: `MetadataExt::nlink()` is `u64` on every Unix
+        // SEAHAVEN DIVERGENCE: `MetadataExt::nlink()` is `u64` on every Unix
         // target, so the per-target `st_nlink` width maze this replaced is no
         // longer needed.
         #[cfg(unix)]
@@ -379,7 +379,7 @@ pub fn canonicalize<P: AsRef<Path>>(
     let original = if original.is_absolute() {
         original.to_path_buf()
     } else {
-        // FLATLAND DIVERGENCE: was `env::current_dir()` plus
+        // SEAHAVEN DIVERGENCE: was `env::current_dir()` plus
         // `dunce::canonicalize`, i.e. the *host* process cwd. Every existence
         // check below this point goes through the namespace, so a host-derived
         // prefix made the function half-virtual: the prefix from one
@@ -404,7 +404,7 @@ pub fn canonicalize<P: AsRef<Path>>(
                 result.push(s);
                 continue;
             }
-            // FLATLAND DIVERGENCE: the root is pushed but never probed. The
+            // SEAHAVEN DIVERGENCE: the root is pushed but never probed. The
             // loop below asks `resolve_symlink` whether each accumulated prefix
             // is a link, starting with `/`. On a host filesystem that is a free
             // `Ok(None)` -- `/` is a directory and cannot be a symlink -- but

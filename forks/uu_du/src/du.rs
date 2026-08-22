@@ -6,16 +6,16 @@
 // spell-checker:ignore fstatat openat dirfd
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::PossibleValue};
 use glob::{Pattern, PatternError};
 use rustc_hash::FxHashSet as HashSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata};
-// FLATLAND DIVERGENCE (D13 residual patch): see the note in uu_ls/src/ls.rs.
+// SEAHAVEN DIVERGENCE (D13 residual patch): see the note in uu_ls/src/ls.rs.
 use brush_vfs::ambient::DirEntry;
 use std::io::{BufRead, BufReader, Write, stdout};
 #[cfg(not(windows))]

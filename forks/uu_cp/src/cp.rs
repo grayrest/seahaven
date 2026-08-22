@@ -6,9 +6,9 @@
 // spell-checker:ignore RDONLY futimens utimensat
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -70,7 +70,7 @@ pub enum CpError {
 
     /// Simple walk-error wrapper.
     ///
-    /// FLATLAND DIVERGENCE (D13 residual patch): the walk is `brush_vfs::walk`,
+    /// SEAHAVEN DIVERGENCE (D13 residual patch): the walk is `brush_vfs::walk`,
     /// whose `Error` mirrors `walkdir::Error`.
     #[error("{0}")]
     WalkDirErr(#[from] brush_vfs::walk::Error),
@@ -1890,7 +1890,7 @@ pub(crate) fn copy_attributes(
     })?;
 
     handle_preserve(attributes.timestamps, || -> CopyResult<()> {
-        // FLATLAND DIVERGENCE: routed. `filetime`'s path functions resolve on
+        // SEAHAVEN DIVERGENCE: routed. `filetime`'s path functions resolve on
         // the host, so under a mount `cp -p` failed with a bare "No such file
         // or directory" -- the destination it was told to stamp does not exist
         // out there. `cap-fs-ext` has both operations anchored on a directory
@@ -2436,7 +2436,7 @@ fn handle_copy_mode(
             }
         }
         CopyMode::AttrOnly => {
-            // FLATLAND DIVERGENCE: routed. `--attributes-only` creates the
+            // SEAHAVEN DIVERGENCE: routed. `--attributes-only` creates the
             // destination if absent and must not truncate one that exists --
             // the whole point is that the contents are left alone.
             brush_vfs::ambient::open_with(
@@ -2888,7 +2888,7 @@ fn copy_helper(
     Ok(())
 }
 
-// FLATLAND DIVERGENCE: `cp` does not recreate special files.
+// SEAHAVEN DIVERGENCE: `cp` does not recreate special files.
 //
 // A FIFO, a socket and a device node are made by `mkfifo(3)`, `bind(2)` and
 // `mknod(2)`, all of which take a path the kernel resolves itself and none of

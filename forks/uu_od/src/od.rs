@@ -8,9 +8,9 @@
 // spell-checker:ignore Anone bfloat
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 mod byteorder_io;
 mod formatter_item_info;
 mod input_decoder;

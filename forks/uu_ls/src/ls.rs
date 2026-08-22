@@ -7,9 +7,9 @@
 // spell-checker:ignore nohash strtime clocale
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::{
     Arg, ArgAction, Command,
     builder::{NonEmptyStringValueParser, PossibleValue, ValueParser},
@@ -32,7 +32,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-// FLATLAND DIVERGENCE (D13 residual patch): `ReadDir` and `DirEntry` are the
+// SEAHAVEN DIVERGENCE (D13 residual patch): `ReadDir` and `DirEntry` are the
 // only two types the facade cannot hand back as `std`'s own -- neither has a
 // public constructor. `uu_ls` names them in signatures, so the names follow the
 // calls. Everything else keeps its `std` type (D34).
@@ -866,7 +866,7 @@ impl<'a> PathData<'a> {
         let must_dereference = match &config.dereference {
             Dereference::All => true,
             Dereference::Args => command_line,
-            // FLATLAND DIVERGENCE: routed. `Path::metadata` is an inherent
+            // SEAHAVEN DIVERGENCE: routed. `Path::metadata` is an inherent
             // method, outside what the codemod can see (D34 bounds it to free
             // functions), so upstream asks the *host* whether a command-line
             // argument dereferences to a directory. Under a namespace the
@@ -889,7 +889,7 @@ impl<'a> PathData<'a> {
         let security_context: OnceCell<Box<str>> = OnceCell::new();
 
         let de: RefCell<Option<DirEntry>> = if let Some(de) = dir_entry {
-            // FLATLAND DIVERGENCE: routed, as the `Dereference::DirArgs` site
+            // SEAHAVEN DIVERGENCE: routed, as the `Dereference::DirArgs` site
             // above. This is the dereferenced metadata for a directory entry,
             // so the host answer is wrong for every path in a namespace.
             if must_dereference && let Ok(md_pb) = brush_vfs::ambient::metadata(&p_buf) {
@@ -1555,7 +1555,7 @@ fn sort_entries(entries: &mut [PathData], config: &Config) {
 
 fn get_metadata_with_deref_opt(p_buf: &Path, dereference: bool) -> std::io::Result<Metadata> {
     if dereference {
-        // FLATLAND DIVERGENCE: routed. The `else` arm was rewritten by the
+        // SEAHAVEN DIVERGENCE: routed. The `else` arm was rewritten by the
         // codemod because `symlink_metadata` is reached as a free function
         // here, but the dereferencing arm is `Path::metadata`, an inherent
         // method the codemod cannot see -- so half of this function asked the

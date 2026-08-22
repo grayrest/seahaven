@@ -1,4 +1,4 @@
-// FLATLAND DIVERGENCE: a build script runs at build time on the host, before
+// SEAHAVEN DIVERGENCE: a build script runs at build time on the host, before
 // any namespace exists, and cannot see `brush_vfs` at all -- routing it does not
 // compile. The exemption is here rather than in `forks/UNROUTED.txt` because
 // `cargo xtask check lint` denies the ban, a denied lint is an error, and an

@@ -31,7 +31,7 @@ fn is_xattr_unsupported(_err: &std::io::Error) -> bool {
 /// A descriptor for `path`, opened through the namespace rather than resolved
 /// by the kernel from the path itself.
 ///
-/// FLATLAND DIVERGENCE. `xattr`'s path functions -- `list`, `get`, `set`,
+/// SEAHAVEN DIVERGENCE. `xattr`'s path functions -- `list`, `get`, `set`,
 /// `list_deref` -- resolve on the host, so under a mount they address a file
 /// outside it. The crate also ships a descriptor form, `xattr::FileExt`, and
 /// `brush_vfs`'s contract *is* descriptors: `Vfs::open_with` hands back a
@@ -187,7 +187,7 @@ pub fn apply_xattrs<P: AsRef<Path>>(
 ///
 /// `true` if the file has extended attributes (indicating an ACL), `false` otherwise.
 pub fn has_acl<P: AsRef<Path>>(file: P) -> bool {
-    // FLATLAND DIVERGENCE, by omission: this one stays on the host path, and
+    // SEAHAVEN DIVERGENCE, by omission: this one stays on the host path, and
     // the sibling below with it. `ls -l` calls it once per entry, and the
     // comment on the next line is upstream counting syscalls -- routing it
     // means opening a descriptor for every file listed, where the path form is

@@ -7,9 +7,9 @@
 // spell-checker:ignore renameat symlinkat unlinkat unguessability RDONLY CLOEXEC
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 mod error;
 #[cfg(unix)]
 mod hardlink;
@@ -31,7 +31,7 @@ use std::io::{self, IsTerminal};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(windows)]
 use std::os::windows;
-// FLATLAND DIVERGENCE: `std::path::absolute` is `getcwd(2)` plus a join, so
+// SEAHAVEN DIVERGENCE: `std::path::absolute` is `getcwd(2)` plus a join, so
 // under a mount it rooted both operands of every same-file comparison at the
 // *host* working directory and `mv f.txt g.txt` failed naming a host path.
 // The facade's version takes the session's cwd and the virtual-path grammar;
@@ -980,7 +980,7 @@ fn rename_with_fallback(
 
 /// Replace the destination with a new pipe with the same name as the source.
 ///
-/// FLATLAND DIVERGENCE: refused rather than done. `mkfifo(3)` takes a path the
+/// SEAHAVEN DIVERGENCE: refused rather than done. `mkfifo(3)` takes a path the
 /// kernel resolves itself and the namespace cannot express it -- the ban list
 /// says "not expressible in the namespace yet" and `cap-std` has no equivalent
 /// -- so unrouted this created the pipe on the *host*, outside the mount, and
@@ -1063,7 +1063,7 @@ fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid destination path"))?;
 
-    // FLATLAND DIVERGENCE: rooted. `openat(CWD, parent, ..)` anchored the whole
+    // SEAHAVEN DIVERGENCE: rooted. `openat(CWD, parent, ..)` anchored the whole
     // sequence on the *host* process's working directory -- the single ambient
     // entry point for this function, and invisible to the `std::fs`-shaped
     // codemod. The root is now resolved through the namespace and every `*at`
@@ -1072,7 +1072,7 @@ fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
     // facade's `follow = false`.
     let dir_fd = brush_vfs::ambient::open_dir_fd(parent, false)?;
 
-    // FLATLAND DIVERGENCE: entropy from `getentropy(2)` rather than from
+    // SEAHAVEN DIVERGENCE: entropy from `getentropy(2)` rather than from
     // `/dev/urandom`. The sandbox's `/dev` is synthetic (D20) and carries
     // `null` and `fd` -- there is no `urandom` in it -- so this function could
     // not run under a mount at all: it failed at the open, before reaching any
@@ -1153,7 +1153,7 @@ fn rename_dir_fallback(
         brush_vfs::ambient::remove_dir_all(to)?;
     }
 
-    // FLATLAND DIVERGENCE: the directory progress bar is dropped, and with it
+    // SEAHAVEN DIVERGENCE: the directory progress bar is dropped, and with it
     // the last use of `fs_extra`.
     //
     // Sizing it needed `fs_extra::dir::get_size`, which walks the tree by path
@@ -1379,7 +1379,7 @@ fn copy_file_with_hardlinks_helper(
         // rename_symlink_fallback already preserves ownership and removes the source.
         rename_symlink_fallback(from, to)?;
     } else if is_fifo(brush_vfs::ambient::symlink_metadata(&(from))?.file_type()) {
-        // FLATLAND DIVERGENCE: refused, as `rename_fifo_fallback`. The source
+        // SEAHAVEN DIVERGENCE: refused, as `rename_fifo_fallback`. The source
         // is left where it is rather than removed.
         return Err(io::Error::other(format!(
             "cannot move fifo {}: this shell cannot create special files, because \

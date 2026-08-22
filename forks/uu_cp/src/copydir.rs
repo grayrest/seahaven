@@ -24,7 +24,7 @@ use uucore::fs::{
 use uucore::show;
 use uucore::translate;
 use uucore::uio_error;
-// FLATLAND DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
+// SEAHAVEN DIVERGENCE (D13 residual patch): `walkdir` opens directories by path
 // and reads them itself, so `cp -r` enumerated the host tree regardless of the
 // namespace. `brush_vfs::walk` mirrors its API and stays inside it.
 use brush_vfs::ambient::walk;
@@ -664,7 +664,7 @@ fn build_dir(
     options: &Options,
     copy_attributes_from: Option<&Path>,
 ) -> CopyResult<()> {
-    // FLATLAND DIVERGENCE: routed. See `uu_mkdir` for why the mode has to be
+    // SEAHAVEN DIVERGENCE: routed. See `uu_mkdir` for why the mode has to be
     // part of the create rather than a `chmod` after it: this function excludes
     // permission bits *until the copy is finished* precisely so the destination
     // is never readable before it is ready, and a chmod-after would reopen the

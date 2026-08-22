@@ -107,7 +107,7 @@ pub(crate) fn copy_on_write(
             let mut src_file =
                 brush_vfs::ambient::open(source).map_err(|e| CpError::IoErrContext(e, context.to_owned()))?;
             let mode = 0o622 & !get_umask();
-            // FLATLAND DIVERGENCE: routed. The mode is carried through, since
+            // SEAHAVEN DIVERGENCE: routed. The mode is carried through, since
             // it is the point: the destination is created 0o622-minus-umask so
             // it is not readable while the copy is in flight.
             let mut dst_file = brush_vfs::ambient::open_with(

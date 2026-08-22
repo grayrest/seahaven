@@ -6,9 +6,9 @@
 // spell-checker:ignore (ToDO) RFILE fsize
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 use clap::{Arg, ArgAction, Command};
 use std::ffi::OsString;
 use std::fs::{OpenOptions, metadata};
@@ -210,7 +210,7 @@ pub fn uu_app() -> Command {
 /// If the file could not be opened, or there was a problem setting the
 /// size of the file.
 fn do_file_truncate(filename: &Path, create: bool, size: u64) -> UResult<()> {
-    // FLATLAND DIVERGENCE: routed. `write()` is the facade's create-and-
+    // SEAHAVEN DIVERGENCE: routed. `write()` is the facade's create-and-
     // truncate mode, and truncation is turned back off because this function
     // sets the length itself -- truncating first would defeat `-s +N`.
     match brush_vfs::ambient::open_with(

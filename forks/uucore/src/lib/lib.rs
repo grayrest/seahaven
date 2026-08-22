@@ -9,9 +9,9 @@
 
 // * feature-gated external crates (re-shared as public internal modules)
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 #[cfg(feature = "libc")]
 pub extern crate libc;
 #[cfg(all(feature = "windows-sys", target_os = "windows"))]

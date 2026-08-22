@@ -4,9 +4,9 @@
 // file that was distributed with this source code.
 
 
-// FLATLAND DIVERGENCE: identity vfs session for this crate's own tests.
+// SEAHAVEN DIVERGENCE: identity vfs session for this crate's own tests.
 #[cfg(test)]
-mod flatland_test_session;
+mod seahaven_test_session;
 #[doc(hidden)]
 pub mod context_buffer;
 #[doc(hidden)]
@@ -344,7 +344,7 @@ pub fn uumain(args: impl uucore::Args) -> UResult<()> {
         match file_args {
             [] => directory_mode == DirectoryMode::Recurse,
             [one] if one.to_str() != Some("-") => {
-                // FLATLAND DIVERGENCE: routed. `Path::is_dir` is an inherent
+                // SEAHAVEN DIVERGENCE: routed. `Path::is_dir` is an inherent
                 // method, which the codemod cannot see (D34's
                 // signature-preservation rule bounds it to free functions), so
                 // upstream asks the *host* whether this is a directory. Under a

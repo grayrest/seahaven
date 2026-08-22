@@ -140,7 +140,7 @@ pub fn instantiate_current_writer(
                 create_or_truncate_output_file(input, filename)?
             } else {
                 // re-open file that we previously created to append to it
-                // FLATLAND DIVERGENCE: routed. Appending to a file this run
+                // SEAHAVEN DIVERGENCE: routed. Appending to a file this run
                 // already created, so it must not create one itself.
                 let file = brush_vfs::ambient::open_with(
                     Path::new(filename),
@@ -171,7 +171,7 @@ pub fn instantiate_current_writer(
 }
 
 fn create_or_truncate_output_file(input: &OsStr, filename: &OsStr) -> Result<std::fs::File> {
-    // FLATLAND DIVERGENCE: routed. `create_new` is what makes the
+    // SEAHAVEN DIVERGENCE: routed. `create_new` is what makes the
     // already-exists branch below reachable, so it is carried through.
     match brush_vfs::ambient::open_with(
         Path::new(filename),
@@ -181,7 +181,7 @@ fn create_or_truncate_output_file(input: &OsStr, filename: &OsStr) -> Result<std
     ) {
         Ok(file) => Ok(file),
         Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-            // FLATLAND DIVERGENCE: routed. The file is known to exist here.
+            // SEAHAVEN DIVERGENCE: routed. The file is known to exist here.
             let file = brush_vfs::ambient::open_with(
                 Path::new(filename),
                 brush_vfs::OpenMode::write()
