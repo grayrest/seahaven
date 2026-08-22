@@ -1,142 +1,80 @@
 // Copyright 2017 Google Inc.
 //
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT.
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
-use std::cell::RefCell;
+//! FLATLAND DIVERGENCE: `-exec`, `-execdir`, `-ok` and `-okdir` are dropped.
+//!
+//! These spawned a child with `std::process::Command` directly, which goes
+//! around **both** boundaries this shell has:
+//!
+//! - D2's closed world is a *parent-side* predicate. `SessionPayload` carries
+//!   `cwd` and `mounts` to a bundled child and nothing else, so `find` had no
+//!   policy object to consult and no idea one existed. Measured: `/bin/echo` is
+//!   refused directly with exit 127, and runs happily through
+//!   `find . -exec /bin/echo …`. That is arbitrary host execution from inside a
+//!   closed world.
+//! - `-execdir` additionally `chdir`s to each file's parent before spawning, so
+//!   the child ran in the *host's* working directory. `find . -execdir /bin/pwd`
+//!   printed a path outside the mount.
+//!
+//! Dropped rather than routed, per D4's disposition. Routing is the better
+//! answer and is recorded as a follow-up in `plans/2026-08-21-broker.md`: it
+//! needs the handshake to carry the execution policy, which is work the broker
+//! plan already lists as undone. Note that only `-exec` could be routed even
+//! then — `-execdir` cannot be, because a host program has no session and so
+//! cannot take a virtual working directory, which is exactly why brush deleted
+//! `Command::current_dir` from its own bundled dispatch.
+//!
+//! The predicates still parse, so `find . -exec foo` still reports a missing
+//! `;` rather than an unknown predicate; the constructors refuse.
+
 use std::error::Error;
-use std::ffi::OsString;
-use std::io::{stderr, Write};
-use std::path::Path;
-use std::process::Command;
 
-use super::{Matcher, MatcherIO, WalkEntry};
+use super::Matcher;
 
-enum Arg {
-    FileArg(Vec<OsString>),
-    LiteralArg(OsString),
+/// The error every one of the four predicates now returns.
+fn refused(predicate: &str) -> Box<dyn Error> {
+    From::from(format!(
+        "{predicate} is not supported: running another program from `find` \
+         would bypass the shell's execution policy, which does not reach a \
+         bundled utility"
+    ))
 }
 
-fn parse_arg(s: &str) -> Arg {
-    let parts = s.split("{}").collect::<Vec<_>>();
-    if parts.len() == 1 {
-        Arg::LiteralArg(OsString::from(s))
-    } else {
-        Arg::FileArg(parts.iter().map(OsString::from).collect())
-    }
-}
-
-pub struct SingleExecMatcher {
-    executable: Arg,
-    args: Vec<Arg>,
-    exec_in_parent_dir: bool,
-    interactive: bool,
-}
+pub struct SingleExecMatcher;
 
 impl SingleExecMatcher {
+    /// Always refuses; see the module docs.
     pub fn new(
-        executable: &str,
-        args: &[&str],
+        _executable: &str,
+        _args: &[&str],
         exec_in_parent_dir: bool,
     ) -> Result<Self, Box<dyn Error>> {
-        Ok(Self::new_impl(executable, args, exec_in_parent_dir, false))
+        Err(refused(if exec_in_parent_dir {
+            "-execdir"
+        } else {
+            "-exec"
+        }))
     }
 
+    /// Always refuses; see the module docs.
     pub fn new_interactive(
-        executable: &str,
-        args: &[&str],
+        _executable: &str,
+        _args: &[&str],
         exec_in_parent_dir: bool,
     ) -> Result<Self, Box<dyn Error>> {
-        Ok(Self::new_impl(executable, args, exec_in_parent_dir, true))
-    }
-
-    fn new_impl(
-        executable: &str,
-        args: &[&str],
-        exec_in_parent_dir: bool,
-        interactive: bool,
-    ) -> Self {
-        let transformed_args = args.iter().map(|&a| parse_arg(a)).collect();
-
-        Self {
-            executable: parse_arg(executable),
-            args: transformed_args,
-            exec_in_parent_dir,
-            interactive,
-        }
+        Err(refused(if exec_in_parent_dir { "-okdir" } else { "-ok" }))
     }
 }
 
 impl Matcher for SingleExecMatcher {
-    fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
-        let path_to_file = if self.exec_in_parent_dir {
-            if let Some(f) = file_info.path().file_name() {
-                Path::new(".").join(f)
-            } else {
-                Path::new(".").join(file_info.path())
-            }
-        } else {
-            file_info.path().to_path_buf()
-        };
-
-        let resolved_executable = match self.executable {
-            Arg::LiteralArg(ref a) => a.clone(),
-            Arg::FileArg(ref parts) => parts.join(path_to_file.as_os_str()),
-        };
-
-        if self.interactive {
-            // GNU find prints a fixed, abbreviated prompt of the form
-            // "< executable ... pathname > ? ".  It does not render the
-            // substituted argument list, and always shows the full path of
-            // the entry being processed (even for -okdir, whose command runs
-            // with the "./basename" form).
-            let prompt = format!(
-                "< {} ... {} > ? ",
-                resolved_executable.to_string_lossy(),
-                file_info.path().to_string_lossy()
-            );
-
-            if !matcher_io.confirm(&prompt) {
-                return false;
-            }
-        }
-
-        let mut command = Command::new(&resolved_executable);
-
-        for arg in &self.args {
-            match *arg {
-                Arg::LiteralArg(ref a) => command.arg(a.as_os_str()),
-                Arg::FileArg(ref parts) => command.arg(parts.join(path_to_file.as_os_str())),
-            };
-        }
-        if self.exec_in_parent_dir {
-            match file_info.path().parent() {
-                None => {
-                    // Root paths like "/" have no parent.  Run them from the root to match GNU find.
-                    command.current_dir(file_info.path());
-                }
-                Some(parent) if parent == Path::new("") => {
-                    // Paths like "foo" have a parent of "".  Avoid chdir("").
-                }
-                Some(parent) => {
-                    command.current_dir(parent);
-                }
-            }
-        }
-        match command.status() {
-            Ok(status) => status.success(),
-            Err(e) => {
-                writeln!(
-                    &mut stderr(),
-                    "Failed to run {}: {}",
-                    resolved_executable.to_string_lossy(),
-                    e
-                )
-                .unwrap();
-                false
-            }
-        }
+    fn matches(&self, _file_info: &super::WalkEntry, _matcher_io: &mut super::MatcherIO) -> bool {
+        // Unreachable: the constructors above never yield a value.
+        false
     }
 
     fn has_side_effects(&self) -> bool {
@@ -144,126 +82,29 @@ impl Matcher for SingleExecMatcher {
     }
 }
 
-pub struct MultiExecMatcher {
-    executable: String,
-    args: Vec<OsString>,
-    exec_in_parent_dir: bool,
-    /// Command to build while matching.
-    command: RefCell<Option<argmax::Command>>,
-}
+pub struct MultiExecMatcher;
 
 impl MultiExecMatcher {
+    /// Always refuses; see the module docs.
     pub fn new(
-        executable: &str,
-        args: &[&str],
+        _executable: &str,
+        _args: &[&str],
         exec_in_parent_dir: bool,
     ) -> Result<Self, Box<dyn Error>> {
-        let transformed_args = args.iter().map(OsString::from).collect();
-
-        Ok(Self {
-            executable: executable.to_string(),
-            args: transformed_args,
-            exec_in_parent_dir,
-            command: RefCell::new(None),
-        })
-    }
-
-    fn new_command(&self) -> argmax::Command {
-        let mut command = argmax::Command::new(&self.executable);
-        command.try_args(&self.args).unwrap();
-        command
-    }
-
-    fn run_command(&self, command: &mut argmax::Command, matcher_io: &mut MatcherIO) {
-        match command.status() {
-            Ok(status) => {
-                if !status.success() {
-                    matcher_io.set_exit_code(1);
-                }
-            }
-            Err(e) => {
-                writeln!(&mut stderr(), "Failed to run {}: {}", self.executable, e).unwrap();
-                matcher_io.set_exit_code(1);
-            }
-        }
+        Err(refused(if exec_in_parent_dir {
+            "-execdir"
+        } else {
+            "-exec"
+        }))
     }
 }
 
 impl Matcher for MultiExecMatcher {
-    fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
-        let path_to_file = if self.exec_in_parent_dir {
-            if let Some(f) = file_info.path().file_name() {
-                Path::new(".").join(f)
-            } else {
-                Path::new(".").join(file_info.path())
-            }
-        } else {
-            file_info.path().to_path_buf()
-        };
-        let mut command = self.command.borrow_mut();
-        let command = command.get_or_insert_with(|| self.new_command());
-
-        // Build command, or dispatch it before when it is long enough.
-        if command.try_arg(&path_to_file).is_err() {
-            if self.exec_in_parent_dir {
-                match file_info.path().parent() {
-                    None => {
-                        // Root paths like "/" have no parent.  Run them from the root to match GNU find.
-                        command.current_dir(file_info.path());
-                    }
-                    Some(parent) if parent == Path::new("") => {
-                        // Paths like "foo" have a parent of "".  Avoid chdir("").
-                    }
-                    Some(parent) => {
-                        command.current_dir(parent);
-                    }
-                }
-            }
-            self.run_command(command, matcher_io);
-
-            // Reset command status.
-            *command = self.new_command();
-            if let Err(e) = command.try_arg(&path_to_file) {
-                writeln!(
-                    &mut stderr(),
-                    "Cannot fit a single argument {}: {}",
-                    path_to_file.to_string_lossy(),
-                    e
-                )
-                .unwrap();
-                matcher_io.set_exit_code(1);
-            }
-        }
-        true
-    }
-
-    fn finished_dir(&self, dir: &Path, matcher_io: &mut MatcherIO) {
-        // Dispatch command for -execdir.
-        if self.exec_in_parent_dir {
-            let mut command = self.command.borrow_mut();
-            if let Some(mut command) = command.take() {
-                command.current_dir(Path::new(".").join(dir));
-                self.run_command(&mut command, matcher_io);
-            }
-        }
-    }
-
-    fn finished(&self, matcher_io: &mut MatcherIO) {
-        // Dispatch command for -exec.
-        if !self.exec_in_parent_dir {
-            let mut command = self.command.borrow_mut();
-            if let Some(mut command) = command.take() {
-                self.run_command(&mut command, matcher_io);
-            }
-        }
+    fn matches(&self, _file_info: &super::WalkEntry, _matcher_io: &mut super::MatcherIO) -> bool {
+        false
     }
 
     fn has_side_effects(&self) -> bool {
         true
     }
 }
-
-#[cfg(test)]
-/// No tests here, because we need to call out to an external executable. See
-/// `tests/exec_unit_tests.rs` instead.
-mod tests {}

@@ -14,3 +14,19 @@
 # Fails closed -- an error about something *inside* the namespace, not a wrong
 # answer about something outside it. See the note on `symlink_metadata_at`.
 find::matchers::printf::tests::test_printf_special_types
+
+# FLATLAND DIVERGENCE, not an upstream failure. `-exec`, `-execdir`, `-ok` and
+# `-okdir` are dropped: they spawned a child with `std::process::Command`, which
+# goes around D2's closed world entirely -- `/bin/echo` is refused directly with
+# exit 127 and runs fine through `find . -exec /bin/echo` -- and `-execdir`
+# additionally ran the child in the *host's* working directory.
+#
+# These four assert that the predicates *parse into a matcher*, which is exactly
+# the capability that was removed, so they fail by construction rather than by
+# accident. D13 asks that a divergence entry name the decision behind it: D4's
+# disposition, "drop the capability and keep the utility". Routing `-exec`
+# instead is recorded as a follow-up in plans/2026-08-21-broker.md.
+find::matchers::tests::build_top_level_exec_should_eat_args
+find::matchers::tests::build_top_level_exec_plus_semicolon
+find::matchers::tests::build_top_level_ok_parses_correctly
+find::matchers::tests::build_top_level_ok_matches_with_confirmation

@@ -334,6 +334,31 @@ differential check while developing: every `mv` form tried produced byte-identic
 output under a restrictive mount and under the identity policy, which is the
 oracle that isolates confinement from upstream behaviour.
 
+## `findutils` — `-exec`, `-execdir`, `-ok`, `-okdir` dropped (D2, D4)
+
+The only escape found on this branch that was not about the *namespace*.
+
+These spawned a child with `std::process::Command` directly. D2's closed world
+is a parent-side predicate and `SessionPayload` carries `cwd` and `mounts` and
+nothing else, so `find` had no policy to consult and no idea one existed.
+Measured: `/bin/echo` is refused directly with exit 127, and runs through
+`find . -exec /bin/echo` with exit 0 — arbitrary host execution from inside a
+closed world. `-execdir` also `chdir`s to each file's parent before spawning, so
+`find . -execdir /bin/pwd` printed a path outside the mount.
+
+The predicates still parse — `find . -exec foo` reports a missing `;` rather
+than an unknown predicate — and the constructors refuse with the reason.
+
+Four of upstream's tests assert these parse into a matcher, which is the
+capability that was removed, so they are recorded in
+`findutils/known-test-failures.txt` naming the decision, as D13 asks.
+
+Routing `-exec` is the better answer and is scoped as a follow-up in
+`plans/2026-08-21-broker.md`: it needs the handshake to carry the execution
+policy. Only `-exec` could be routed even then — a host program has no session
+and cannot take a virtual working directory, which is exactly why
+`Command::current_dir` was deleted for bundled dispatch.
+
 ## Four capabilities dropped rather than routed (D4)
 
 D4's disposition for something the namespace cannot express is to **drop the

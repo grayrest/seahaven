@@ -32,14 +32,13 @@
 # routing them means an open per file listed where the path form is a single
 # `getxattr`. What leaks is whether a file has attributes, not their contents.
 #
-# A child's `Command::current_dir` has no facade equivalent, so `find -exec`
-# still runs its child in the host's working directory.
-#
-# `mkfifo`, `mknod` and `UnixListener::bind` were on this list and are gone --
-# not routed, *dropped*. Creating a special file cannot be expressed in the
-# namespace, so `cp` and `mv` refuse rather than creating one on the host, per
-# D4's disposition. `utimensat` left the list a different way: `set_times` gave
-# it a facade equivalent. The ban list says "not
+# Nothing here spawns a process any more. `mkfifo`, `mknod`,
+# `UnixListener::bind` and `find`'s `Command::current_dir` were all on this list
+# and are gone -- not routed, *dropped*, per D4's disposition. Creating a
+# special file cannot be expressed in the namespace, so `cp` and `mv` refuse;
+# `find -exec` went around D2's closed world entirely and is refused with it.
+# `utimensat` left the list a different way: `set_times` gave it a facade
+# equivalent. The ban list says "not
 # expressible in the namespace yet" for each, and means it.
 #
 # `tempfile` and `env::temp_dir` in `uu_sort` and `uu_tac` are scratch space,
@@ -61,7 +60,6 @@
 # analysed. That is not hypothetical -- it hid `uucore`'s and `sed`'s entire
 # libraries from this gate until 2026-08-21.
 # ---------------------------------------------------------------------------
-findutils/src/find/matchers/exec.rs std::process::Command::current_dir 2
 uu_df/src/df.rs std::path::Path::is_symlink 1
 uu_df/src/filesystem.rs std::fs::canonicalize 1
 uu_df/src/filesystem.rs std::path::Path::canonicalize 3
