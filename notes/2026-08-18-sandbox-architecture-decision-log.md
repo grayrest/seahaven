@@ -1497,3 +1497,45 @@ cannot be *built* on APFS or NTFS. The cases pin the collision specifically:
 behaviour a listing named one file and an open of that name returned the other.
 Type-checked for Linux via `cargo check --target x86_64-unknown-linux-gnu`;
 not run here, since there is no Linux runtime on this machine.
+
+## D46 — Host file identity leaks through `std::fs::Metadata`, and D34 blocks the obvious fix
+
+`ls -i /work/f.txt` under a mount prints the host inode. Measured, not inferred.
+The same is true of every value a `stat` carries: device, inode, owning uid and
+gid, link count, block size. `FileFacts::dev_ino` already says so in its own doc
+comment -- "These are host values, so they leak the host's mount layout into a
+namespace that otherwise hides it" -- and `uid_gid` sits three fields above it
+with no such caveat.
+
+**The shell's own surface does not expose them.** The three consumers are
+`extendedtests.rs`: `-O` and `-G` compare `uid_gid` against the current user,
+`-ef` compares `dev_ino` pairs. All three answer a boolean, so no number
+reaches a script through them.
+
+**The bundled utilities do.** `ls -i` is the measured case; `ls -l` prints owner
+and group; `find -inum` and `du` read the same fields. Those go through
+`Vfs::metadata`, which returns `std::fs::Metadata` -- and that is the leak's
+actual shape, because a `std::fs::Metadata` cannot be constructed or edited. It
+is an opaque handle onto the host's `stat`. There is nothing to sanitise.
+
+**And the fix D6 would want is the one D34 forbids.** Returning a synthesised
+facts type everywhere instead of `std::fs::Metadata` is the obvious move, and
+D34 records the opposite requirement from the spike: `brush-vfs` must be
+"path-based and std-typed", because `uu_ls`'s `PathData` carries `Cow<'a, Path>`
+and re-opens by absolute path, so a handle-shaped API "breaks the rule
+immediately". A facts-shaped one breaks it the same way.
+
+So this is recorded rather than fixed. The options, none of them cheap: a
+per-utility divergence in the forks that suppresses identity fields under a
+policy (fragile, and D13 says the forks are generated); a synthetic overlay in
+the facade for the fields that have accessors, leaving `Metadata` itself intact
+(partial by construction); or reopening D34's std-typed constraint, which costs
+the codemod its main property. **What is not an option is leaving it
+undocumented**, which is where it was: a field comment calling it "an open
+question" is not the same as an entry saying the namespace leaks host file
+identity today.
+
+Bounded by what it is: this discloses host *layout* -- which filesystem a mount
+sits on, and stable per-file identifiers -- in the same class as the D6 leaks
+the launcher milestone closed. It is not a filesystem escape; no inode number
+opens anything.

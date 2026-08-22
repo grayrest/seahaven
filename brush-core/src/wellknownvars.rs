@@ -6,6 +6,38 @@ use rand::RngExt as _;
 use crate::shell::ShellState;
 use crate::{Shell, ShellValue, ShellVariable, error, extensions, sys, variables};
 
+/// The machine name a confined shell reports (D21, synthesized class).
+///
+/// The host's own name correlates a sandboxed run to a specific box, and it
+/// names a machine nothing inside the namespace can reach.
+const SANDBOX_HOSTNAME: &str = "sandbox";
+
+/// The user and group a confined shell reports (D21, synthesized class).
+///
+/// Non-root deliberately: scripts gate on `[ $EUID -eq 0 ]`, and a sandbox that
+/// claims to be root sends them down the privileged branch of code that has no
+/// privilege here. The value is otherwise arbitrary -- what matters is that it
+/// is a constant rather than the host's.
+const SANDBOX_UID: u32 = 1000;
+
+/// The group id a confined shell reports. See [`SANDBOX_UID`].
+const SANDBOX_GID: u32 = 1000;
+
+/// The uid to report, given the host accessor for it.
+///
+/// Real group membership -- `admin`, `wheel`, `docker` -- tells a guest what an
+/// escape would be worth before it attempts one, and no host group grants
+/// anything inside the namespace.
+fn session_uid<SE: extensions::ShellExtensions>(
+    shell: &Shell<SE>,
+    host: impl FnOnce() -> Result<u32, error::Error>,
+) -> Option<u32> {
+    if shell.is_confined() {
+        return Some(SANDBOX_UID);
+    }
+    host().ok()
+}
+
 const BASH_MAJOR: u32 = 5;
 const BASH_MINOR: u32 = 2;
 const BASH_PATCH: u32 = 37;
@@ -281,7 +313,7 @@ pub(crate) fn init_well_known_vars(
     )?;
 
     // EUID
-    if let Ok(euid) = sys::users::get_effective_uid() {
+    if let Some(euid) = session_uid(shell, sys::users::get_effective_uid) {
         let mut euid_var = ShellVariable::new(ShellValue::String(format!("{euid}")));
         euid_var.treat_as_integer().set_readonly();
         shell.env_mut().set_global("EUID", euid_var)?;
@@ -302,8 +334,16 @@ pub(crate) fn init_well_known_vars(
     shell.env_mut().set_global(
         "GROUPS",
         ShellVariable::new(ShellValue::Dynamic {
-            getter: |_shell| {
-                let groups = get_current_user_gids();
+            getter: |shell| {
+                let groups = if shell.is_confined() {
+                    // D21: synthesized. Real group membership tells a guest what
+                    // an escape would be worth -- `admin`, `wheel`, `docker` --
+                    // before it attempts one, and no group grants anything
+                    // inside the namespace.
+                    vec![SANDBOX_GID]
+                } else {
+                    get_current_user_gids()
+                };
                 ShellValue::indexed_array_from_strings(
                     groups.into_iter().map(|gid| gid.to_string()),
                 )
@@ -336,15 +376,20 @@ pub(crate) fn init_well_known_vars(
     }
 
     // HOSTNAME
-    shell.env_mut().set_global(
-        "HOSTNAME",
-        ShellVariable::new(
-            sys::network::get_hostname()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-        ),
-    )?;
+    let hostname = if shell.is_confined() {
+        // D21 puts HOSTNAME in the synthesized class. The host's name is a
+        // machine identifier that correlates a sandboxed run to a specific box,
+        // and nothing inside the namespace can reach the machine it names.
+        SANDBOX_HOSTNAME.to_owned()
+    } else {
+        sys::network::get_hostname()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    };
+    shell
+        .env_mut()
+        .set_global("HOSTNAME", ShellVariable::new(hostname))?;
 
     // HOSTTYPE
     shell.env_mut().set_global(
@@ -542,13 +587,39 @@ pub(crate) fn init_well_known_vars(
     shell.env_mut().set_global("PWD", pwd_var)?;
 
     // UID
-    if let Ok(uid) = sys::users::get_current_uid() {
+    if let Some(uid) = session_uid(shell, sys::users::get_current_uid) {
         let mut uid_var = ShellVariable::new(ShellValue::String(format!("{uid}")));
         uid_var.treat_as_integer().set_readonly();
         shell.env_mut().set_global("UID", uid_var)?;
     }
 
     Ok(())
+}
+
+/// Re-applies the session facts D21 synthesizes, after a policy is installed.
+///
+/// Called from [`Shell::set_mounts`](crate::Shell::set_mounts), which is the
+/// moment `is_confined()` changes its answer. Everything here was already set
+/// during construction from the host; this overwrites those with the values a
+/// confined shell reports. Readonly is re-applied rather than worked around --
+/// the variables are replaced, not mutated.
+///
+/// Only the *static* ones need this. `GROUPS` is a dynamic getter that re-reads
+/// on every access, so it was already correct the first time.
+pub(crate) fn resynthesize_session_facts<SE: extensions::ShellExtensions>(shell: &mut Shell<SE>) {
+    if !shell.is_confined() {
+        return;
+    }
+
+    let mut hostname = ShellVariable::new(SANDBOX_HOSTNAME.to_owned());
+    hostname.export();
+    let _ = shell.env_mut().set_global("HOSTNAME", hostname);
+
+    for name in ["UID", "EUID"] {
+        let mut var = ShellVariable::new(ShellValue::String(SANDBOX_UID.to_string()));
+        var.treat_as_integer().set_readonly();
+        let _ = shell.env_mut().set_global(name, var);
+    }
 }
 
 /// Returns a list of the current user's group IDs, with the effective GID at the front.

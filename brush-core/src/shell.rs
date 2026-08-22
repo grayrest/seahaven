@@ -259,24 +259,6 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
         &self.builtin_policy
     }
 
-    /// Whether this shell is running under a namespace a launcher installed.
-    ///
-    /// The closest thing the shell has to "am I sandboxed" on the *namespace*
-    /// axis, as [`BuiltinPolicy::is_open`] is on the builtin axis. It answers
-    /// the question the host-layout leaks D6 lists actually need: `~user` and
-    /// `$SHELL` may consult the host's user database only where the host *is*
-    /// the namespace.
-    ///
-    /// False for the identity namespace a shell is constructed with; true after
-    /// [`set_mounts`](Self::set_mounts), **including when what was installed
-    /// happens to be identity**. That errs toward more confinement rather than
-    /// less, which is the direction a wrong answer here should fail.
-    ///
-    /// [`BuiltinPolicy::is_open`]: crate::builtinpolicy::BuiltinPolicy::is_open
-    pub const fn is_confined(&self) -> bool {
-        self.namespace_installed
-    }
-
     /// Installs the builtin allowlist, pruning anything already registered that
     /// it does not admit.
     ///
@@ -308,6 +290,14 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     pub fn set_mounts(&mut self, mounts: brush_vfs::MountTable) {
         self.session = brush_vfs::Session::new(std::sync::Arc::new(brush_vfs::Vfs::new(mounts)));
         self.namespace_installed = true;
+
+        // D21's synthesized class, re-derived now that the answer has changed.
+        // `initialize_vars` runs during construction, before any launcher has
+        // installed a policy, so every one of these was computed with
+        // `is_confined()` still false and holds a host fact. The dynamic
+        // getters (`GROUPS`) re-read on access and need nothing; the static
+        // ones were written once and would keep the host's value forever.
+        crate::wellknownvars::resynthesize_session_facts(self);
 
         // A fresh session starts at the virtual root, so the working directory
         // the shell was started in -- a host path, and one the new policy very
@@ -536,6 +526,29 @@ impl<SE: extensions::ShellExtensions> ShellState for Shell<SE> {
     /// Returns whether or not this shell is a subshell.
     pub fn is_subshell(&self) -> bool {
         self.depth > 0
+    }
+
+    /// Whether this shell is running under a namespace a launcher installed.
+    ///
+    /// The closest thing the shell has to "am I sandboxed" on the *namespace*
+    /// axis, as [`BuiltinPolicy::is_open`] is on the builtin axis. It answers
+    /// the question the host-layout leaks D6 lists actually need, and the one
+    /// D21's synthesized variables need: a host fact may be reported only where
+    /// the host *is* the namespace.
+    ///
+    /// False for the identity namespace a shell is constructed with; true after
+    /// [`set_mounts`](Self::set_mounts), **including when what was installed
+    /// happens to be identity**. That errs toward more confinement rather than
+    /// less, which is the direction a wrong answer here should fail.
+    ///
+    /// On [`ShellState`] rather than beside it, because the dynamic getters
+    /// that read `GROUPS` and its neighbours see a `&dyn ShellState` and nothing
+    /// else -- and a getter that cannot ask this question answers with a host
+    /// fact.
+    ///
+    /// [`BuiltinPolicy::is_open`]: crate::builtinpolicy::BuiltinPolicy::is_open
+    pub fn is_confined(&self) -> bool {
+        self.namespace_installed
     }
 
     /// Returns the last "SECONDS" captured time.

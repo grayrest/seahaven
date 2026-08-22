@@ -61,9 +61,44 @@ fn tilde_does_not_fall_back_to_the_host_passwd_database() {
         "`~` named a host path with HOME unset: {stdout:?}"
     );
 
-    // Set, it is ordinary data and answers normally.
+    // And an inherited `HOME` does not rescue it either. D21 puts `HOME` in the
+    // "synthesized from policy, never inherited" class, so a host value is
+    // denied along with the rest of the environment -- the host's home is not a
+    // directory a bare `--mount` namespace contains, and answering `~` with it
+    // would name a path the shell cannot reach. A `--project` grant is the case
+    // that *has* a home to synthesize from; see `derive_project_namespace`.
     let (stdout, _) = run(&["--mount", &c.mount, "-c", "echo ~"], false);
-    assert!(!stdout.trim().is_empty(), "`~` must still answer when set");
+    assert!(
+        !stdout.contains('/'),
+        "an inherited HOME reached `~` under a policy: {stdout:?}"
+    );
+}
+
+#[test]
+fn the_host_environment_does_not_survive_a_policy() {
+    // D21's denied class is "everything else", so the test names something the
+    // shell has no opinion about: an inherited variable that is neither
+    // synthesized nor passthrough must simply be gone.
+    let c = confined();
+    let shell_path = assert_cmd::cargo::cargo_bin!("brush");
+    let mut command = std::process::Command::new(shell_path);
+    let output = command
+        .args(["--norc", "--noprofile", "--mount", &c.mount])
+        .args([
+            "-c",
+            "echo \"[$SSH_AUTH_SOCK][$AWS_SECRET_ACCESS_KEY][$NO_COLOR]\"",
+        ])
+        .env("SSH_AUTH_SOCK", "/tmp/agent.sock")
+        .env("AWS_SECRET_ACCESS_KEY", "hunter2")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to spawn brush");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(
+        stdout.trim(),
+        "[][][1]",
+        "denied variables survived, or the passthrough class did not"
+    );
 }
 
 #[test]

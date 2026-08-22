@@ -103,13 +103,33 @@ impl JobManager {
             }
         }
 
-        let id = self.jobs.len() + 1;
-        job.id = id;
+        job.id = self.next_id();
         job.annotation = JobAnnotation::Current;
         self.jobs.push(job);
 
         #[allow(clippy::unwrap_used, reason = "we just pushed an element")]
         self.jobs.last().unwrap()
+    }
+
+    /// The smallest job id not currently in use.
+    ///
+    /// **Not `jobs.len() + 1`**, which was the previous rule and which aliases:
+    /// `poll` removes a completed job from the same vector, so spawning two
+    /// jobs, reaping the first and spawning a third gives the third an id the
+    /// second still holds. A caller then names one job and reaches another --
+    /// harmless for `jobs` output, and not harmless at all once D25 hands these
+    /// ids to a guest as `spawn`/`wait_any` handles.
+    ///
+    /// Smallest-unused rather than monotonic, because bash reuses job numbers
+    /// and the compatibility suite compares them: after `[1]` finishes, the
+    /// next background job is `[1]` again. What bash does not do is hand out a
+    /// number that a *live* job already has, which is the whole of the bug.
+    fn next_id(&self) -> usize {
+        let mut id = 1;
+        while self.jobs.iter().any(|j| j.id == id) {
+            id += 1;
+        }
+        id
     }
 
     /// Returns the current job, if there is one.

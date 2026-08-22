@@ -16,6 +16,15 @@ pub trait ShellState {
     /// Returns whether or not this shell is a subshell.
     fn is_subshell(&self) -> bool;
 
+    /// Whether a namespace policy is installed -- the namespace-axis twin of
+    /// [`BuiltinPolicy::is_open`](crate::BuiltinPolicy::is_open).
+    ///
+    /// On the trait because D21's synthesized variables are read through
+    /// [`ShellValue::Dynamic`](crate::ShellValue::Dynamic) getters, which see a
+    /// `&dyn ShellState` and nothing else. A getter that cannot ask this
+    /// question answers with a host fact.
+    fn is_confined(&self) -> bool;
+
     /// Returns the last "SECONDS" captured time.
     fn last_stopwatch_time(&self) -> std::time::SystemTime;
 

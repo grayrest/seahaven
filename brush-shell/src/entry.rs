@@ -425,7 +425,7 @@ async fn initialize_shell(
     if let Some(mounts) = mounts {
         let mut shell = shell_ref.lock().await;
         shell.set_mounts(mounts);
-        strip_host_environment(&mut shell);
+        strip_host_environment(&mut shell, args.project.is_some());
         drop(shell);
     }
 
@@ -609,9 +609,67 @@ fn prompt_for_grant(excess: &[crate::trust::GrantedMount]) -> Result<bool, Strin
 /// namespace sees it, and until D22 builds `/bin` from the builtin registry
 /// there is no such path. Unset is the truthful interim; a made-up value would
 /// name something that does not resolve.
-fn strip_host_environment(shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>) {
-    shell.env_mut().unset("SHELL").ok();
+fn strip_host_environment(
+    shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+    has_project_home: bool,
+) {
+    // D21's *denied* class, which is "everything else" and is therefore
+    // expressed as a sweep rather than a list. Every name the host process was
+    // started with is removed unless D21 names it passthrough -- so a variable
+    // added to the host environment tomorrow is denied without an edit here,
+    // which is the whole point of default-deny.
+    //
+    // The sweep reads `std::env::vars()` rather than the shell's own table
+    // because those are two different sets: the shell's table also holds what
+    // `initialize_vars` computed (`PWD`, `IFS`, the prompt strings, `BASH*`),
+    // and unsetting those would break the shell rather than confine it. The
+    // host's set is exactly the inherited class.
+    for (name, _) in std::env::vars() {
+        if D21_PASSTHROUGH.contains(&name.as_str()) || SHELL_OWNED.contains(&name.as_str()) {
+            continue;
+        }
+        shell.env_mut().unset(&name).ok();
+    }
+
+    // D21's *synthesized* class, for the members there is an answer for today.
+    // `HOSTNAME`, `UID` and `EUID` are done in `set_mounts`, where confinement
+    // becomes true; `GROUPS` is a dynamic getter and needs nothing.
+    //
+    // `TERM` is `dumb` per D21's correction: D36 strips control sequences from
+    // sandboxed output, and passing a real `TERM` in is how a utility decides to
+    // *emit* them.
+    let mut term = brush_core::ShellVariable::new(String::from("dumb"));
+    term.export();
+    shell.env_mut().set_global("TERM", term).ok();
+
+    // `HOME` is synthesized where there is something to synthesize it *from*.
+    // A `--project` grant mounts D31's per-project home, so the name exists and
+    // pointing `HOME` at it is what makes that mount reachable -- without this
+    // the persistent home is in the namespace and unnameable. A bare `--mount`
+    // namespace has no such directory, so `HOME` stays denied and `~` has no
+    // answer, which is the fail-closed direction and what `home_dir()` already
+    // reports under confinement.
+    if has_project_home {
+        let mut home = brush_core::ShellVariable::new(String::from(crate::grant::HOME_MOUNT));
+        home.export();
+        shell.env_mut().set_global("HOME", home).ok();
+    }
+
+    // `PATH` and `TMPDIR` are D21's remaining synthesized members and there is
+    // nothing to synthesize them from: `PATH` wants D22's `/bin`, which does not
+    // exist, and no namespace here mounts a temp directory. Denied rather than
+    // inherited -- an unset `PATH` is a shell that cannot find host binaries by
+    // name, which is the direction this should fail.
 }
+
+/// D21's passthrough class: carries no host fact and is meaningful inside.
+const D21_PASSTHROUGH: &[&str] = &["NO_COLOR", "CI"];
+
+/// Names the shell computes for itself that also appear in a host environment.
+///
+/// Excluded from the deny sweep because the sweep runs *after* `initialize_vars`
+/// and would otherwise delete the shell's own answer rather than the host's.
+const SHELL_OWNED: &[&str] = &["PWD", "OLDPWD", "SHLVL", "_", "IFS"];
 
 /// The builtin allowlist (D11) selected by the command line.
 ///
@@ -802,6 +860,15 @@ async fn instantiate_shell_from_args(
         .verbose(args.verbose)
         .parser(parser_impl)
         .builtin_policy(builtin_policy(args))
+        // D43: "frame teardown must reap, or a job spawned in a frame that
+        // exits before `wait_any` sees it leaves a live process holding that
+        // frame's mount handles -- `kill_external_commands_on_drop` is
+        // mandatory for sandboxed sessions." Under D24 that orphan holds mount
+        // descriptors received over `SCM_RIGHTS`, and D24 records that
+        // fd-passing has no revocation, so the process outliving the session is
+        // the session outliving its own grant. Off under identity, where the
+        // shell is an ordinary bash and killing children at exit is not.
+        .kill_external_commands_on_drop(is_confined(args))
         .error_formatter(new_error_behavior(args))
         .shell_version(env!("CARGO_PKG_VERSION").to_string());
 
