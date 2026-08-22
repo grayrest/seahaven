@@ -429,11 +429,11 @@ async fn initialize_shell(
         drop(shell);
     }
 
-    // Seal external execution independently of the namespace (D2). A launcher
-    // confining the filesystem to a project tree usually wants both, but they
-    // are separate axes: `--mount` decides what a running process can name,
-    // `--closed-world` decides what may be run.
-    if args.closed_world {
+    // Seal external execution independently of the namespace (D2). Still
+    // separate axes -- `--mount` decides what a running process can name, this
+    // decides what may be run -- but `--project` now turns both on, so the
+    // question is no longer "was the flag passed". See `closed_world`.
+    if closed_world(args) {
         let launcher = bundled::trusted_launcher().ok_or_else(|| {
             brush_interactive::ShellError::from(std::io::Error::other(
                 "--closed-world: cannot determine this executable's path, so bundled \
@@ -506,6 +506,26 @@ fn build_mount_table(specs: &[String]) -> Result<brush_vfs::MountTable, String> 
 /// Read before the shell exists, so it cannot ask `Shell::is_confined`.
 const fn is_confined(args: &CommandLineArgs) -> bool {
     args.project.is_some() || !args.mounts.is_empty()
+}
+
+/// Whether external execution is sealed (D2).
+///
+/// `--project` implies it and `--mount` does not, which looks inconsistent and
+/// is the point: `--mount` is a caller composing the three axes deliberately,
+/// and defaulting one of them would change a namespace they wrote out by hand.
+/// `--project` derives the whole policy from a directory, so the same default
+/// there is the difference between the safe spelling and the long one.
+const fn closed_world(args: &CommandLineArgs) -> bool {
+    !args.open_world && (args.closed_world || args.project.is_some())
+}
+
+/// Whether the builtin allowlist is in force (D11).
+///
+/// Implied by `--project` for the reason [`closed_world`] gives, and opted out
+/// of separately from it: needing the host's compiler is not a reason to get
+/// `enable` and unrestricted `kill` back.
+const fn restrict_builtins(args: &CommandLineArgs) -> bool {
+    !args.unrestricted_builtins && (args.restrict_builtins || args.project.is_some())
 }
 
 /// Discovers a project and derives the namespace it is granted (D44, D31, D29).
@@ -601,7 +621,7 @@ fn strip_host_environment(shell: &mut brush_core::Shell<impl brush_core::ShellEx
 /// features -- and a hard-coded copy of it would rot silently in the direction
 /// that leaves a shell unable to run `cat`.
 fn builtin_policy(args: &CommandLineArgs) -> brush_core::BuiltinPolicy {
-    if !args.restrict_builtins {
+    if !restrict_builtins(args) {
         return brush_core::BuiltinPolicy::Open;
     }
     let bundled: Vec<String> = bundled::registry()
@@ -1031,5 +1051,98 @@ mod tests {
         assert!(!CommandLineArgs::has_pending_c_flag("-")); // bare dash
         assert!(!CommandLineArgs::has_pending_c_flag("c")); // no leading dash
         assert!(!CommandLineArgs::has_pending_c_flag("")); // empty
+    }
+
+    /// The three policy axes as `--project` and `--mount` resolve them.
+    ///
+    /// Table-driven rather than a case per row because the property is the
+    /// *difference* between the two ways of naming a namespace, and a reader
+    /// checking that difference wants both columns in one place.
+    #[test]
+    fn project_implies_the_other_two_axes_and_mount_does_not() -> Result<()> {
+        // (argv, confined, closed world, restricted builtins)
+        let rows: &[(&[&str], bool, bool, bool)] = &[
+            (&["brush"], false, false, false),
+            // `--mount` is a caller composing axes by hand. Defaulting either
+            // of the other two would change a namespace they wrote out.
+            (&["brush", "--mount", "/work:/tmp:rw"], true, false, false),
+            (
+                &["brush", "--mount", "/work:/tmp:rw", "--closed-world"],
+                true,
+                true,
+                false,
+            ),
+            // `--project` derives the whole policy, so the safe spelling is the
+            // short one.
+            (&["brush", "--project", "."], true, true, true),
+            (
+                &["brush", "--project", ".", "--open-world"],
+                true,
+                false,
+                true,
+            ),
+            (
+                &["brush", "--project", ".", "--unrestricted-builtins"],
+                true,
+                true,
+                false,
+            ),
+            (
+                &[
+                    "brush",
+                    "--project",
+                    ".",
+                    "--open-world",
+                    "--unrestricted-builtins",
+                ],
+                true,
+                false,
+                false,
+            ),
+            // The opt-outs are inert without the implication that produced
+            // them, rather than being a way to weaken a policy that was asked
+            // for outright.
+            (&["brush", "--open-world"], false, false, false),
+            (&["brush", "--unrestricted-builtins"], false, false, false),
+        ];
+
+        for (argv, confined, closed, restricted) in rows {
+            let parsed = CommandLineArgs::try_parse_from(args(argv))?;
+            assert_eq!(is_confined(&parsed), *confined, "confined: {argv:?}");
+            assert_eq!(closed_world(&parsed), *closed, "closed world: {argv:?}");
+            assert_eq!(
+                restrict_builtins(&parsed),
+                *restricted,
+                "restricted builtins: {argv:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_opt_out_cannot_contradict_the_flag_it_undoes() {
+        // Asking for both is a mistake worth reporting rather than resolving by
+        // precedence: whichever way it resolved, one of the two spellings on
+        // the command line would be silently doing nothing.
+        for argv in [
+            ["brush", "--closed-world", "--open-world"],
+            ["brush", "--restrict-builtins", "--unrestricted-builtins"],
+        ] {
+            assert!(
+                CommandLineArgs::try_parse_from(args(&argv)).is_err(),
+                "{argv:?} must be refused"
+            );
+        }
+
+        // And the two opt-outs are independent, so asking for one does not
+        // conflict with asking for the other axis outright.
+        assert!(
+            CommandLineArgs::try_parse_from(args(&[
+                "brush",
+                "--open-world",
+                "--restrict-builtins"
+            ]))
+            .is_ok()
+        );
     }
 }

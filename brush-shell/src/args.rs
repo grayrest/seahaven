@@ -130,8 +130,24 @@ pub struct CommandLineArgs {
     /// other host program fail to launch; the bundled `ls`, `cat` and the rest
     /// still work, because they are this executable re-invoking itself rather
     /// than external programs.
+    ///
+    /// Implied by `--project`, which is the only mode that derives a policy
+    /// rather than being handed one. Pass `--open-world` to turn it back off
+    /// there.
     #[clap(long = "closed-world", help_heading = HEADING_STANDARD_OPTIONS)]
     pub closed_world: bool,
+
+    /// Undo the closed world `--project` implies.
+    ///
+    /// Host programs run again, so a project shell can invoke `cargo` or `git`.
+    /// The namespace still applies -- an external program launched this way is
+    /// handed the project's mounts over the broker (D24) -- but what may be run
+    /// is no longer bounded by what is bundled.
+    ///
+    /// Separate from `--unrestricted-builtins` on purpose: needing the host's
+    /// compiler is not a reason to get `enable` and unrestricted `kill` back.
+    #[clap(long = "open-world", conflicts_with = "closed_world", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub open_world: bool,
 
     /// Confine the shell to a project discovered from this directory (D44).
     ///
@@ -143,6 +159,14 @@ pub struct CommandLineArgs {
     ///
     /// Mutually exclusive with `--mount`, which names a namespace outright
     /// instead of deriving one.
+    ///
+    /// **Implies `--closed-world` and `--restrict-builtins`**, which `--mount`
+    /// does not. The difference is who chose the policy: `--mount` is a caller
+    /// composing axes deliberately, and defaulting anything for them would
+    /// silently change a namespace they wrote out by hand. `--project` derives
+    /// the whole policy from a directory, so leaving two of its three axes wide
+    /// open makes the safe spelling the longest one. `--open-world` and
+    /// `--unrestricted-builtins` turn them back off.
     #[clap(long = "project", value_name = "DIR", help_heading = HEADING_STANDARD_OPTIONS)]
     pub project: Option<PathBuf>,
 
@@ -162,14 +186,25 @@ pub struct CommandLineArgs {
     /// Pair it with `--closed-world`. On its own, denying a builtin *promotes*
     /// the name to an external lookup, so a denied `find` becomes the host's
     /// `/usr/bin/find`. Only a closed world makes denial mean what it looks
-    /// like it means.
+    /// like it means -- which is why `--project` implies both rather than
+    /// either. Pass `--unrestricted-builtins` to turn it back off there.
     #[clap(long = "restrict-builtins", help_heading = HEADING_STANDARD_OPTIONS)]
     pub restrict_builtins: bool,
 
+    /// Undo the builtin allowlist `--project` implies.
+    ///
+    /// Every builtin is registered again, including `enable`, `history` and the
+    /// unrestricted form of `kill`. It also restores `BASH_FUNC_*` inheritance,
+    /// which is not a builtin at all but is gated on the same policy.
+    ///
+    /// Separate from `--open-world` on purpose: see that flag.
+    #[clap(long = "unrestricted-builtins", conflicts_with = "restrict_builtins", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub unrestricted_builtins: bool,
+
     /// Admit a builtin the `--restrict-builtins` allowlist would deny, repeatable.
     ///
-    /// Ignored without `--restrict-builtins`, which is the only mode that
-    /// denies anything.
+    /// Ignored unless the allowlist is in force -- `--restrict-builtins`, or
+    /// `--project` without `--unrestricted-builtins`.
     #[clap(long = "allow-builtin", value_name = "NAME", help_heading = HEADING_STANDARD_OPTIONS)]
     pub allowed_builtins: Vec<String>,
 
@@ -177,7 +212,7 @@ pub struct CommandLineArgs {
     ///
     /// Applied after `--allow-builtin`, and the only way to deny a *bundled*
     /// utility: those are admitted wholesale, because which of them exist is a
-    /// build-time question. Ignored without `--restrict-builtins`.
+    /// build-time question. Ignored unless the allowlist is in force.
     #[clap(long = "deny-builtin", value_name = "NAME", help_heading = HEADING_STANDARD_OPTIONS)]
     pub denied_builtins: Vec<String>,
 

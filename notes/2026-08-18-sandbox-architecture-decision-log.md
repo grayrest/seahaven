@@ -733,6 +733,17 @@ justfile's `import`/`mod` graph needs a parser this repository does not have and
 is rocjust's. The default a project gets before any manifest is consulted is
 `brush-shell/src/grant.rs`.
 
+**And the ceiling is all three axes, not just the namespace.** `--project`
+implies `--closed-world` and `--restrict-builtins`; `--mount` implies neither.
+The inconsistency is the entry's own rule applied to the command line: a caller
+writing mounts out by hand *is* the launcher and has chosen its policy, so
+defaulting an axis for them would narrow something they specified. A caller
+naming a directory has delegated the whole policy, and leaving two of its three
+axes open there makes the safe spelling the longest one. `--open-world` and
+`--unrestricted-builtins` opt out, separately -- needing the host's compiler is
+not a reason to get `enable` and unrestricted `kill` back -- and each conflicts
+with its positive twin so that neither spelling can silently do nothing.
+
 Whether the intersection is computed on virtual or host paths, and before or
 after canonicalization, is load-bearing and unstated: after canonicalization a
 symlinked subdirectory intersects to empty, and before it grants a host tree the
