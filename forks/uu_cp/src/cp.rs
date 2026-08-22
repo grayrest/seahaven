@@ -25,7 +25,6 @@ use uucore::fsxattr::{copy_acls, copy_xattrs, copy_xattrs_skip_selinux};
 use uucore::translate;
 
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::ValueParser, value_parser};
-use filetime::FileTime;
 use indicatif::{ProgressBar, ProgressStyle};
 #[cfg(unix)]
 use nix::sys::stat::{Mode, SFlag, dev_t, mknod as nix_mknod, mode_t};
@@ -1895,13 +1894,23 @@ pub(crate) fn copy_attributes(
     })?;
 
     handle_preserve(attributes.timestamps, || -> CopyResult<()> {
-        let atime = FileTime::from_last_access_time(&source_metadata);
-        let mtime = FileTime::from_last_modification_time(&source_metadata);
-        // `set_file_times` opens the destination (O_RDONLY) before calling
-        // futimens; opening a FIFO or device with no peer blocks forever, and a
-        // socket cannot be opened at all. For symlinks and these special files
-        // use the path-based, no-follow variant, which sets the times via
-        // utimensat without opening.
+        // FLATLAND DIVERGENCE: routed. `filetime`'s path functions resolve on
+        // the host, so under a mount `cp -p` failed with a bare "No such file
+        // or directory" -- the destination it was told to stamp does not exist
+        // out there. `cap-fs-ext` has both operations anchored on a directory
+        // capability, which the facade now exposes as `set_times`.
+        //
+        // The times come straight off the source's metadata rather than through
+        // `FileTime`, because `std::fs::Metadata` already yields the
+        // `SystemTime` the facade takes and the round trip bought nothing.
+        let atime = source_metadata.accessed()?;
+        let mtime = source_metadata.modified()?;
+        // The no-follow choice is kept exactly as upstream made it. Its reason
+        // was that `filetime` *opens* the destination first: opening a FIFO or
+        // device with no peer blocks forever, and a socket cannot be opened at
+        // all. The facade never opens for this, so the hazard is gone -- but a
+        // symlink still needs the no-follow form to stamp the link rather than
+        // its target, which is the half of the condition that still matters.
         #[cfg(unix)]
         let no_open = {
             let ft = source_metadata.file_type();
@@ -1913,11 +1922,7 @@ pub(crate) fn copy_attributes(
         };
         #[cfg(not(unix))]
         let no_open = dest.is_symlink();
-        if no_open {
-            filetime::set_symlink_file_times(dest, atime, mtime)?;
-        } else {
-            filetime::set_file_times(dest, atime, mtime)?;
-        }
+        brush_vfs::ambient::set_times(dest, atime, mtime, !no_open)?;
 
         Ok(())
     })?;

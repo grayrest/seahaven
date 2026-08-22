@@ -386,6 +386,21 @@ pub fn create_dir_with_mode(path: impl AsRef<Path>, mode: u32, recursive: bool) 
     with(path, |vfs, p| vfs.create_dir_with_mode(p, mode, recursive))
 }
 
+/// Sets a path's access and modification times. The rewrite target for
+/// `filetime::set_file_times` and `set_symlink_file_times`; `follow` picks
+/// between them.
+///
+/// # Errors
+/// As [`open`], and if the times cannot be set.
+pub fn set_times(
+    path: impl AsRef<Path>,
+    atime: std::time::SystemTime,
+    mtime: std::time::SystemTime,
+    follow: bool,
+) -> io::Result<()> {
+    with(path, |vfs, p| vfs.set_times(p, atime, mtime, follow))
+}
+
 /// Removes a file. Mirrors `std::fs::remove_file`.
 ///
 /// # Errors

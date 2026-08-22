@@ -16,7 +16,7 @@ use clap::builder::{PossibleValue, ValueParser};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 #[cfg(any(not(unix), target_os = "redox"))]
 use filetime::set_file_times;
-use filetime::{FileTime, set_symlink_file_times};
+use filetime::FileTime;
 use jiff::civil::Time;
 use jiff::fmt::strtime;
 use jiff::tz::TimeZone;
@@ -135,6 +135,27 @@ mod format {
     // "%Y-%m-%d %H:%M +offset"
     // Used for example in tests/touch/relative.sh
     pub(crate) const YYYYMMDDHHMM_OFFSET: &str = "%Y-%m-%d %H:%M %z";
+}
+
+/// FLATLAND DIVERGENCE: `FileTime` as the `SystemTime` the facade takes.
+///
+/// `filetime`'s path setters and `rustix::fs::utimensat(CWD, ..)` both resolve
+/// on the host, so under a mount they stamp a file outside the namespace --
+/// the same shape that made `cp -p` fail. `brush_vfs::ambient::set_times`
+/// covers both, following or not, and takes `std::time::SystemTime`.
+///
+/// Pre-epoch times are subtraction rather than a negative `Duration`, which
+/// does not exist: `FileTime` carries whole seconds plus a non-negative
+/// nanosecond remainder, so -1.5s is (-2, 500_000_000).
+fn filetime_to_system_time(ft: FileTime) -> std::time::SystemTime {
+    let secs = ft.unix_seconds();
+    let nanos = std::time::Duration::from_nanos(u64::from(ft.nanoseconds()));
+    let whole = std::time::Duration::from_secs(secs.unsigned_abs());
+    if secs >= 0 {
+        std::time::UNIX_EPOCH + whole + nanos
+    } else {
+        std::time::UNIX_EPOCH - whole + nanos
+    }
 }
 
 fn timestamp_to_filetime(ts: Timestamp) -> FileTime {
@@ -599,7 +620,14 @@ fn update_times(
     // The filename, access time (atime), and modification time (mtime) are provided as inputs.
 
     if opts.no_deref && !is_stdout {
-        return set_symlink_file_times(path, atime, mtime).map_err_context(
+        // FLATLAND DIVERGENCE: routed, as `set_times_by_path` below.
+        return brush_vfs::ambient::set_times(
+            path,
+            filetime_to_system_time(atime),
+            filetime_to_system_time(mtime),
+            /* follow */ false,
+        )
+        .map_err_context(
             || translate!("touch-error-setting-times-of-path", "path" => path.quote()),
         );
     }
@@ -662,14 +690,15 @@ fn build_timestamps(atime: FileTime, mtime: FileTime) -> Timestamps {
 /// This never opens the file, so it does not block on special files such as
 /// FIFOs.
 fn set_times_by_path(path: &Path, atime: FileTime, mtime: FileTime) -> UResult<()> {
-    let timestamps = build_timestamps(atime, mtime);
-    rustix::fs::utimensat(
-        rustix::fs::CWD,
+    // FLATLAND DIVERGENCE: routed. `utimensat(CWD, ..)` anchors on the *host*
+    // process's working directory. The facade sets times without opening, so
+    // the doc comment above still holds: no block on a reader-less FIFO.
+    brush_vfs::ambient::set_times(
         path,
-        &timestamps,
-        rustix::fs::AtFlags::empty(),
+        filetime_to_system_time(atime),
+        filetime_to_system_time(mtime),
+        /* follow */ true,
     )
-    .map_err(|e| Error::from_raw_os_error(e.raw_os_error()))
     .map_err_context(|| translate!("touch-error-setting-times-of-path", "path" => path.quote()))
 }
 

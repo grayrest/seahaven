@@ -32,8 +32,9 @@
 # routing them means an open per file listed where the path form is a single
 # `getxattr`. What leaks is whether a file has attributes, not their contents.
 #
-# `mkfifo`, `mknod`, `utimensat`, `UnixListener::bind` and a child's
-# `Command::current_dir` have no facade equivalent. The ban list says "not
+# `mkfifo`, `mknod`, `UnixListener::bind` and a child's `Command::current_dir`
+# have no facade equivalent. (`utimensat` was on this list until `set_times`
+# gave it one.) The ban list says "not
 # expressible in the namespace yet" for each, and means it.
 #
 # `tempfile` and `env::temp_dir` in `uu_sort` and `uu_tac` are scratch space,
@@ -61,7 +62,6 @@ uu_mv/src/mv.rs rustix::fs::unlinkat 1
 uu_sort/src/sort.rs std::env::temp_dir 1
 uu_sort/src/tmp_dir.rs tempfile::Builder::tempdir_in 1
 uu_tac/src/tac.rs tempfile::tempfile 1
-uu_touch/src/touch.rs rustix::fs::utimensat 1
 uucore/src/lib/features/fsext.rs std::fs::metadata 1
 uucore/src/lib/features/fsxattr.rs xattr::list_deref 2
 uucore/src/lib/features/perms.rs libc::lchown 1
@@ -80,15 +80,12 @@ uucore/src/lib/features/safe_traversal.rs nix::unistd::unlinkat 1
 # stopped aborting `uucore` and `sed`. They have been unrouted the whole time;
 # the gate could not see them.
 #
-# `sed/src/sed/named_writer.rs` is the sharp one and should be treated like
-# `uu_ln`'s `symlink` was: it is the `w` command's output file, so
-# `sed 's/x/y/w out.txt'` writes to a host path. `in_place.rs` is `sed -i`'s
-# replacement file, created *next to the target* rather than as scratch, so D38
-# does not cover it.
+# `sed/src/sed/in_place.rs` is `sed -i`'s replacement file, created *next to the
+# target* rather than as scratch, so D38 does not cover it. Its sibling in
+# `named_writer.rs` -- the `w` command's output file, which wrote to a host path
+# -- is routed.
 # ---------------------------------------------------------------------------
 sed/src/sed/in_place.rs tempfile::NamedTempFile::new_in 1
-sed/src/sed/named_writer.rs std::fs::OpenOptions::new 1
-sed/src/sed/named_writer.rs std::fs::OpenOptions::open 1
 uucore/src/lib/features/checksum/compute.rs std::path::Path::is_dir 1
 uucore/src/lib/mods/io.rs std::fs::OpenOptions::open 1
 uucore/src/lib/mods/locale.rs std::fs::read_to_string 1

@@ -63,6 +63,41 @@ between two paths in the same mount. The root is now pushed and not probed —
 skipped rather than special-cased in the error handling, because the question is
 meaningless rather than unanswerable.
 
+## `sed/src/sed/named_writer.rs` — the `w` command's output file
+
+An `OpenOptions` chain on a path named in the *script*, not on the command
+line: `sed 's/x/y/w out.txt'` wrote wherever the host resolved `out.txt`. Under
+a mount it exited 0 and created the file outside the namespace — the same escape
+`uu_ln`'s `symlink` was, in a utility nobody had looked at. Routed onto
+`ambient::open_with` with `OpenMode::write()`, which is exactly the
+create-and-truncate the chain asked for.
+
+`in_place.rs` is *not* routed and is recorded in `UNROUTED.txt`: `sed -i` builds
+its replacement through `NamedTempFile::new_in` next to the target, which needs
+a create-new loop through the facade rather than a one-line swap.
+
+## `uu_cp` and `uu_touch` — `filetime`'s path setters
+
+`filetime::set_file_times` resolves the path itself, so `cp -p` under a mount
+failed with a bare "No such file or directory": the destination it was told to
+stamp does not exist on the host. `cap-fs-ext` has both operations anchored on a
+directory capability — which is what the decision log meant by filing `filetime`
+under "expressible, merely unwritten" — so the facade grew `set_times`, taking
+`std::time::SystemTime` and a `follow` flag.
+
+`uu_cp` reads the times straight off the source's `Metadata`, which already
+yields `SystemTime`; the `FileTime` round trip bought nothing. `uu_touch` needs
+the conversion and carries it, subtraction for pre-epoch because a negative
+`Duration` does not exist.
+
+`uu_touch`'s `rustix::fs::utimensat(CWD, ..)` went the same way. It had been
+recorded as having no facade equivalent, which stopped being true the moment
+`set_times` existed — the kind of entry this file exists to keep honest.
+
+`clippy.toml` bans `filetime`'s four path setters so neither can regress
+quietly. `set_file_handle_times` is deliberately not banned: it takes a
+descriptor.
+
 ## `uucore/src/lib/features/fsxattr.rs` — descriptors, not paths
 
 `xattr`'s path functions resolve on the host, so under a mount they address a

@@ -311,6 +311,16 @@ fn rustix_fs_linux_only() {
     );
 }
 
+/// `filetime`'s path surface. `set_file_handle_times` is deliberately not
+/// banned: it takes a descriptor.
+fn filetime_by_path() {
+    let t = filetime::FileTime::zero();
+    filetime::set_file_times(path(), t, t);
+    filetime::set_symlink_file_times(path(), t, t);
+    filetime::set_file_mtime(path(), t);
+    filetime::set_file_atime(path(), t);
+}
+
 /// `xattr`'s path surface. The crate's `FileExt` form is deliberately *not*
 /// banned: a descriptor the vfs opened is the routed answer.
 #[cfg(unix)]

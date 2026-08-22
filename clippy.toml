@@ -212,6 +212,16 @@ disallowed-methods = [
   { path = "rustix::fs::fclonefileat", reason = "read and write through brush_vfs::Vfs", allow-invalid = true },
   { path = "rustix::fs::getpath", reason = "the host's layout is not the namespace's", allow-invalid = true },
 
+  # `filetime`'s path surface, for the same reason as `xattr`'s: the crate is
+  # not banned outright, because `set_file_handle_times` takes a descriptor and
+  # the facade's `set_times` covers the no-follow case that a descriptor cannot.
+  # These are the forms that resolve a path on the host -- which is what made
+  # `cp -p` fail under a mount with a bare "No such file or directory".
+  { path = "filetime::set_file_times", reason = "use brush_vfs::Vfs::set_times" },
+  { path = "filetime::set_symlink_file_times", reason = "use brush_vfs::Vfs::set_times with follow=false" },
+  { path = "filetime::set_file_mtime", reason = "use brush_vfs::Vfs::set_times" },
+  { path = "filetime::set_file_atime", reason = "use brush_vfs::Vfs::set_times" },
+
   # `xattr`'s path surface. The crate is not banned outright, because its
   # *descriptor* form is the routed answer -- `xattr::FileExt` on a `File` the
   # vfs opened -- and the decision log records that moving `xattr` out of the

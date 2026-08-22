@@ -1157,6 +1157,44 @@ impl Vfs {
         })
     }
 
+    /// Sets a path's access and modification times, optionally following a
+    /// final symlink. The target for `filetime`'s path functions.
+    ///
+    /// `filetime::set_file_times` resolves the path itself, so under a mount it
+    /// addresses a file outside the namespace -- which is why `cp -p` failed
+    /// with a bare "No such file or directory". `cap-fs-ext` has the same two
+    /// operations anchored on a directory capability, which is what the
+    /// decision log meant when it filed `filetime` under "expressible, merely
+    /// unwritten".
+    ///
+    /// # Errors
+    ///
+    /// If the path is unmounted, the mount is read-only, or the call fails.
+    pub fn set_times(
+        &self,
+        path: &VirtualPath,
+        atime: std::time::SystemTime,
+        mtime: std::time::SystemTime,
+        follow: bool,
+    ) -> std::io::Result<()> {
+        use cap_fs_ext::{DirExt as _, SystemTimeSpec};
+
+        let spec = |t: std::time::SystemTime| {
+            Some(SystemTimeSpec::Absolute(
+                cap_std::time::SystemTime::from_std(t),
+            ))
+        };
+        self.at(path, false, |located| {
+            Self::require_writable(located)?;
+            let dir = located.mount.dir();
+            if follow {
+                dir.set_times(&located.relative, spec(atime), spec(mtime))
+            } else {
+                dir.set_symlink_times(&located.relative, spec(atime), spec(mtime))
+            }
+        })
+    }
+
     /// Sets a path's permissions. Mirrors `std::fs::set_permissions`.
     ///
     /// Takes `std::fs::Permissions` so the rewrite stays a signature-preserving

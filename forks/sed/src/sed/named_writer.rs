@@ -11,7 +11,7 @@
 use crate::sed::error_handling::{ScriptLocation, runtime_error};
 
 use std::cell::RefCell;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -35,11 +35,13 @@ pub struct NamedWriter {
 impl NamedWriter {
     /// Create a new writer, truncate the file, and register it for flushing.
     pub fn new(path: PathBuf, location: ScriptLocation) -> UResult<Rc<RefCell<Self>>> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&path)
+        // FLATLAND DIVERGENCE: routed. This is the `w` command's output file,
+        // named in the *script* -- `sed 's/x/y/w out.txt'` -- so an unrouted
+        // open writes wherever the host resolves that name. Under a mount it
+        // exited 0 and created the file outside the namespace, which is the
+        // same escape `uu_ln`'s `symlink` was. `OpenMode::write()` is exactly
+        // create-and-truncate.
+        let file = brush_vfs::ambient::open_with(&path, brush_vfs::OpenMode::write())
             .map_err(|e| {
                 runtime_error::<()>(&location, format!("creating file {}: {}", path.quote(), e))
                     .unwrap_err()

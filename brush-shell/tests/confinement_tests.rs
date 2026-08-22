@@ -140,8 +140,30 @@ const CASES: &[Case] = &[
         "sed -i 's/bravo/BRAVO/' f.txt && cat f.txt",
         TREE,
     ),
+    case(
+        "sed's w command writes inside the namespace",
+        // The `w` output file is named in the *script*, so an unrouted open
+        // wrote it wherever the host resolved that name -- exit 0, file
+        // outside the mount. Reading it back is the assertion.
+        "sed -n 's/bravo/BRAVO/w out.txt' f.txt && cat out.txt",
+        TREE,
+    ),
     // Creating and removing.
     case("cp a file", "cp f.txt c.txt && cat c.txt", TREE),
+    case(
+        "cp -p preserves timestamps",
+        // `filetime`'s path setters resolve on the host, so this failed with a
+        // bare "No such file or directory". `touch -t` first, so the stamp
+        // being compared is a fixed one rather than now.
+        "touch -t 202001020304 f.txt && cp -p f.txt c.txt && ls -l c.txt | cut -c1-10",
+        TREE,
+    ),
+    case(
+        "cp -Pp preserves a symlink's own timestamps",
+        // The no-follow branch, which used `set_symlink_file_times`.
+        "ln -s f.txt l && cp -Pp l l2 && readlink l2",
+        TREE,
+    ),
     case("cp -r a directory", "cp -r d d2 && cat d2/inner.txt", TREE),
     case("mv a file", "mv f.txt m.txt && cat m.txt", TREE),
     case("mv into a directory", "mv f.txt d/ && cat d/f.txt", TREE),
