@@ -1,0 +1,27 @@
+# The Roc platform host. Excluded from the workspace like `forks/`: it is a
+# `staticlib` linked by `roc`, not by cargo, and its generated glue is
+# unsafe-heavy `extern "C"` code that the workspace lint wall (missing_docs,
+# undocumented_unsafe_blocks, ...) is not written for. It path-depends on the
+# workspace crates it routes through.
+[workspace]
+
+[package]
+name = "brush-roc-host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "host"
+crate-type = ["staticlib"]
+
+[dependencies]
+brush-platform = { path = "../brush-platform" }
+brush-vfs = { path = "../brush-vfs" }
+libc = "0.2"
+
+[profile.release]
+lto = true
+# Exported hosted_* and roc_* symbols must survive; do not strip them.
+strip = "debuginfo"
+panic = "abort"

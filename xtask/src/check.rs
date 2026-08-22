@@ -1441,6 +1441,20 @@ fn check_platform(sh: &Shell, verbose: bool) -> Result<()> {
     cmd!(sh, "roc check {main}")
         .run()
         .context("the Roc platform does not type-check")?;
+
+    // The Rust host is excluded from the workspace (a `staticlib` linked by
+    // `roc`, unsafe-heavy generated glue), exactly as `forks/` is -- so it needs
+    // its own build here or it rots. Compile it as the library it is.
+    let host_manifest = root.join("brush-roc-host").join("Cargo.toml");
+    if host_manifest.is_file() {
+        let host_manifest = host_manifest.to_string_lossy().to_string();
+        if verbose {
+            eprintln!("Running: cargo build --manifest-path {host_manifest}");
+        }
+        cmd!(sh, "cargo build --quiet --manifest-path {host_manifest}")
+            .run()
+            .context("the Roc platform host does not compile")?;
+    }
     eprintln!("Platform check passed.");
     Ok(())
 }

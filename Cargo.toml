@@ -20,7 +20,7 @@ members = [
 # not see them -- their routing is proven by the Landlock test (D41), not the
 # lint (D3). This mirrors how the crates.io versions they replace were never
 # linted either.
-exclude = ["forks"]
+exclude = ["forks", "brush-roc-host"]
 default-members = ["brush-shell"]
 
 # Every fork is patched, not just the ones `brush-coreutils-builtins` names.
