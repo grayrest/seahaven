@@ -4,7 +4,10 @@ use std::io::{Read as _, Write as _};
 
 use brush_vfs::{AccessModes, Session, VirtualPath};
 
-use crate::effects::{Effect, PathKind, PlatformEffects};
+use crate::cmd::{
+    Cmd, Executor, Exit, Finished, IoPlan, JobHandle, NO_EXECUTOR, OutputMode, RunResult, StdinMode,
+};
+use crate::effects::{Effect, ExecOutput, PathKind, PlatformEffects};
 use crate::error::PlatformError;
 use crate::facts::{EXE_PATH, PlatformTarget, SessionFacts};
 use crate::stdio::{Stdio, Stream};
@@ -20,6 +23,14 @@ pub struct VfsPlatform {
     session: Session,
     facts: SessionFacts,
     stdio: Stdio,
+    /// The execution backend, or `None` before the link step wires the broker
+    /// in. Absent means every execution fails with `Unsupported`, uniformly --
+    /// including the `exec_*` effects, because they route through `spawn`.
+    executor: Option<Box<dyn Executor>>,
+    /// Finished jobs awaiting `wait_any`, keyed by handle id.
+    jobs: std::collections::BTreeMap<u64, Finished>,
+    /// The next handle id. Monotonic, never reused -- see `JobHandle`.
+    next_handle: u64,
 }
 
 impl VfsPlatform {
@@ -32,6 +43,9 @@ impl VfsPlatform {
             session,
             facts,
             stdio: Stdio::new(Vec::new()),
+            executor: None,
+            jobs: std::collections::BTreeMap::new(),
+            next_handle: 0,
         }
     }
 
@@ -40,6 +54,46 @@ impl VfsPlatform {
     pub fn with_stdin(mut self, stdin: Vec<u8>) -> Self {
         self.stdio = Stdio::new(stdin);
         self
+    }
+
+    /// Installs the execution backend (D2's predicate and D24's broker, at the
+    /// link step). Without one, every execution is `Unsupported`.
+    #[must_use]
+    pub fn with_executor(mut self, executor: Box<dyn Executor>) -> Self {
+        self.executor = Some(executor);
+        self
+    }
+
+    /// Mints the next non-aliasing job handle.
+    const fn mint_handle(&mut self) -> JobHandle {
+        let id = self.next_handle;
+        self.next_handle += 1;
+        JobHandle(id)
+    }
+
+    /// Runs a capturing command through `spawn`/`wait_any`, building the
+    /// `ExecOutput` the two `exec_output` effects return. Shared so both stdin
+    /// modes take the identical path.
+    fn exec_capturing(&mut self, cmd: &Cmd, stdin: StdinMode) -> Effect<ExecOutput> {
+        let handle = self.spawn(cmd, IoPlan::capture(stdin))?;
+        let (_h, finished) = self.wait_any(&[handle])?;
+        let (stdout, stderr) = finished.captured.unwrap_or_default();
+        Ok(match finished.exit {
+            Exit::Code(0) => ExecOutput::Success { stdout, stderr },
+            Exit::Code(exit_code) => ExecOutput::NonZeroExit {
+                exit_code,
+                stdout,
+                stderr,
+            },
+            // A signal death is a non-zero end; report it as the shell does,
+            // 128 + signal, so the guest sees a non-zero code rather than a
+            // spurious success.
+            Exit::Signal(signal) => ExecOutput::NonZeroExit {
+                exit_code: 128 + signal,
+                stdout,
+                stderr,
+            },
+        })
     }
 
     /// The session this host resolves against.
@@ -260,6 +314,87 @@ impl PlatformEffects for VfsPlatform {
 
     fn stdin_read_to_end(&mut self) -> Effect<Vec<u8>> {
         Ok(self.stdio.input.read_to_end())
+    }
+
+    fn spawn(&mut self, cmd: &Cmd, io: IoPlan) -> Effect<JobHandle> {
+        // The child's stdin: the session's own, drained, for an inheriting run
+        // (just's backticks); empty otherwise. Read first so the executor borrow
+        // does not overlap the stdio borrow.
+        let stdin = match io.stdin {
+            StdinMode::Inherit => self.stdio.input.read_to_end(),
+            StdinMode::Null => Vec::new(),
+        };
+
+        let result: RunResult = self
+            .executor
+            .as_mut()
+            .ok_or(NO_EXECUTOR)?
+            .run(cmd, &stdin)?;
+
+        // Apply the output plan. Inherited output is the child writing where the
+        // parent would (D28's log); captured output is held for the guest.
+        let captured = match io.output {
+            OutputMode::Inherit => {
+                self.stdio.output.write(Stream::Stdout, &result.stdout);
+                self.stdio.output.write(Stream::Stderr, &result.stderr);
+                None
+            }
+            OutputMode::Capture => Some((result.stdout, result.stderr)),
+        };
+
+        let handle = self.mint_handle();
+        self.jobs.insert(
+            handle.0,
+            Finished {
+                exit: result.exit,
+                captured,
+            },
+        );
+        Ok(handle)
+    }
+
+    fn wait_any(&mut self, handles: &[JobHandle]) -> Effect<(JobHandle, Finished)> {
+        for handle in handles {
+            // Removed on wait: a handle names its job once. With non-aliasing
+            // ids, a waited handle then names nothing rather than a later job.
+            if let Some(finished) = self.jobs.remove(&handle.0) {
+                return Ok((*handle, finished));
+            }
+        }
+        Err(PlatformError::Other(
+            "wait_any: no such job (empty list, or already waited)".to_owned(),
+        ))
+    }
+
+    fn cmd_exec_exit_code(&mut self, cmd: &Cmd) -> Effect<i32> {
+        let handle = self.spawn(cmd, IoPlan::inherit())?;
+        let (_h, finished) = self.wait_any(&[handle])?;
+        match finished.exit {
+            Exit::Code(code) => Ok(code),
+            // exec_exit_code collapses a signal death into an error, which is
+            // basic-cli's documented behaviour: it cannot report which signal.
+            Exit::Signal(_) => Err(PlatformError::Other(
+                "child terminated by a signal".to_owned(),
+            )),
+        }
+    }
+
+    fn cmd_exec_status(&mut self, cmd: &Cmd) -> Effect<i32> {
+        let handle = self.spawn(cmd, IoPlan::inherit())?;
+        let (_h, finished) = self.wait_any(&[handle])?;
+        Ok(match finished.exit {
+            Exit::Code(code) => code,
+            // The negated signal, unambiguous because real codes are 0..=255.
+            Exit::Signal(signal) => -signal,
+        })
+    }
+
+    fn cmd_exec_output(&mut self, cmd: &Cmd) -> Effect<ExecOutput> {
+        self.exec_capturing(cmd, StdinMode::Null)
+    }
+
+    fn cmd_exec_output_inherit_stdin(&mut self, cmd: &Cmd) -> Effect<ExecOutput> {
+        self.exec_capturing(cmd, StdinMode::Inherit)
     }
 }
 

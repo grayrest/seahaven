@@ -937,6 +937,25 @@ when the store decision changed. Within a store there is one grant and therefore
 one mount table; sessions differ in working directory, environment and open
 descriptors. The handle design is D43.
 
+**Implemented as a shape, per `plans/2026-08-22-platform.md` step 5**
+(`brush_platform::cmd`). `spawn` returns a [`JobHandle`], `wait_any` collects one
+from a list, and two handles are held at once -- the property a blocking exec
+cannot express, which is the whole reason the shape lands before the scheduler.
+Blocking underneath: `spawn` runs the command to completion and stores the
+result, `wait_any` retrieves it. The four `exec_*` effects route *through*
+`spawn`/`wait_any` with no second path, pinned by a test that removes the
+executor and watches `exec_status` fail exactly as `spawn` does.
+
+The scheduler is not built and neither is the store-per-sub-invocation split;
+one session is one job with one output log (D28), and D25's per-store deadlines
+and memo table wait on the parallel executor. Handles are **non-aliasing by
+construction** -- a monotonic counter, never reused, waited handles removed --
+which is stronger than D43's generational indices for one session, so the
+aliasing bug this entry's neighbours warn of cannot arise here. Actual process
+execution is a seam (`Executor`), so the broker-backed binding (D2's predicate,
+D24's broker) is the link step's rather than a dependency this crate takes on
+`brush-core`.
+
 ## D26 — Links are validated at creation
 
 cap-std blocks *following* escaping symlinks, not creating them. An unvalidated

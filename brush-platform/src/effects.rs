@@ -1,5 +1,6 @@
 //! The hosted-effect trait, and the value types that cross it.
 
+use crate::cmd::{Cmd, Finished, IoPlan, JobHandle};
 use crate::error::PlatformError;
 use crate::facts::PlatformTarget;
 
@@ -22,6 +23,34 @@ pub enum PathKind {
     SymLink,
     /// A device, socket, FIFO — anything with no more specific kind.
     Other,
+}
+
+/// The result of a capturing execution — `basic-cli`'s
+/// `Try(CmdOutputSuccess, [NonZeroExitCode(CmdOutputFailure), ...])`.
+///
+/// A command that ran and exited non-zero is a *successful run* with a
+/// [`NonZeroExit`](ExecOutput::NonZeroExit) result, not an
+/// [`Err`](PlatformError) — the error channel is for a command that could not be
+/// run at all. rocjust branches on the two, so they are distinct variants rather
+/// than an exit code the caller must inspect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecOutput {
+    /// Exited zero.
+    Success {
+        /// Captured stdout.
+        stdout: Vec<u8>,
+        /// Captured stderr.
+        stderr: Vec<u8>,
+    },
+    /// Ran and exited non-zero.
+    NonZeroExit {
+        /// The non-zero exit code.
+        exit_code: i32,
+        /// Captured stdout.
+        stdout: Vec<u8>,
+        /// Captured stderr.
+        stderr: Vec<u8>,
+    },
 }
 
 /// The effects a Roc application performs, expressed once (D18).
@@ -211,4 +240,47 @@ pub trait PlatformEffects {
     ///
     /// `basic-cli`'s `stdin_read_to_end!`.
     fn stdin_read_to_end(&mut self) -> Effect<Vec<u8>>;
+
+    // --- Process execution (D25, D2, D24) ---------------------------------
+
+    /// Starts a job and returns a handle to it (D25).
+    ///
+    /// Blocking underneath today — the command runs to completion here and the
+    /// handle names its stored result — but the *shape* is D25's: a handle now,
+    /// collected by [`wait_any`](Self::wait_any) later, so a caller can hold two
+    /// at once. When the real scheduler lands, this is where it goes and no
+    /// caller changes.
+    fn spawn(&mut self, cmd: &Cmd, io: IoPlan) -> Effect<JobHandle>;
+
+    /// Waits for any of `handles` to finish, returning it and its result (D25).
+    ///
+    /// A handle is consumed when waited, so it cannot be waited twice — combined
+    /// with non-aliasing handles, a finished job's handle names nothing
+    /// afterward.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] if none of the handles names a job — an empty
+    /// list, or one already waited.
+    fn wait_any(&mut self, handles: &[JobHandle]) -> Effect<(JobHandle, Finished)>;
+
+    /// Runs a command with all stdio inherited and returns its exit code; a
+    /// signal death is an **error** (`basic-cli`'s `cmd_exec_exit_code!`).
+    ///
+    /// Routed through [`spawn`](Self::spawn)/[`wait_any`](Self::wait_any), which
+    /// is the property gate 6 checks.
+    fn cmd_exec_exit_code(&mut self, cmd: &Cmd) -> Effect<i32>;
+
+    /// Runs a command with all stdio inherited and returns its exit code, or the
+    /// **negated** signal that killed it (`basic-cli`'s `cmd_exec_status!`).
+    fn cmd_exec_status(&mut self, cmd: &Cmd) -> Effect<i32>;
+
+    /// Runs a command with stdin empty, capturing stdout and stderr
+    /// (`basic-cli`'s `cmd_exec_output!`).
+    fn cmd_exec_output(&mut self, cmd: &Cmd) -> Effect<ExecOutput>;
+
+    /// Runs a command with the session's stdin inherited, capturing stdout and
+    /// stderr (`basic-cli`'s `cmd_exec_output_inherit_stdin!`) — the form just's
+    /// backticks need.
+    fn cmd_exec_output_inherit_stdin(&mut self, cmd: &Cmd) -> Effect<ExecOutput>;
 }

@@ -33,13 +33,15 @@
 
 #![deny(missing_docs)]
 
+mod cmd;
 mod effects;
 mod error;
 pub mod facts;
 pub mod stdio;
 mod vfs_host;
 
-pub use effects::{PathKind, PlatformEffects};
+pub use cmd::{Cmd, Executor, Exit, Finished, IoPlan, JobHandle, OutputMode, RunResult, StdinMode};
+pub use effects::{ExecOutput, PathKind, PlatformEffects};
 pub use error::PlatformError;
 pub use facts::{PlatformTarget, SessionFacts, TargetArch, TargetOs};
 pub use stdio::{OutputLog, StdinSource, Stdio, Stream};
