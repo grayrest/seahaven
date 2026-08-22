@@ -34,6 +34,14 @@ cargo install --locked brush-shell --features experimental-bundled-coreutils
 
 ### `experimental-bundled-coreutils`
 
+> **In the default feature set.** This one is on unless you turn it off. It
+> stopped being optional when `--closed-world` and `--project` became things
+> you could ask for: a sealed shell can run nothing except the utilities that
+> ship inside the binary, so a build without them is a shell with no commands
+> at all. Build with `--no-default-features` to leave them out, or pass
+> `--no-bundled-builtins` at runtime to keep them in the binary and out of the
+> builtin registry.
+
 Bundles a configurable subset of [`uutils/coreutils`](https://github.com/uutils/coreutils)
 implementations directly into `brush-shell` as builtins. Useful when:
 
@@ -43,8 +51,7 @@ implementations directly into `brush-shell` as builtins. Useful when:
 - distributing a single self-contained `brush` binary that doesn't
   rely on host utilities being present.
 
-When enabled (via the umbrella `experimental` feature, or directly), the
-full set of supported utilities is bundled. When building the
+The full set of supported utilities is bundled. When building the
 `brush-coreutils-builtins` crate directly, individual utilities can be
 selected via `coreutils.<name>` features (e.g., `coreutils.cat`,
 `coreutils.ls`); the `coreutils.all` feature enables all of them.
@@ -53,6 +60,14 @@ Bundled utilities run in-process and take precedence over external
 executables of the same name on `PATH` when invoked unqualified. As with
 any builtin, you can bypass the in-process implementation with
 `command <name>` or by giving an explicit path.
+
+That precedence is visible in more places than the utilities themselves:
+`type cat` reports a shell builtin rather than `/bin/cat`, and `command -v`,
+`hash` and `compgen -A command` follow it. It is also why the compatibility
+suite passes `--no-bundled-builtins` -- it compares this shell against the
+host's bash *and* the host's coreutils, and with the bundled set registered it
+would be measuring the difference between uutils and the platform's own tools
+instead.
 
 ### `experimental-builtins`
 

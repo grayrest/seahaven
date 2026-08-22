@@ -1266,6 +1266,25 @@ const CROSS_CRATES: &[&str] = &[
     "brush-coreutils-builtins",
 ];
 
+/// Feature overrides applied when cross-checking a crate.
+///
+/// `brush-shell`'s default set now includes the bundled utilities, and three of
+/// them (`findutils`, `uu_expr`, `uu_grep`) depend on `onig` -- the C library
+/// the comment above [`CROSS_TARGETS`] already names as the reason the cross
+/// check is not workspace-wide. So the same reasoning now applies to a crate on
+/// the list, and the answer is the same: check it with the feature set it had
+/// before the utilities were bundled. The platform assumptions this gate exists
+/// to catch are in the shell, not in a vendored regex engine, and CI builds the
+/// full set through `cross`, which carries the toolchains.
+const CROSS_FEATURES: &[(&str, &[&str])] = &[(
+    "brush-shell",
+    &[
+        "--no-default-features",
+        "--features",
+        "basic,reedline,minimal",
+    ],
+)];
+
 /// Checks the sandbox crates against non-host targets.
 ///
 /// A native-only check is how `brush-vfs` came to not compile for Windows at
@@ -1291,12 +1310,22 @@ fn check_cross_platform(sh: &Shell, verbose: bool) -> Result<()> {
         }
         eprintln!("  checking {target}...");
         for krate in CROSS_CRATES {
+            let features: &[&str] = CROSS_FEATURES
+                .iter()
+                .find(|(name, _)| name == krate)
+                .map_or(&[], |(_, args)| *args);
             if verbose {
-                eprintln!("    cargo check -p {krate} --target {target}");
+                eprintln!(
+                    "    cargo check -p {krate} --target {target} {}",
+                    features.join(" ")
+                );
             }
-            cmd!(sh, "cargo check --quiet -p {krate} --target {target}")
-                .run()
-                .with_context(|| format!("{krate} does not compile for {target}"))?;
+            cmd!(
+                sh,
+                "cargo check --quiet -p {krate} --target {target} {features...}"
+            )
+            .run()
+            .with_context(|| format!("{krate} does not compile for {target}"))?;
         }
     }
     Ok(())

@@ -57,6 +57,20 @@ away early as "not found". Selected by `--closed-world`, a separate axis from
 `--mount`; the default stays `Open` under identity so the compat suite is
 unaffected (the predicate is a no-op there).
 
+**The bundled set is in the default feature list, and it had to be.** A sealed
+world can run nothing but the utilities inside the binary, so `--closed-world`
+in a build without them was a shell with no commands at all -- and once
+`--project` implied a closed world (D16), that was reachable without asking for
+it. Making them default costs the compatibility suite, which compares this
+shell against the host's bash *and* the host's coreutils: with the bundled set
+registered, 37 cases differ, and only 14 are about the shell -- `type cat`
+reporting a builtin, and `command -v`, `hash` and `compgen -A command`
+following it. The other 23 are `wc -l`'s column padding, `touch -d <iso8601>`,
+`date`'s long options and `grep`'s escapes, which is BSD against GNU rather
+than brush against bash. So the suite passes `--no-bundled-builtins` and stays
+at its measured 1799. The integration suite does not, and gained ten cases that
+had been skipping for want of a `cat`.
+
 **What it does not do is confine the child.** A bundled `ls` runs in a freshly
 spawned process that inherits ambient authority, and — because nothing
 re-installs the namespace across the spawn — an *absolute* virtual path handed to

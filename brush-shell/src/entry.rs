@@ -653,7 +653,9 @@ async fn instantiate_shell(
     // Register shims for any bundled commands in the installed registry.
     // Done here (not inside the inner instantiators) so both paths are
     // covered from a single site.
-    bundled::register_shims(&mut shell);
+    if !args.no_bundled_builtins {
+        bundled::register_shims(&mut shell);
+    }
 
     Ok(shell)
 }

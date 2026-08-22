@@ -57,6 +57,20 @@ fn create_sh_oracle(options: &TestOptions) -> OracleConfig {
 fn create_test_shell_config(options: &TestOptions, oracle_name: &str) -> Result<ShellConfig> {
     let mut config = options.create_test_shell_config()?;
 
+    // The bundled utilities ship in the binary by default, and being builtins
+    // is the point of them -- but this suite compares brush against the host's
+    // bash *and the host's coreutils*, so with them registered the two sides
+    // differ wherever uutils and the platform's own tools do. Measured on
+    // macOS: 37 cases, and only 14 of them about the shell. The rest are
+    // `wc -l`'s column padding, `touch -d <iso8601>`, `date`'s long options and
+    // `grep`'s escape handling -- BSD-versus-GNU, which this suite has no
+    // business asserting either way.
+    //
+    // Registered here rather than in the shared harness config because the
+    // integration suite is brush's own and *should* see them: enabling them by
+    // default is what let ten of its previously-skipped cases run.
+    config.default_args.push("--no-bundled-builtins".into());
+
     // Add --sh flag when testing against sh oracle.
     if oracle_name == SH_CONFIG_NAME {
         config.default_args.insert(0, "--sh".into());

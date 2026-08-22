@@ -62,7 +62,7 @@ path = "benches/shell.rs"
 harness = false
 
 [features]
-default = ["basic", "reedline", "minimal"]
+default = ["basic", "reedline", "minimal", "experimental-bundled-coreutils"]
 basic = ["brush-interactive/basic"]
 minimal = ["brush-interactive/minimal"]
 reedline = ["brush-interactive/reedline"]
@@ -78,6 +78,11 @@ experimental-builtins = ["dep:brush-experimental-builtins"]
 # Without `findutils.all` and `textutils.all` the crates are forked, routed and
 # registered and then unreachable, so `find`, `grep` and `sed` fall through to
 # the host's copies -- which a closed world refuses rather than confines.
+#
+# In `default` despite the name, because `--closed-world` and `--project` are
+# not opt-in features and a sealed shell without the bundled set can run
+# nothing at all. `--no-bundled-builtins` turns the registration off at
+# runtime; the compatibility suite uses it.
 experimental-bundled-coreutils = [
     "dep:brush-coreutils-builtins",
     "brush-coreutils-builtins/coreutils.all",

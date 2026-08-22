@@ -216,6 +216,24 @@ pub struct CommandLineArgs {
     #[clap(long = "deny-builtin", value_name = "NAME", help_heading = HEADING_STANDARD_OPTIONS)]
     pub denied_builtins: Vec<String>,
 
+    /// Don't register the bundled utilities as builtins.
+    ///
+    /// They ship in the binary by default, and being builtins is the point:
+    /// under `--closed-world` they are the only things left that can run. This
+    /// turns that off, leaving `cat` and `ls` to resolve on `PATH` the way they
+    /// do in a shell that was built without them.
+    ///
+    /// It exists for the compatibility suite, which compares this shell against
+    /// the host's bash *and the host's coreutils*. With the utilities bundled
+    /// the two sides differ wherever uutils and the platform's own tools
+    /// differ -- `wc -l` padding, `touch -d`, `date`'s long options -- and the
+    /// suite would be measuring uutils rather than brush.
+    ///
+    /// Combining it with `--closed-world` leaves a shell that can run nothing
+    /// at all. That is a coherent thing to ask for, so it is not refused.
+    #[clap(long = "no-bundled-builtins", help_heading = HEADING_STANDARD_OPTIONS)]
+    pub no_bundled_builtins: bool,
+
     /// Don't process "rc" files if the shell is interactive (e.g., `~/.bashrc`, `~/.brushrc`).
     #[clap(long = "norc", help_heading = HEADING_STANDARD_OPTIONS)]
     pub no_rc: bool,
