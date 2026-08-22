@@ -8,9 +8,10 @@
 //! disagree, the differential must *notice*, which is
 //! [`the_differential_notices_an_escape`].
 //!
-//! This runs with no Roc toolchain, which is why it is the gate the milestone
-//! leans on: the trait is the seam a Rust test can drive, and driving it is the
-//! only end-to-end confinement property CI can check here.
+//! This runs with cargo alone -- no Roc toolchain, no cross-language link --
+//! which is why it is the gate the milestone's confinement claim leans on: the
+//! trait is a seam a Rust test drives directly, so the property is checkable
+//! here and now rather than only through a full rocjust build.
 //!
 //! Two rules borrowed from `brush-shell/tests/confinement_tests.rs`, because
 //! they are what make a differential mean anything:
