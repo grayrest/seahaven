@@ -637,6 +637,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "brush-platform"
+version = "0.1.0"
+dependencies = [
+ "brush-vfs",
+ "tempfile",
+]
+
+[[package]]
 name = "brush-shell"
 version = "0.4.0"
 dependencies = [

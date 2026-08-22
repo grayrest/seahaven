@@ -1,0 +1,23 @@
+[package]
+name = "brush-platform"
+description = "The Roc platform's hosted effects, routed through the sandbox (D17-D19)"
+version = "0.1.0"
+categories.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+brush-vfs = { version = "0.1.0", path = "../brush-vfs" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
