@@ -175,6 +175,19 @@ impl StdinSource {
         self.cursor = self.bytes.len();
         rest
     }
+
+    /// Reads the next chunk of bytes, or `None` at end of file.
+    ///
+    /// `basic-cli`'s `stdin_bytes!` reads a fixed-size chunk off a live
+    /// descriptor and the caller loops until end of file. This source is fixed,
+    /// so one chunk is the whole remainder — the loop still terminates, seeing
+    /// the bytes once and then `None`, which is the contract that matters.
+    pub fn read_chunk(&mut self) -> Option<Vec<u8>> {
+        if self.cursor >= self.bytes.len() {
+            return None;
+        }
+        Some(self.read_to_end())
+    }
 }
 
 /// A session's three standard streams: the output log and the stdin source.

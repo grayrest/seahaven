@@ -20,6 +20,9 @@ brush-platform = { path = "../brush-platform" }
 brush-vfs = { path = "../brush-vfs" }
 libc = "0.2"
 
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [profile.release]
 lto = true
 # Exported hosted_* and roc_* symbols must survive; do not strip them.

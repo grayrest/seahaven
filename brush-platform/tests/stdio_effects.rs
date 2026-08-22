@@ -90,3 +90,30 @@ fn an_empty_stdin_is_immediately_end_of_file() {
     assert!(host.output().is_empty());
     let _ = Stream::Stdout;
 }
+
+#[test]
+fn byte_writes_land_in_the_log_on_their_own_stream() {
+    // The byte siblings of `stdout_write`/`stderr_write`, for output that is not
+    // text. Same log, same separation.
+    let mut host = host();
+    host.stdout_write_bytes(b"\x00\x01out")
+        .expect("stdout bytes");
+    host.stderr_write_bytes(b"err\xff").expect("stderr bytes");
+    assert_eq!(host.output().stdout(), b"\x00\x01out");
+    assert_eq!(host.output().stderr(), b"err\xff");
+}
+
+#[test]
+fn stdin_bytes_reads_a_chunk_then_ends() {
+    // A chunk, then end of file -- the caller loops until `None`.
+    let mut host = host().with_stdin(b"raw bytes".to_vec());
+    assert_eq!(
+        host.stdin_bytes().expect("chunk"),
+        Some(b"raw bytes".to_vec())
+    );
+    assert_eq!(
+        host.stdin_bytes().expect("eof"),
+        None,
+        "a drained stdin is end of file"
+    );
+}

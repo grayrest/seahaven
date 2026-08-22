@@ -158,6 +158,49 @@ fn script(host: &VfsPlatform, root: &str) -> Vec<(&'static str, Outcome)> {
         ),
         ("create_all", host.dir_create_all("made/deep").map(unit)),
         ("path_type made", host.path_type("made/deep").map(kind)),
+        // Effects added with the Roc host (step 9). Each must be as invisible to
+        // confinement as the originals -- the differential holds them to it.
+        ("dir_create", host.dir_create("solo").map(unit)),
+        (
+            "write_bytes",
+            host.file_write_bytes("bin.dat", b"\x00\x01\x02\x03")
+                .map(unit),
+        ),
+        (
+            "read_bytes after write",
+            host.file_read_bytes("bin.dat").map(|b| b.len().to_string()),
+        ),
+        (
+            "size",
+            host.file_size_in_bytes("bin.dat").map(|n| n.to_string()),
+        ),
+        (
+            "is_readable",
+            host.file_is_readable("data.txt").map(|b| b.to_string()),
+        ),
+        (
+            "is_writable",
+            host.file_is_writable("data.txt").map(|b| b.to_string()),
+        ),
+        (
+            "hard_link",
+            host.file_hard_link("data.txt", "hardlink").map(unit),
+        ),
+        ("rename", host.file_rename("hardlink", "renamed").map(unit)),
+        // D46: the time effects are the deferred Unsupported on both sides, so
+        // they agree -- which is exactly the invisibility the gate asserts.
+        (
+            "time_accessed",
+            host.file_time_accessed("data.txt").map(|n| n.to_string()),
+        ),
+        (
+            "time_modified",
+            host.file_time_modified("data.txt").map(|n| n.to_string()),
+        ),
+        (
+            "time_created",
+            host.file_time_created("data.txt").map(|n| n.to_string()),
+        ),
         (
             "write_utf8",
             host.file_write_utf8("out.txt", "written").map(unit),
@@ -407,11 +450,21 @@ fn the_script_exercises_every_filesystem_effect() {
         "is_executable false", // file_is_executable
         "delete empty",        // dir_delete_empty
         "delete all",          // dir_delete_all
+        "dir_create",          // dir_create
+        "write_bytes",         // file_write_bytes
+        "size",                // file_size_in_bytes
+        "is_readable",         // file_is_readable
+        "is_writable",         // file_is_writable
+        "hard_link",           // file_hard_link
+        "rename",              // file_rename
+        "time_accessed",       // file_time_accessed
+        "time_modified",       // file_time_modified
+        "time_created",        // file_time_created
     ];
     assert_eq!(
         effects_covered.len(),
-        12,
-        "there are 12 filesystem effects; update this when the trait grows"
+        22,
+        "there are 22 filesystem effects; update this when the trait grows"
     );
     for label in effects_covered {
         assert!(

@@ -272,6 +272,80 @@ impl PlatformEffects for VfsPlatform {
         self.session.vfs().remove_dir_all(&vp).map_err(|e| io(&e))
     }
 
+    fn dir_create(&self, path: &str) -> Effect<()> {
+        let vp = self.resolve(path)?;
+        self.session.vfs().create_dir(&vp).map_err(|e| io(&e))
+    }
+
+    fn file_write_bytes(&self, path: &str, bytes: &[u8]) -> Effect<()> {
+        let vp = self.resolve(path)?;
+        let mut file = self.session.vfs().create(&vp).map_err(|e| io(&e))?;
+        file.write_all(bytes).map_err(|e| io(&e))?;
+        Ok(())
+    }
+
+    fn file_size_in_bytes(&self, path: &str) -> Effect<u64> {
+        let vp = self.resolve(path)?;
+        Ok(self.session.vfs().metadata(&vp).map_err(|e| io(&e))?.len())
+    }
+
+    fn file_is_readable(&self, path: &str) -> Effect<bool> {
+        // A missing path is an error, not `false` -- the is_executable stance,
+        // for the same reason: rocjust branches on "not there" separately.
+        let _ = self.probe(path, true)?;
+        let vp = self.resolve(path)?;
+        Ok(self.session.vfs().access(
+            &vp,
+            AccessModes {
+                readable: true,
+                writable: false,
+                executable: false,
+            },
+        ))
+    }
+
+    fn file_is_writable(&self, path: &str) -> Effect<bool> {
+        let _ = self.probe(path, true)?;
+        let vp = self.resolve(path)?;
+        Ok(self.session.vfs().access(
+            &vp,
+            AccessModes {
+                readable: false,
+                writable: true,
+                executable: false,
+            },
+        ))
+    }
+
+    fn file_time_accessed(&self, _path: &str) -> Effect<u128> {
+        // D46, deferred: a host timestamp is a host-identity leak, and no
+        // synthesized answer is designed yet, so the effect is absent.
+        Err(PlatformError::Unsupported)
+    }
+
+    fn file_time_modified(&self, _path: &str) -> Effect<u128> {
+        Err(PlatformError::Unsupported)
+    }
+
+    fn file_time_created(&self, _path: &str) -> Effect<u128> {
+        Err(PlatformError::Unsupported)
+    }
+
+    fn file_hard_link(&self, original: &str, link: &str) -> Effect<()> {
+        let original = self.resolve(original)?;
+        let link = self.resolve(link)?;
+        self.session
+            .vfs()
+            .hard_link(&original, &link)
+            .map_err(|e| io(&e))
+    }
+
+    fn file_rename(&self, from: &str, to: &str) -> Effect<()> {
+        let from = self.resolve(from)?;
+        let to = self.resolve(to)?;
+        self.session.vfs().rename(&from, &to).map_err(|e| io(&e))
+    }
+
     fn env_var(&self, name: &str) -> Option<String> {
         self.facts.env.get(name).cloned()
     }
@@ -346,6 +420,20 @@ impl PlatformEffects for VfsPlatform {
 
     fn stdin_read_to_end(&mut self) -> Effect<Vec<u8>> {
         Ok(self.stdio.input.read_to_end())
+    }
+
+    fn stdout_write_bytes(&mut self, bytes: &[u8]) -> Effect<()> {
+        self.stdio.output.write(Stream::Stdout, bytes);
+        Ok(())
+    }
+
+    fn stderr_write_bytes(&mut self, bytes: &[u8]) -> Effect<()> {
+        self.stdio.output.write(Stream::Stderr, bytes);
+        Ok(())
+    }
+
+    fn stdin_bytes(&mut self) -> Effect<Option<Vec<u8>>> {
+        Ok(self.stdio.input.read_chunk())
     }
 
     fn spawn(&mut self, cmd: &Cmd, io: IoPlan) -> Effect<JobHandle> {
@@ -449,6 +537,31 @@ impl PlatformEffects for VfsPlatform {
 
     fn random_seed_u64(&mut self) -> Effect<u64> {
         Ok(self.rng.next_u64())
+    }
+
+    fn random_seed_u32(&mut self) -> Effect<u32> {
+        // The low half of the same source, so hermetic mode pins both from one
+        // seed rather than two independent streams.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "taking the low 32 bits is the intent"
+        )]
+        Ok(self.rng.next_u64() as u32)
+    }
+
+    fn regex_is_match(&self, pattern: &str, haystack: &str) -> Result<bool, String> {
+        let regex = regex::Regex::new(pattern).map_err(|e| e.to_string())?;
+        Ok(regex.is_match(haystack))
+    }
+
+    fn regex_replace_all(
+        &self,
+        pattern: &str,
+        haystack: &str,
+        replacement: &str,
+    ) -> Result<String, String> {
+        let regex = regex::Regex::new(pattern).map_err(|e| e.to_string())?;
+        Ok(regex.replace_all(haystack, replacement).into_owned())
     }
 }
 

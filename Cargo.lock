@@ -642,6 +642,7 @@ version = "0.1.0"
 dependencies = [
  "brush-vfs",
  "rand 0.10.2",
+ "regex",
  "tempfile",
 ]
 

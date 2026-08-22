@@ -143,6 +143,69 @@ pub trait PlatformEffects {
     /// `basic-cli`'s `dir_delete_all!`.
     fn dir_delete_all(&self, path: &str) -> Effect<()>;
 
+    /// Creates a single directory; its parent must already exist.
+    ///
+    /// `basic-cli`'s `dir_create!` — the non-recursive sibling of
+    /// [`dir_create_all`](Self::dir_create_all).
+    fn dir_create(&self, path: &str) -> Effect<()>;
+
+    /// Writes bytes to a file, replacing what was there.
+    ///
+    /// `basic-cli`'s `file_write_bytes!`. The byte sibling of
+    /// [`file_write_utf8`](Self::file_write_utf8); rocjust's `Path` writes bytes
+    /// and decodes in Roc, so this is the one it actually reaches.
+    fn file_write_bytes(&self, path: &str, bytes: &[u8]) -> Effect<()>;
+
+    /// A file's size in bytes (`basic-cli`'s `file_size_in_bytes!`).
+    ///
+    /// Reported truthfully: size is derived from content the guest can already
+    /// read, not a host-identity fact, so it discloses nothing D46 was guarding.
+    fn file_size_in_bytes(&self, path: &str) -> Effect<u64>;
+
+    /// Whether the session may **read** the path (`basic-cli`'s
+    /// `file_is_readable!`).
+    ///
+    /// Grant-derived, not the host's mode bits: the answer is whether *this
+    /// session's* namespace permits a read here, which is the capability-correct
+    /// question. A path that names nothing is an error, not `false`, matching
+    /// [`file_is_executable`](Self::file_is_executable).
+    fn file_is_readable(&self, path: &str) -> Effect<bool>;
+
+    /// Whether the session may **write** the path (`basic-cli`'s
+    /// `file_is_writable!`). Grant-derived; see
+    /// [`file_is_readable`](Self::file_is_readable).
+    fn file_is_writable(&self, path: &str) -> Effect<bool>;
+
+    /// A file's last-access time — **unsupported** (D46).
+    ///
+    /// `basic-cli`'s `file_time_accessed!`. The host's timestamps are exactly the
+    /// host-identity leak D46 named and left unfixed: a real mtime discloses the
+    /// host clock and backup cadence across the boundary. Until a synthesized
+    /// clock-relative answer is designed, this is [`PlatformError::Unsupported`]
+    /// — the effect is absent, not silently lying.
+    fn file_time_accessed(&self, path: &str) -> Effect<u128>;
+
+    /// A file's last-modified time — **unsupported** (D46). See
+    /// [`file_time_accessed`](Self::file_time_accessed).
+    fn file_time_modified(&self, path: &str) -> Effect<u128>;
+
+    /// A file's creation time — **unsupported** (D46). See
+    /// [`file_time_accessed`](Self::file_time_accessed).
+    fn file_time_created(&self, path: &str) -> Effect<u128>;
+
+    /// Hard-links `link` to the same content as `original`
+    /// (`basic-cli`'s `file_hard_link!`).
+    ///
+    /// Both paths resolve in the same namespace; a link across a mount boundary
+    /// fails as the host's `hard_link` does, which the grant tests already pin.
+    fn file_hard_link(&self, original: &str, link: &str) -> Effect<()>;
+
+    /// Renames `from` to `to` (`basic-cli`'s `file_rename!`).
+    ///
+    /// A rename across a mount boundary is not a rename here — the vfs reports it
+    /// as the host does — so this is confined to within-namespace moves.
+    fn file_rename(&self, from: &str, to: &str) -> Effect<()>;
+
     // --- Environment (D21, D15, D22, D30) ---------------------------------
 
     /// A single environment variable, or `None` when it is not set.
@@ -241,6 +304,23 @@ pub trait PlatformEffects {
     /// `basic-cli`'s `stdin_read_to_end!`.
     fn stdin_read_to_end(&mut self) -> Effect<Vec<u8>>;
 
+    /// Writes raw bytes to stdout (`basic-cli`'s `stdout_write_bytes!`).
+    ///
+    /// Into the job's output log, like [`stdout_write`](Self::stdout_write) — the
+    /// byte form, for output that is not text.
+    fn stdout_write_bytes(&mut self, bytes: &[u8]) -> Effect<()>;
+
+    /// Writes raw bytes to stderr (`basic-cli`'s `stderr_write_bytes!`).
+    fn stderr_write_bytes(&mut self, bytes: &[u8]) -> Effect<()>;
+
+    /// Reads the next chunk of stdin as raw bytes, or `None` at end of file
+    /// (`basic-cli`'s `stdin_bytes!`, whose `EndOfFile` the binding maps from
+    /// `None`).
+    ///
+    /// A chunk, not the whole stream: the caller loops until `None`, the same
+    /// contract `basic-cli` gives with its fixed-size read.
+    fn stdin_bytes(&mut self) -> Effect<Option<Vec<u8>>>;
+
     // --- Process execution (D25, D2, D24) ---------------------------------
 
     /// Starts a job and returns a handle to it (D25).
@@ -313,4 +393,38 @@ pub trait PlatformEffects {
     /// From the session's RNG, **unpredictable by default** — rocjust names a
     /// temp directory from this, so a predictable value is a path hazard.
     fn random_seed_u64(&mut self) -> Effect<u64>;
+
+    /// A random `u32` (`basic-cli`'s `random_seed_u32!`).
+    ///
+    /// The low half of the session RNG's next value — the same source as
+    /// [`random_seed_u64`](Self::random_seed_u64), so hermetic mode pins both.
+    fn random_seed_u32(&mut self) -> Effect<u32>;
+
+    // --- Regular expressions ----------------------------------------------
+    //
+    // Pure computation over its two `Str` arguments: no path, no namespace, no
+    // confinement to apply. It is on the trait so the effect surface lives in
+    // one place (D18), and its error is the engine's own message — `basic-cli`'s
+    // `[RegexErr(Str)]`, which is a `String` here rather than a `PlatformError`.
+
+    /// Whether `pattern` matches anywhere in `haystack`
+    /// (`basic-cli`'s `regex_is_match!`).
+    ///
+    /// # Errors
+    ///
+    /// The engine's compile-error message when `pattern` does not compile.
+    fn regex_is_match(&self, pattern: &str, haystack: &str) -> Result<bool, String>;
+
+    /// Replaces every match of `pattern` in `haystack` with `replacement`
+    /// (`basic-cli`'s `regex_replace_all!`).
+    ///
+    /// # Errors
+    ///
+    /// The engine's compile-error message when `pattern` does not compile.
+    fn regex_replace_all(
+        &self,
+        pattern: &str,
+        haystack: &str,
+        replacement: &str,
+    ) -> Result<String, String>;
 }

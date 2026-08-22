@@ -1588,6 +1588,21 @@ sits on, and stable per-file identifiers -- in the same class as the D6 leaks
 the launcher milestone closed. It is not a filesystem escape; no inode number
 opens anything.
 
+**The Roc platform surface does not re-open it.** Building the host (step 9 of
+the platform plan) found rocjust's `Path` module reaching `file_time_accessed`,
+`file_time_modified` and `file_time_created` -- exactly the timestamp fields this
+entry names, which a naive host would answer from `std::fs::Metadata` and so
+carry the host clock and backup cadence across the boundary. The decision taken:
+those three effects report **`Unsupported`** on this platform, deferred rather
+than leaked, so D46 stays open rather than being widened by a new consumer. The
+neighbouring probes it also reaches are answered without a host fact:
+`file_size_in_bytes` is truthful (size is content the guest can already read,
+not an identity field), and `file_is_readable`/`file_is_writable` are
+**grant-derived** -- "may this session read/write here", from the namespace's
+access check, not the host's mode bits. That keeps the platform's file surface
+inside the same boundary the shell's own surface already respected: booleans and
+content, never host identity numbers.
+
 ## D47 — Signals are a sandbox-fed queue; the host's are not forwarded
 
 The platform milestone reached signals (rocjust imports `Signal.install!`,
