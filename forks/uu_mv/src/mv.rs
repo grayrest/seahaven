@@ -27,7 +27,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{self, IsTerminal};
 #[cfg(unix)]
-use std::os::unix;
 #[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(windows)]
@@ -1034,12 +1033,11 @@ fn rename_symlink_fallback(from: &Path, to: &Path) -> io::Result<()> {
 ///
 /// Mirrors GNU's `force_symlinkat` in `force-link.c`: open the parent
 /// directory once and operate via `*at` syscalls so a concurrent rename
-/// of the parent cannot redirect the operation, and pick the temp name
-/// from `/dev/urandom` so it is unguessable to other users in that
-/// directory.
+/// of the parent cannot redirect the operation, and pick an unguessable temp
+/// name so another user in that directory cannot predict it and swap the entry
+/// between the `symlinkat` and the `renameat`.
 #[cfg(all(unix, not(target_os = "redox")))]
 fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
-    use io::Read;
     use rustix::fs::{AtFlags, renameat, symlinkat, unlinkat};
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
@@ -1066,12 +1064,26 @@ fn create_symlink_replace(target: &Path, to: &Path) -> io::Result<()> {
     // facade's `follow = false`.
     let dir_fd = brush_vfs::ambient::open_dir_fd(parent, false)?;
 
-    let mut urandom = brush_vfs::ambient::open("/dev/urandom")?;
-
+    // FLATLAND DIVERGENCE: entropy from `getentropy(2)` rather than from
+    // `/dev/urandom`. The sandbox's `/dev` is synthetic (D20) and carries
+    // `null` and `fd` -- there is no `urandom` in it -- so this function could
+    // not run under a mount at all: it failed at the open, before reaching any
+    // of the work below. A syscall needs no path, so it cannot be denied by a
+    // namespace, and it draws from the same pool the device would have.
+    //
+    // Not a derived name. The unguessability is load-bearing here in a way it
+    // is not for `sed`'s temporary: `symlinkat` already fails closed on a
+    // collision, but an attacker who can *predict* the name can unlink the
+    // entry between the `symlinkat` and the `renameat` below and have their own
+    // file renamed into place. A random name is what closes that window.
     for _ in 0..32 {
         let mut tmp_bytes = *b"Cu------";
         let mut raw = [0u8; 6];
-        urandom.read_exact(&mut raw)?;
+        // SAFETY: `getentropy` fills exactly `buflen` bytes on success, and 6
+        // is far below the 256-byte limit above which it fails outright.
+        if unsafe { libc::getentropy(raw.as_mut_ptr().cast(), raw.len()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
         for (slot, byte) in tmp_bytes[2..].iter_mut().zip(raw) {
             *slot = ALPHABET[(byte as usize) % ALPHABET.len()];
         }

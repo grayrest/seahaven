@@ -80,9 +80,31 @@ randomness is not reachable: the sandbox's `/dev` is synthetic (D20) and carries
 `null` and `fd`, not `urandom` — measured, not assumed. `O_EXCL` is what makes a
 derived name safe, and is the real protection either way: it refuses an existing
 entry and refuses to follow a symlink planted at the path, which is the attack a
-random name defends against. Worth knowing that `uu_mv`'s `create_symlink_replace`
-still reads `/dev/urandom` and so cannot work under a mount at all; it sits
-behind a fallback a single mount does not reach.
+random name defends against. `uu_mv`'s `create_symlink_replace` had the same
+problem in the other direction and is fixed separately: it drew its temp name
+from `/dev/urandom`, which the synthetic `/dev` does not carry, so under a mount
+it failed at the open before doing any work.
+
+## `uu_mv/src/mv.rs` — entropy from a syscall, not a device
+
+`create_symlink_replace` mirrors GNU's `force_symlinkat` and drew its temp name
+from `/dev/urandom`. The sandbox's `/dev` is synthetic (D20) and carries `null`
+and `fd`, so under a mount the function failed at that open before doing any of
+its work. Now `getentropy(2)`: a syscall needs no path, so no namespace can deny
+it, and it draws from the same pool the device would have.
+
+`libc` rather than a `rustix` feature or the `getrandom` crate, deliberately —
+both would mean editing a *generated* manifest, which is the residual patch most
+easily lost to a re-vendor, and `libc` is already a dependency.
+
+The name stays random rather than derived, unlike `sed`'s temporary. The
+unguessability is load-bearing here: `symlinkat` already fails closed on a
+collision, but an attacker who can predict the name can unlink the entry between
+the `symlinkat` and the `renameat` and have their own file renamed into place.
+
+Measured by driving the function directly under a restrictive mount, since the
+`EXDEV` fallback that reaches it needs two filesystems: the old code returns
+`NotFound: /dev/urandom`, the new one `Ok(())`.
 
 ## `uucore` — `locale.rs` and `checksum/compute.rs`
 
