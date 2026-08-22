@@ -16,8 +16,6 @@ use std::fmt::Display;
 use std::fs::{self, Metadata, OpenOptions, Permissions};
 #[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-#[cfg(unix)]
-use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf, StripPrefixError};
 use std::{fmt, io};
 #[cfg(all(unix, not(target_os = "android")))]
@@ -26,8 +24,6 @@ use uucore::translate;
 
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::ValueParser, value_parser};
 use indicatif::{ProgressBar, ProgressStyle};
-#[cfg(unix)]
-use nix::sys::stat::{Mode, SFlag, dev_t, mknod as nix_mknod, mode_t};
 use thiserror::Error;
 
 use platform::copy_on_write;
@@ -2850,13 +2846,13 @@ fn copy_helper(
     if options.recursive && !options.copy_contents {
         let ft = source_metadata.file_type();
         if ft.is_socket() {
-            return copy_socket(dest, options.overwrite, options.debug);
+            return refuse_special_file(dest, "socket");
         }
         if ft.is_fifo() {
-            return copy_fifo(dest, options.overwrite, options.debug);
+            return refuse_special_file(dest, "fifo");
         }
         if ft.is_char_device() || ft.is_block_device() {
-            return copy_node(dest, source_metadata, options.overwrite, options.debug);
+            return refuse_special_file(dest, "special file");
         }
     }
 
@@ -2892,49 +2888,28 @@ fn copy_helper(
     Ok(())
 }
 
-// "Copies" a FIFO by creating a new one. This workaround is because Rust's
-// built-in fs::copy does not handle FIFOs (see rust-lang/rust/issues/79390).
+// FLATLAND DIVERGENCE: `cp` does not recreate special files.
+//
+// A FIFO, a socket and a device node are made by `mkfifo(3)`, `bind(2)` and
+// `mknod(2)`, all of which take a path the kernel resolves itself and none of
+// which the namespace can express -- the ban list says "not expressible in the
+// namespace yet" for each, and `cap-std` has no equivalent. Unrouted they
+// created the node on the *host*, so `cp -a` across a mount put a FIFO
+// somewhere the shell could not name.
+//
+// D4's disposition for something the namespace cannot express is to drop the
+// capability and keep the utility. So `cp` refuses these three rather than
+// creating them outside the namespace, and says why. Everything else `cp` does
+// with a special file -- reading through one, `cp` of a symlink, `-a` on
+// ordinary files -- is unaffected.
 #[cfg(unix)]
-fn copy_fifo(dest: &Path, overwrite: OverwriteMode, debug: bool) -> CopyResult<()> {
-    if brush_vfs::ambient::exists(&(dest)) {
-        overwrite.verify(dest, debug)?;
-        brush_vfs::ambient::remove_file(dest)?;
-    }
-    // rustix::fs::mkfifoat is linux only
-    nix::unistd::mkfifo(dest, Mode::from_bits_truncate(0o666))
-        .map_err(|_| translate!("cp-error-cannot-create-fifo", "path" => dest.quote()).into())
-}
-
-#[cfg(unix)]
-fn copy_socket(dest: &Path, overwrite: OverwriteMode, debug: bool) -> CopyResult<()> {
-    if brush_vfs::ambient::exists(&(dest)) {
-        overwrite.verify(dest, debug)?;
-        brush_vfs::ambient::remove_file(dest)?;
-    }
-
-    UnixListener::bind(dest)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn copy_node(
-    dest: &Path,
-    source_metadata: &Metadata,
-    overwrite: OverwriteMode,
-    debug: bool,
-) -> CopyResult<()> {
-    if brush_vfs::ambient::exists(&(dest)) {
-        overwrite.verify(dest, debug)?;
-        brush_vfs::ambient::remove_file(dest)?;
-    }
-    let sflag = if source_metadata.file_type().is_char_device() {
-        SFlag::S_IFCHR
-    } else {
-        SFlag::S_IFBLK
-    };
-    let mode = Mode::from_bits_truncate(source_metadata.mode() as mode_t);
-    nix_mknod(dest, sflag, mode, source_metadata.rdev() as dev_t)
-        .map_err(|e| translate!("cp-error-cannot-create-special-file", "path" => dest.quote(), "error" => e.desc()).into())
+fn refuse_special_file(dest: &Path, kind: &str) -> CopyResult<()> {
+    Err(format!(
+        "cannot create {kind} {}: this shell cannot create special files, \
+         because the namespace has no way to express one",
+        dest.quote()
+    )
+    .into())
 }
 
 fn copy_link(

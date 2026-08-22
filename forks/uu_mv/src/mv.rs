@@ -65,7 +65,6 @@ use uucore::update_control;
 pub use uucore::{backup_control::BackupMode, update_control::UpdateMode};
 use uucore::{format_usage, prompt_yes, show};
 
-use fs_extra::dir::get_size as dir_get_size;
 
 use crate::error::MvError;
 
@@ -980,14 +979,23 @@ fn rename_with_fallback(
 }
 
 /// Replace the destination with a new pipe with the same name as the source.
+///
+/// FLATLAND DIVERGENCE: refused rather than done. `mkfifo(3)` takes a path the
+/// kernel resolves itself and the namespace cannot express it -- the ban list
+/// says "not expressible in the namespace yet" and `cap-std` has no equivalent
+/// -- so unrouted this created the pipe on the *host*, outside the mount, and
+/// then deleted the source. D4's disposition for a capability the namespace
+/// cannot express is to drop it and keep the utility; losing the source to a
+/// pipe that landed somewhere unreachable is the worst of both.
+///
+/// Only reached on a cross-device move of a FIFO, which is why nothing noticed.
 #[cfg(unix)]
-fn rename_fifo_fallback(from: &Path, to: &Path) -> io::Result<()> {
-    if brush_vfs::ambient::try_exists(&(to))? {
-        brush_vfs::ambient::remove_file(to)?;
-    }
-    // rustix::fs::mkfifoat is linux only
-    nix::unistd::mkfifo(to, nix::sys::stat::Mode::from_bits_truncate(0o666))?;
-    brush_vfs::ambient::remove_file(from)
+fn rename_fifo_fallback(_from: &Path, to: &Path) -> io::Result<()> {
+    Err(io::Error::other(format!(
+        "cannot move fifo {}: this shell cannot create special files, because \
+         the namespace has no way to express one",
+        to.quote()
+    )))
 }
 
 #[cfg(not(unix))]
@@ -1145,22 +1153,20 @@ fn rename_dir_fallback(
         brush_vfs::ambient::remove_dir_all(to)?;
     }
 
-    // Calculate total size of directory
-    // Silently degrades:
-    //    If finding the total size fails for whatever reason,
-    //    the progress bar wont be shown for this file / dir.
-    //    (Move will probably fail due to permission error later?)
-    let total_size = dir_get_size(from).ok();
-
-    let progress_bar = match (display_manager, total_size) {
-        (Some(display_manager), Some(total_size)) => {
-            let template = "{msg}: [{elapsed_precise}] {wide_bar} {bytes:>7}/{total_bytes:7}";
-            let style = ProgressStyle::with_template(template).unwrap();
-            let bar = ProgressBar::new(total_size).with_style(style);
-            Some(display_manager.add(bar))
-        }
-        (_, _) => None,
-    };
+    // FLATLAND DIVERGENCE: the directory progress bar is dropped, and with it
+    // the last use of `fs_extra`.
+    //
+    // Sizing it needed `fs_extra::dir::get_size`, which walks the tree by path
+    // and so never sees the namespace -- one of the crates `deny.toml` listed
+    // as knowingly unrouted. D4's disposition for something the namespace
+    // cannot express is to drop the capability and keep the utility, and this
+    // is the cheapest possible instance of that: what is lost is a progress
+    // bar's *total*, on a directory move, and nothing about the move itself.
+    //
+    // The per-file bars are untouched; only the byte total for a whole
+    // directory needed the walk.
+    let _ = display_manager;
+    let progress_bar = None;
 
     #[cfg(all(unix, not(any(target_os = "macos", target_os = "redox"))))]
     let xattrs = fsxattr::retrieve_xattrs(from).unwrap_or_else(|_| FxHashMap::default());
@@ -1373,10 +1379,13 @@ fn copy_file_with_hardlinks_helper(
         // rename_symlink_fallback already preserves ownership and removes the source.
         rename_symlink_fallback(from, to)?;
     } else if is_fifo(brush_vfs::ambient::symlink_metadata(&(from))?.file_type()) {
-        // rustix::fs::mkfifoat is linux only
-        nix::unistd::mkfifo(to, nix::sys::stat::Mode::from_bits_truncate(0o666))?;
-        // Preserve ownership (uid/gid) from the source
-        let _ = preserve_ownership(from, to);
+        // FLATLAND DIVERGENCE: refused, as `rename_fifo_fallback`. The source
+        // is left where it is rather than removed.
+        return Err(io::Error::other(format!(
+            "cannot move fifo {}: this shell cannot create special files, because \
+             the namespace has no way to express one",
+            to.quote()
+        )));
     } else {
         // Copy a regular file.
         brush_vfs::ambient::copy(from, to)?;

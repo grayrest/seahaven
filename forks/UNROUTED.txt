@@ -32,9 +32,14 @@
 # routing them means an open per file listed where the path form is a single
 # `getxattr`. What leaks is whether a file has attributes, not their contents.
 #
-# `mkfifo`, `mknod`, `UnixListener::bind` and a child's `Command::current_dir`
-# have no facade equivalent. (`utimensat` was on this list until `set_times`
-# gave it one.) The ban list says "not
+# A child's `Command::current_dir` has no facade equivalent, so `find -exec`
+# still runs its child in the host's working directory.
+#
+# `mkfifo`, `mknod` and `UnixListener::bind` were on this list and are gone --
+# not routed, *dropped*. Creating a special file cannot be expressed in the
+# namespace, so `cp` and `mv` refuse rather than creating one on the host, per
+# D4's disposition. `utimensat` left the list a different way: `set_times` gave
+# it a facade equivalent. The ban list says "not
 # expressible in the namespace yet" for each, and means it.
 #
 # `tempfile` and `env::temp_dir` in `uu_sort` and `uu_tac` are scratch space,
@@ -57,14 +62,10 @@
 # libraries from this gate until 2026-08-21.
 # ---------------------------------------------------------------------------
 findutils/src/find/matchers/exec.rs std::process::Command::current_dir 2
-uu_cp/src/cp.rs nix::sys::stat::mknod 1
-uu_cp/src/cp.rs nix::unistd::mkfifo 1
-uu_cp/src/cp.rs std::os::unix::net::UnixListener::bind 1
 uu_df/src/df.rs std::path::Path::is_symlink 1
 uu_df/src/filesystem.rs std::fs::canonicalize 1
 uu_df/src/filesystem.rs std::path::Path::canonicalize 3
 uu_df/src/filesystem.rs std::path::Path::metadata 2
-uu_mv/src/mv.rs nix::unistd::mkfifo 2
 uu_mv/src/mv.rs rustix::fs::renameat 1
 uu_mv/src/mv.rs rustix::fs::symlinkat 1
 uu_mv/src/mv.rs rustix::fs::unlinkat 1

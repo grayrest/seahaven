@@ -334,6 +334,42 @@ differential check while developing: every `mv` form tried produced byte-identic
 output under a restrictive mount and under the identity policy, which is the
 oracle that isolates confinement from upstream behaviour.
 
+## Four capabilities dropped rather than routed (D4)
+
+D4's disposition for something the namespace cannot express is to **drop the
+capability and keep the utility** — it names `tail` without `-f` as the example.
+These are that, and each removes a hole rather than recording one.
+
+`tail -f`. Following means watching a *path* and being told when it changes;
+`notify` holds paths independently of any namespace and recurses on its own on
+some backends. There is nothing to route it onto — a watch is not an open, and
+the descriptor the namespace can hand out is not what the OS watch APIs take.
+The flag still parses and `tail` still reads and prints; following reports that
+it is unavailable. Upstream's own WASI stub, which existed because `notify` is
+equally unavailable there, became the only implementation — a smaller divergence
+than writing one.
+
+`mv`'s directory progress bar. Sizing it needed `fs_extra::dir::get_size`, which
+walks a tree by path. The bar's *total* is gone on a directory move; the move,
+and the per-file bars, are not.
+
+Special files in `cp` and `mv`. `mkfifo(3)`, `bind(2)` and `mknod(2)` all take a
+path the kernel resolves itself, and the ban list says "not expressible in the
+namespace yet" for each. Unrouted, `cp -a` across a mount created the node on
+the *host*, and `mv`'s FIFO fallback created the pipe outside the mount **and
+then deleted the source**. Both now refuse and say why.
+
+`notify` and `fs_extra` are removed from the fork manifests, so both are out of
+the shipped graph entirely — which is the substance of the change and why they
+are no longer `wrappers` entries in `deny.toml`. That is enforced rather than
+noted: `cargo-deny` reports a wrapper that is not a real parent as
+`unused-wrapper`, and `check deps` fails on it.
+
+The messages say what is true unconditionally. These capabilities are gone from
+the *build*, not disabled when a policy is installed, so they do not claim to be
+about being "sandboxed" — a confined and an unconfined shell give the same
+answer, which is the honest one.
+
 ## `uucore::perms` — left on `walkdir`, deliberately
 
 `dive_into` is the last walk in the fork set that is not routed, and it stays

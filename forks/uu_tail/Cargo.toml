@@ -75,10 +75,6 @@ version = "0.10.0"
 [target.'cfg(not(target_os = "wasi"))'.dependencies.libc]
 version = "0.2.186"
 
-[target.'cfg(not(target_os = "wasi"))'.dependencies.notify]
-features = ["macos_kqueue"]
-version = "8.2.0"
-
 [target."cfg(unix)".dependencies.rustix]
 features = [
     "param",

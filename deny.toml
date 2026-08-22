@@ -122,8 +122,6 @@ deny = [
     # `sed`'s dev-dependencies reach it through `assert_fs`; nothing shipped does.
     "globwalk",
     "ignore",
-    # `uu_tail -f` watches files, which has no namespace expression at all.
-    "notify",
     # `uucore::perms::dive_into`, which is unreachable from anything bundled:
     # `chmod`, `chown` and `chgrp` are not in the coreutils set, and on Linux
     # `perms` uses the vfs-rooted `DirFd` path regardless. Porting it needs a
@@ -140,12 +138,22 @@ deny = [
   { crate = "xattr", wrappers = ["uucore"] },
   # Sets timestamps by path.
   { crate = "filetime", wrappers = ["uu_cp", "uu_touch"] },
-  # Recursive copy and move, by path.
-  { crate = "fs_extra", wrappers = ["uu_mv"] },
-  # Filesystem watching: holds paths and reports on them independently of any
-  # namespace, and on some backends recurses.
-  { crate = "notify", wrappers = ["uu_tail"] },
 ]
+
+# Dropped rather than exempted, per D4: the disposition for a capability the
+# namespace cannot express is to drop it and keep the utility.
+#
+# `notify` (`uu_tail -f`) watched paths independently of any namespace and
+# recursed on its own on some backends. `tail` keeps everything but `-f`, which
+# now reports that following is unavailable; upstream's own WASI stub became the
+# only implementation.
+#
+# `fs_extra` (`uu_mv`) was one call, `dir::get_size`, walking a tree by path to
+# size a progress bar. The bar's total is gone; the move is not.
+#
+# Both crates are out of the shipped graph entirely, which is why they are not
+# `wrappers` entries any more -- `cargo-deny` reports a wrapper that is not a
+# real parent as `unused-wrapper`, and `check deps` fails on it.
 
 # This section is considered when running `cargo deny check sources`.
 # More documentation about the 'sources' section can be found here:

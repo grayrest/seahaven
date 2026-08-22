@@ -223,8 +223,7 @@ fn tail_file(
 #[cfg(unix)]
 fn open_file(path: &Path, use_nonblock_for_fifo: bool) -> io::Result<File> {
     use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
-    use std::fs::OpenOptions;
-    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
+    use std::os::unix::fs::FileTypeExt;
 
     let is_fifo = brush_vfs::ambient::metadata(path).is_ok_and(|m| m.file_type().is_fifo());
 
