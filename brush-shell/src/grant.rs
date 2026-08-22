@@ -230,6 +230,8 @@ fn home_key(root: &Path) -> String {
     reason = "test fixtures are built on the host, which is the one place that is the point"
 )]
 mod tests {
+    use std::io::ErrorKind::{self, CrossesDevices, PermissionDenied};
+
     use super::*;
 
     fn repo() -> (tempfile::TempDir, PathBuf, Ceiling) {
@@ -313,5 +315,232 @@ mod tests {
     fn a_project_name_that_is_not_a_safe_directory_name_is_replaced() {
         let key = home_key(Path::new("/a/pro ject!"));
         assert!(key.starts_with("project-"), "{key}");
+    }
+
+    #[test]
+    fn no_write_route_reaches_the_marker() {
+        // Gate 6, as worded. The case above asserts the marker's *contents* are
+        // unreachable, which is the stronger property for reading and says
+        // nothing at all about writing -- and writing is what D44's reasoning
+        // is about. Git runs what it finds in `.git` at the user's next
+        // command, so a grant that cannot read `config` but can drop a
+        // `hooks/pre-commit` has closed nothing.
+        //
+        // Every route is enumerated rather than sampled, because they are
+        // separate calls in the facade and a read-only mount is enforced per
+        // call. `hard_link` and `copy` are the two the shadow exists for:
+        // `Grant::derive` explains that a read-only mount *of the real marker*
+        // would let a hard link give a read-write name to a read-only inode,
+        // and the shadow is what makes that unreachable rather than merely
+        // refused.
+        let (_root, project, ceiling) = repo();
+        std::fs::write(project.join(".git").join("config"), b"[core]\n").expect("write");
+        std::fs::write(project.join("payload"), b"p").expect("write");
+
+        let grant = Grant::derive(&project, &ceiling).expect("derives");
+        let vfs = brush_vfs::Vfs::new(grant.mount_table().expect("builds"));
+        let vp = |p: &str| brush_vfs::VirtualPath::new(p).expect("valid");
+
+        // The indirect route, closed one step earlier than expected: a symlink
+        // inside the writable tree pointing *at* the mount point is refused at
+        // creation, because the facade will not make a link that crosses a
+        // mount boundary. So there is no name to write through, rather than a
+        // name that is written through and refused.
+        let err = vfs
+            .symlink(&vp("/work/link"), ".git")
+            .expect_err("a link across a mount boundary must be refused");
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+
+        let routes: Vec<(&str, ErrorKind, std::io::Result<()>)> = vec![
+            (
+                "create a file",
+                PermissionDenied,
+                vfs.create(&vp("/work/.git/hooks")).map(drop),
+            ),
+            (
+                "create a directory",
+                PermissionDenied,
+                vfs.create_dir(&vp("/work/.git/x")),
+            ),
+            (
+                "create a directory tree",
+                PermissionDenied,
+                vfs.create_dir_all(&vp("/work/.git/hooks/x")),
+            ),
+            (
+                "symlink into it",
+                PermissionDenied,
+                vfs.symlink(&vp("/work/.git/payload"), "../payload"),
+            ),
+            (
+                "copy into it",
+                PermissionDenied,
+                vfs.copy(&vp("/work/payload"), &vp("/work/.git/payload"))
+                    .map(drop),
+            ),
+            (
+                "overwrite what is there",
+                PermissionDenied,
+                vfs.create(&vp("/work/.git/config")).map(drop),
+            ),
+            (
+                "remove what is there",
+                PermissionDenied,
+                vfs.remove_file(&vp("/work/.git/config")),
+            ),
+            // These two are refused a step earlier, by the mount boundary
+            // rather than by the access mode -- which is the stronger of the
+            // two refusals: it does not depend on the shadow having been
+            // mounted read-only, only on it being a mount at all.
+            (
+                "rename into it",
+                CrossesDevices,
+                vfs.rename(&vp("/work/payload"), &vp("/work/.git/payload")),
+            ),
+            (
+                "hard-link into it",
+                CrossesDevices,
+                vfs.hard_link(&vp("/work/payload"), &vp("/work/.git/payload")),
+            ),
+        ];
+        for (what, expected, result) in routes {
+            let err = result.expect_err(&format!("`{what}` must be refused"));
+            assert_eq!(
+                err.kind(),
+                expected,
+                "`{what}` was refused for the wrong reason: {err}"
+            );
+        }
+
+        // The half an error-only assertion cannot make. Every call above
+        // failing is consistent with one of them having succeeded somewhere
+        // else first, and there are two somewhere-elses that matter: the host's
+        // real marker, and the shadow -- which is one empty directory shared by
+        // every project on the machine, so a write landing there is a channel
+        // between projects rather than only an escape from one.
+        let entries = |dir: &Path| {
+            let mut names: Vec<String> = std::fs::read_dir(dir)
+                .expect("read_dir")
+                .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(
+            entries(&project.join(".git")),
+            ["config"],
+            "a write reached the host's real marker"
+        );
+        assert!(
+            entries(&grant.shadow).is_empty(),
+            "a write landed in the shadow, which every project on this machine shares"
+        );
+    }
+
+    #[test]
+    fn a_derived_grant_is_the_namespace_the_fixture_asks_for() {
+        // Gate 8. The cases above assert that a grant *resolves* the way it
+        // should, which a grant derived from the wrong directory passes just as
+        // well so long as it is internally consistent. This runs the launcher's
+        // whole pipeline -- discovery upward from a nested directory, then
+        // derivation -- and compares the mounts to an expectation built here
+        // from the fixture's own layout.
+        //
+        // The expectation duplicates `home_key`'s hash and `launcher_state`'s
+        // path on purpose. Composing the helpers under test would make this
+        // assert only that the code agrees with itself, which is the failure
+        // mode the gate is named after.
+        let (root, project, nested) = nested_repo();
+        let ceiling = crate::discovery::Bound::platform_default()
+            .ceiling(&nested)
+            .expect("the fixture is a project below every stop");
+
+        assert_eq!(
+            ceiling.dir, project,
+            "discovery must answer with the repository, not the directory it started in"
+        );
+        assert_eq!(ceiling.marker, project.join(".git"));
+
+        let grant = Grant::derive(&ceiling.dir, &ceiling).expect("derives");
+        let table = grant.mount_table().expect("builds");
+
+        let mut observed: Vec<(String, Option<PathBuf>, Access)> = table
+            .mounts()
+            .map(|m| {
+                (
+                    m.mount_point().as_str().to_owned(),
+                    m.host_path().map(Path::to_path_buf),
+                    m.access(),
+                )
+            })
+            .collect();
+        observed.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let state = expected_state_dir();
+        let expected = vec![
+            (
+                "/home/user".to_owned(),
+                Some(state.join("homes").join(expected_home_key(&project))),
+                Access::ReadWrite,
+            ),
+            ("/work".to_owned(), Some(project.clone()), Access::ReadWrite),
+            (
+                "/work/.git".to_owned(),
+                Some(state.join("empty")),
+                Access::ReadOnly,
+            ),
+        ];
+        assert_eq!(observed, expected);
+
+        // And it is not a constant. A pipeline that ignored its input would
+        // satisfy every assertion above.
+        let (_other_root, other_project, other_nested) = nested_repo();
+        assert_ne!(other_project, project, "the fixtures must differ");
+        let other_ceiling = crate::discovery::Bound::platform_default()
+            .ceiling(&other_nested)
+            .expect("the second fixture is a project too");
+        let other = Grant::derive(&other_ceiling.dir, &other_ceiling).expect("derives");
+        assert_ne!(other.root, grant.root);
+        assert_ne!(
+            other.home, grant.home,
+            "two projects must not share a home (D31)"
+        );
+        assert_eq!(
+            other.shadow, grant.shadow,
+            "the shadow is empty and read-only, so one per user is the design"
+        );
+        drop(root);
+    }
+
+    /// A repository with a subdirectory to start a search from, canonicalized
+    /// so it can be compared to what discovery returns.
+    fn nested_repo() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let root = tempfile::tempdir().expect("temp dir");
+        let project = root.path().join("proj");
+        std::fs::create_dir(&project).expect("mkdir");
+        std::fs::create_dir(project.join(".git")).expect("mkdir .git");
+        let nested = project.join("src").join("deep");
+        std::fs::create_dir_all(&nested).expect("mkdir -p");
+        let project = project.canonicalize().expect("canonicalize");
+        let nested = nested.canonicalize().expect("canonicalize");
+        (root, project, nested)
+    }
+
+    /// `launcher_state`, rewritten rather than called. See the gate 8 case.
+    fn expected_state_dir() -> PathBuf {
+        let strategy = etcetera::choose_base_strategy().expect("a base strategy");
+        etcetera::BaseStrategy::state_dir(&strategy)
+            .unwrap_or_else(|| etcetera::BaseStrategy::data_dir(&strategy))
+            .join("brush")
+    }
+
+    /// `home_key`, rewritten rather than called. See the gate 8 case.
+    fn expected_home_key(root: &Path) -> String {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in root.as_os_str().as_encoded_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100_0000_01b3);
+        }
+        format!("proj-{hash:016x}")
     }
 }

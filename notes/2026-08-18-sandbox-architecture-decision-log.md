@@ -725,6 +725,14 @@ straight through.
 Discovery -- finding the root justfile in the first place -- is not covered by
 this rule and could not be; see D44.
 
+**Half of this entry is built, and it is the half that lives here.**
+`plans/2026-08-21-launcher.md` separates the two: the mechanism -- a bounded
+search, a grant derived from its answer, a per-project home, a record of
+consent -- is this repository's and is implemented; deriving a grant from a
+justfile's `import`/`mod` graph needs a parser this repository does not have and
+is rocjust's. The default a project gets before any manifest is consulted is
+`brush-shell/src/grant.rs`.
+
 Whether the intersection is computed on virtual or host paths, and before or
 after canonicalization, is load-bearing and unstated: after canonicalization a
 symlinked subdirectory intersects to empty, and before it grants a host tree the
@@ -994,7 +1002,8 @@ closed with an error naming the exact `--mount` flag. **No blanket approve-all f
 exists** — every `--yes` becomes a copy-pasted line in every pipeline, on exactly
 the machines where the boundary matters most.
 
-**Implemented** as `brush-shell/src/trust.rs`. Two properties worth naming
+**Implemented** as `brush-shell/src/trust.rs`, per
+`plans/2026-08-21-launcher.md`. Two properties worth naming
 because a set comparison gets both wrong by default: *less access* to the same
 directory is narrowing and does not re-ask, and *more* access to it is a
 superset that does; and the store is normalised on record, so a project run
@@ -1033,7 +1042,8 @@ consulted only inside `if self.options.login_shell`
 repo dropping `~/.bashrc` gets execution on every later run — this converts a
 host-scoped persistence vector into a project-scoped one unless rc loading is off.
 
-**Implemented.** `/home/user` is a mount under the user's state directory, keyed
+**Implemented** per `plans/2026-08-21-launcher.md`. `/home/user` is a mount
+under the user's state directory, keyed
 by the project's name plus an FNV-1a hash of its full path -- readable in the
 state directory, and distinct for two checkouts of one repository. FNV rather
 than the standard library's hasher, which makes no stability guarantee across
@@ -1381,7 +1391,8 @@ set is therefore enumerated rather than described: on macOS `/System`,
 `/proc`, `/sys`, `/dev`; on Windows `%SystemRoot%` and the program directories.
 
 **Implemented** as `brush-shell/src/discovery.rs`, with the grant in
-`grant.rs` and consent in `trust.rs`; selected by `--project DIR`. The two
+`grant.rs` and consent in `trust.rs`; selected by `--project DIR`. The milestone
+is `plans/2026-08-21-launcher.md`. The two
 searches are separate as this entry requires, the bound is a predicate on the
 answer applied to every route, and the stop list is enumerated per platform with
 a test asserting directly that no stop swallows a temp directory -- so an edit
