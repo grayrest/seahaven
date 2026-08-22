@@ -1438,3 +1438,40 @@ from `USERPROFILE` *inside* the boundary — so a launcher reading `HOME` would
 find nothing, the stop would silently vanish, and a `git init`'d user profile
 would become a valid ceiling. That is the same fail-open class as the two
 Windows defects e0b9ea2 fixed.
+
+## D45 — Paths are strings; `OsStr` is a disjoint set
+
+The platform is cross-platform, and the three hosts do not agree on what a
+filename is: APFS and NTFS require valid Unicode, Linux permits any byte
+sequence except `/` and NUL. Making the namespace's path type the *union* would
+export the widest host's rule to every platform and give every consumer a type
+it cannot render, compare or round-trip. Making it the intersection makes one
+rule that holds everywhere.
+
+So `VirtualPath` is a `String` and that is the whole path set. A host name that
+is not valid UTF-8 is **not a path on this platform** — it is unnameable, which
+is the same category D6 puts everything outside the namespace in, and needs no
+new mechanism to express.
+
+`OsStr` remains a type, and is **disjoint from paths** rather than a superset of
+them. It is what a value is when it came from the operating system and is not
+required to be text — an argument, an environment value — and it does not
+convert to a path implicitly, because on this platform there is nothing for a
+non-UTF-8 value to convert *to*. rocjust imports both `Path` and `OsStr` from
+basic-cli, so the two are already separate on the consumer's side; this entry
+says the separation is the design rather than an accident of the port.
+
+**The facade mostly implements this already, by erroring.** `ambient`'s host-path
+entry (`ambient.rs:82`), `symlink`'s target (`ambient.rs:362`) and `read_link`
+(`fs.rs:599`) all take `to_str()` and refuse what does not convert.
+
+**Three sites do not, and they transliterate instead.** `Vfs::read_dir_names`
+(`fs.rs:998`), `Dir::entry_names` (`dir.rs:296`) and the stored-target check in
+`rename` (`fs.rs:1096`) call `to_string_lossy`. The first two are the dangerous
+direction: a listing that answers `a\u{FFFD}b` has manufactured a name that does
+not exist, that the caller can construct a `VirtualPath` from, and that opens
+either nothing or -- where two host names differ only in bytes that both fold to
+`U+FFFD` -- a *different* file than the one listed. The third runs a containment
+check on a mangled string, which is the same class of defect on a security
+boundary. Reachable only on Linux: APFS refuses to create such a name at all,
+measured on this machine.
