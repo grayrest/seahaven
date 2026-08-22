@@ -980,6 +980,11 @@ impl Vfs {
     /// to the directory it came from, and handing back a host path would defeat
     /// the point of the namespace.
     ///
+    /// **An entry whose name is not valid UTF-8 is omitted** (D45). It is not a
+    /// path on this platform, so the directory does not contain it in the only
+    /// sense the namespace has — the same answer D6 gives for everything else
+    /// outside the namespace. See [`crate::path::nameable`].
+    ///
     /// # Errors
     ///
     /// Returns [`std::io::Error`] if the path is unmounted or is not a
@@ -995,7 +1000,9 @@ impl Vfs {
             let mut names = Vec::new();
             for entry in dir.entries()? {
                 let entry = entry?;
-                names.push(entry.file_name().to_string_lossy().into_owned());
+                if let Some(name) = crate::path::nameable(&entry.file_name()) {
+                    names.push(name);
+                }
             }
             Ok(names)
         })
@@ -1093,8 +1100,17 @@ impl Vfs {
             .is_ok_and(|m| m.is_symlink())
         {
             let stored = read_link_contents(from.mount, &from.relative)?;
-            let stored = stored.to_string_lossy();
-            if !stored_target_stays_in_mount(&to.relative, &stored) {
+            // Refused rather than transliterated, matching `read_link`: this
+            // decides whether the move stays inside the mount, and a lossy
+            // conversion would run that check on a string the link does not
+            // contain (D45).
+            let stored = stored.to_str().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "the link being moved has a target that is not valid UTF-8",
+                )
+            })?;
+            if !stored_target_stays_in_mount(&to.relative, stored) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     format!("moving this link would point {stored} out of the mount"),
@@ -2591,18 +2607,101 @@ mod tests {
         let err = f.vfs.create_dir_all(&vp("/ro/a")).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
+
+    /// D45's rule against a name the host actually holds.
+    ///
+    /// Linux-only, and not for portability tidiness: APFS and NTFS refuse to
+    /// *create* a name that is not valid Unicode, so the case cannot be built
+    /// on the two platforms this is usually developed on. Gating it is the only
+    /// way to have a test at all.
+    #[cfg(target_os = "linux")]
+    mod unnameable {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt as _;
+
+        use super::*;
+
+        /// Two host names that differ, and that `to_string_lossy` folds
+        /// together. The collision is the reason skipping beats
+        /// transliterating: with both listed as `bad\u{FFFD}.txt`, opening that
+        /// name reaches whichever the host matched first, so the listing named
+        /// one file and the open returned another.
+        const RAW: [&[u8]; 2] = [b"bad\xff.txt", b"bad\xfe.txt"];
+
+        fn fixture_with_unnameable() -> (tempfile::TempDir, Vfs, std::path::PathBuf) {
+            let root = tempfile::tempdir().expect("temp dir");
+            let work = root.path().join("work");
+            std::fs::create_dir(&work).expect("mkdir work");
+            std::fs::write(work.join("good.txt"), b"good").expect("write");
+            for raw in RAW {
+                std::fs::write(work.join(OsStr::from_bytes(raw)), b"x")
+                    .expect("the host must permit a non-UTF-8 name for this test to mean anything");
+            }
+            let mounts = MountTable::builder()
+                .mount("/work", &work, Access::ReadWrite)
+                .unwrap()
+                .build()
+                .expect("mounts build");
+            (root, Vfs::new(mounts), work)
+        }
+
+        #[test]
+        fn a_listing_omits_a_name_that_is_not_a_path() {
+            let (_root, vfs, work) = fixture_with_unnameable();
+
+            // The control: the host directory really does hold three entries,
+            // so the assertion below is about the facade rather than about an
+            // empty fixture.
+            assert_eq!(
+                std::fs::read_dir(&work).expect("read_dir").count(),
+                3,
+                "the fixture did not create the unnameable entries"
+            );
+
+            let names = vfs.read_dir_names(&vp("/work")).expect("lists");
+            assert_eq!(
+                names,
+                vec!["good.txt".to_owned()],
+                "an entry that is not a path on this platform must not be listed"
+            );
+        }
+
+        #[test]
+        fn nothing_listed_is_a_name_the_namespace_cannot_open() {
+            // The property the skip exists for, stated as a round trip: every
+            // name a listing hands back can be turned into a path and opened.
+            // Transliteration broke exactly this -- it answered a name that
+            // resolved to nothing, or to the other file.
+            let (_root, vfs, _work) = fixture_with_unnameable();
+            for name in vfs.read_dir_names(&vp("/work")).expect("lists") {
+                let path = vp(&format!("/work/{name}"));
+                assert!(
+                    vfs.exists(&path),
+                    "`{name}` was listed but does not resolve"
+                );
+            }
+        }
+
+        #[test]
+        fn the_replacement_spelling_is_not_a_back_door() {
+            // What a caller would type having seen the old lossy output.
+            let (_root, vfs, _work) = fixture_with_unnameable();
+            assert!(
+                !vfs.exists(&vp("/work/bad\u{FFFD}.txt")),
+                "the transliterated name must not resolve to either real entry"
+            );
+        }
+
+        #[test]
+        fn a_dir_handles_listing_agrees_with_the_facade() {
+            // `Dir::entry_names` is the other listing route and is reached by
+            // the walker rather than by `Vfs`, so it needs its own case.
+            let (_root, vfs, _work) = fixture_with_unnameable();
+            let dir = vfs.open_dir(&vp("/work")).expect("opens");
+            assert_eq!(
+                dir.entry_names().expect("lists"),
+                vec!["good.txt".to_owned()]
+            );
+        }
+    }
 }
-
-// ===========================================================================
-// TEMPORARY: adversarial review of adeadc0's fast path in `Vfs::at`.
-// Added by a security review; remove or fold in once triaged.
-// ===========================================================================
-
-// ===========================================================================
-// TEMPORARY: adversarial review of 8f3510b (`symlink`, `rename`,
-// `remove_dir_all`, `relative_from`). Added by a security review; remove or
-// fold in once triaged.
-//
-// Each test asserts the INVARIANT THE DESIGN CLAIMS. A test that fails is a
-// broken claim, and its panic message is the transcript.
-// ===========================================================================

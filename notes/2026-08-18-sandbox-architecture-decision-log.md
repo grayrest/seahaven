@@ -1475,3 +1475,25 @@ either nothing or -- where two host names differ only in bytes that both fold to
 check on a mangled string, which is the same class of defect on a security
 boundary. Reachable only on Linux: APFS refuses to create such a name at all,
 measured on this machine.
+
+**Implemented, and the two directions differ on purpose.** The listings
+**skip** -- `crate::path::nameable` is the one place the rule is applied to a
+name the host already holds, and both routes (`Vfs::read_dir_names` and
+`Dir::entry_names`) go through it. Skipping is what makes the round trip true:
+every name a listing hands back can be turned into a `VirtualPath` and opened,
+which is the property transliteration broke. Erroring the whole call was the
+alternative and was rejected because one stray name on a Linux host would make
+a directory unlistable, which is a larger blast radius than an entry that the
+namespace already cannot name.
+
+`rename`'s stored-target check **errors**, matching `read_link` three hundred
+lines above it. Nothing is being hidden from a caller there; a containment
+check is being asked a question about a string, and the honest answer when the
+link's target is not a string is to refuse.
+
+Tested against a host name that really exists, which needs Linux -- the case
+cannot be *built* on APFS or NTFS. The cases pin the collision specifically:
+`bad\xff.txt` and `bad\xfe.txt` both fold to `bad\u{FFFD}.txt`, so under the old
+behaviour a listing named one file and an open of that name returned the other.
+Type-checked for Linux via `cargo check --target x86_64-unknown-linux-gnu`;
+not run here, since there is no Linux runtime on this machine.

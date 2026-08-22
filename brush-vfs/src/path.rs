@@ -286,6 +286,22 @@ pub fn fold_for_collision(component: &str) -> String {
     component.nfc().flat_map(char::to_lowercase).collect()
 }
 
+/// A directory entry's name as a path on this platform, or `None` (D45).
+///
+/// The one place the intersection rule is applied to a name that already exists
+/// on the host. `to_string_lossy` was the obvious call and is the wrong one:
+/// it answers `a\u{FFFD}b` for a name that is not that, the caller can build a
+/// `VirtualPath` out of it, and opening that path reaches either nothing or --
+/// where two host names differ only in bytes that both fold to `U+FFFD` -- a
+/// *different* entry than the one listed. Omitting it says the only true thing
+/// the namespace can say.
+///
+/// Reachable only where the host permits such a name: APFS and NTFS refuse to
+/// create one, so this is a Linux-and-friends property in practice.
+pub(crate) fn nameable(name: &std::ffi::OsStr) -> Option<String> {
+    name.to_str().map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::disallowed_methods,

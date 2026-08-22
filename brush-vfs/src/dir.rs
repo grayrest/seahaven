@@ -286,6 +286,10 @@ impl Dir {
     /// Names rather than `DirEntry`s: a `cap-std` entry can be asked for its
     /// path, and handing one out would defeat the point.
     ///
+    /// **An entry whose name is not valid UTF-8 is omitted** (D45), as in
+    /// [`Vfs::read_dir_names`](crate::Vfs::read_dir_names). See
+    /// [`crate::path::nameable`].
+    ///
     /// # Errors
     ///
     /// If the directory cannot be read.
@@ -293,7 +297,9 @@ impl Dir {
         let mut names = Vec::new();
         for entry in self.inner.entries()? {
             let entry = entry?;
-            names.push(entry.file_name().to_string_lossy().into_owned());
+            if let Some(name) = crate::path::nameable(&entry.file_name()) {
+                names.push(name);
+            }
         }
         Ok(names)
     }
