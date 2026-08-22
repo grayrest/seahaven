@@ -174,4 +174,41 @@ pub trait PlatformEffects {
     ///
     /// `basic-cli`'s `env_num_cpus!`.
     fn env_num_cpus(&self) -> i64;
+
+    // --- Standard I/O (D28, D36) ------------------------------------------
+
+    /// Writes text to stdout.
+    ///
+    /// `basic-cli`'s `stdout_write!`. The bytes go into the job's output log,
+    /// not to a descriptor: the guest cannot reach the host's stdout, which is
+    /// how the buffering is undefeatable rather than merely encouraged.
+    fn stdout_write(&mut self, text: &str) -> Effect<()>;
+
+    /// Writes text and a newline to stdout.
+    ///
+    /// `basic-cli`'s `stdout_line!`.
+    fn stdout_line(&mut self, text: &str) -> Effect<()>;
+
+    /// Writes text to stderr.
+    ///
+    /// `basic-cli`'s `stderr_write!`. Kept a separate stream from stdout on the
+    /// wire (D28); they meet only when a host renders the log.
+    fn stderr_write(&mut self, text: &str) -> Effect<()>;
+
+    /// Writes text and a newline to stderr.
+    ///
+    /// `basic-cli`'s `stderr_line!` — just's command echo goes here.
+    fn stderr_line(&mut self, text: &str) -> Effect<()>;
+
+    /// Reads one line of stdin, without its newline, or `None` at end of file.
+    ///
+    /// `basic-cli`'s `stdin_line!` (whose `EndOfFile` the binding maps from
+    /// `None`). stdin is a fixed source under D36 — what was piped in, then EOF
+    /// — because there is no terminal to read from interactively.
+    fn stdin_line(&mut self) -> Effect<Option<String>>;
+
+    /// Reads and consumes all remaining stdin.
+    ///
+    /// `basic-cli`'s `stdin_read_to_end!`.
+    fn stdin_read_to_end(&mut self) -> Effect<Vec<u8>>;
 }

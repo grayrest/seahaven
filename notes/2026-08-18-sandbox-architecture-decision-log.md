@@ -1018,6 +1018,21 @@ separately (`runner.rs:400-427`), so a merged buffer on the wire would make gate
 unsatisfiable. And `is_terminal` is no longer a recorded parent state: under D36
 it is the constant `false`.
 
+**Implemented** as `brush_platform::stdio` (`OutputLog`, `StdinSource`), where
+the platform's step-4 stdio effects write. The design that satisfies both halves
+of the correction is an **ordered log of `(stream, bytes)` segments**: filtering
+by stream recovers stdout and stderr exactly (separate on the wire), and
+replaying the log in order is the render a host shows a human (the merge, done
+by *reading* the log rather than by merging the bytes). One log per session,
+which is one job -- D25's store-per-sub-invocation makes it per-job without the
+buffer needing to know the scheduler exists. The guest cannot defeat it because
+the effect trait exposes no reader: a guest writes, and only `VfsPlatform`
+-- the host's handle -- drains. `is_terminal` did not need reinstating; it stays
+D36's constant. It lives in `brush-platform` rather than `brush-core` because
+that is where the effects that feed it are; an earlier note in the platform plan
+guessed `brush-core` and was wrong about which output this buffers -- the
+guest's, not the shell's.
+
 ## D29 — Granted-set trust store; subsets auto-accept, supersets prompt
 
 Path-keyed consent lets a different repo cloned to the same path inherit the grant;

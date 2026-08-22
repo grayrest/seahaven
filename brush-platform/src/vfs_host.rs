@@ -7,6 +7,7 @@ use brush_vfs::{AccessModes, Session, VirtualPath};
 use crate::effects::{Effect, PathKind, PlatformEffects};
 use crate::error::PlatformError;
 use crate::facts::{EXE_PATH, PlatformTarget, SessionFacts};
+use crate::stdio::{Stdio, Stream};
 
 /// A host that routes every effect through a [`brush_vfs::Session`].
 ///
@@ -18,19 +19,43 @@ use crate::facts::{EXE_PATH, PlatformTarget, SessionFacts};
 pub struct VfsPlatform {
     session: Session,
     facts: SessionFacts,
+    stdio: Stdio,
 }
 
 impl VfsPlatform {
     /// Wraps a session and its policy-chosen facts as a platform host.
+    ///
+    /// stdin is empty; use [`with_stdin`](Self::with_stdin) to pipe bytes in.
     #[must_use]
     pub const fn new(session: Session, facts: SessionFacts) -> Self {
-        Self { session, facts }
+        Self {
+            session,
+            facts,
+            stdio: Stdio::new(Vec::new()),
+        }
+    }
+
+    /// Supplies the bytes the job reads from stdin.
+    #[must_use]
+    pub fn with_stdin(mut self, stdin: Vec<u8>) -> Self {
+        self.stdio = Stdio::new(stdin);
+        self
     }
 
     /// The session this host resolves against.
     #[must_use]
     pub const fn session(&self) -> &Session {
         &self.session
+    }
+
+    /// The job's captured output (D28), for the runtime to drain and render.
+    ///
+    /// Not on the effect trait: the guest writes, the *host* reads. That
+    /// asymmetry is the buffering being undefeatable -- there is no guest path
+    /// to the bytes once written.
+    #[must_use]
+    pub const fn output(&self) -> &crate::stdio::OutputLog {
+        &self.stdio.output
     }
 
     /// Resolves a script-written path against the session's working directory.
@@ -205,6 +230,36 @@ impl PlatformEffects for VfsPlatform {
 
     fn env_num_cpus(&self) -> i64 {
         self.facts.num_cpus
+    }
+
+    fn stdout_write(&mut self, text: &str) -> Effect<()> {
+        self.stdio.output.write(Stream::Stdout, text.as_bytes());
+        Ok(())
+    }
+
+    fn stdout_line(&mut self, text: &str) -> Effect<()> {
+        self.stdio.output.write(Stream::Stdout, text.as_bytes());
+        self.stdio.output.write(Stream::Stdout, b"\n");
+        Ok(())
+    }
+
+    fn stderr_write(&mut self, text: &str) -> Effect<()> {
+        self.stdio.output.write(Stream::Stderr, text.as_bytes());
+        Ok(())
+    }
+
+    fn stderr_line(&mut self, text: &str) -> Effect<()> {
+        self.stdio.output.write(Stream::Stderr, text.as_bytes());
+        self.stdio.output.write(Stream::Stderr, b"\n");
+        Ok(())
+    }
+
+    fn stdin_line(&mut self) -> Effect<Option<String>> {
+        Ok(self.stdio.input.read_line())
+    }
+
+    fn stdin_read_to_end(&mut self) -> Effect<Vec<u8>> {
+        Ok(self.stdio.input.read_to_end())
     }
 }
 

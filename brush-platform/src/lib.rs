@@ -36,9 +36,11 @@
 mod effects;
 mod error;
 pub mod facts;
+pub mod stdio;
 mod vfs_host;
 
 pub use effects::{PathKind, PlatformEffects};
 pub use error::PlatformError;
 pub use facts::{PlatformTarget, SessionFacts, TargetArch, TargetOs};
+pub use stdio::{OutputLog, StdinSource, Stdio, Stream};
 pub use vfs_host::VfsPlatform;
