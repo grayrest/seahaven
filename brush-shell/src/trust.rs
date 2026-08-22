@@ -102,11 +102,59 @@ pub enum Decision {
     Ask(Vec<GrantedMount>),
 }
 
+/// Which execution tier a grant is consent for (D17, D19).
+///
+/// The two tiers run the same Roc code with the same capability (D19), and
+/// differ only in the trust they demand: [`Wasm`](Tier::Wasm) runs the guest
+/// behind a real boundary, so the Roc compiler is not in the trusted base;
+/// [`Native`](Tier::Native) runs it as host code in the same address space,
+/// with the whole compiler -- and D17's documented miscompile -- inside the TCB.
+///
+/// So consent is **not symmetric**. Granting native trust covers a later wasm
+/// run of the same mounts -- the user already accepted the riskier tier. The
+/// reverse is refused: consent to a sandboxed wasm run is not consent to run the
+/// same code natively, because that is the more dangerous thing D19 exists to
+/// keep from becoming the silent default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Tier {
+    /// Sandboxed: the guest runs behind a wasm boundary. The least-trust tier,
+    /// and the default for an unlabelled record -- an older store, written
+    /// before tiers existed, grants only this, so a native run re-prompts
+    /// rather than inheriting a consent that predates the distinction.
+    #[default]
+    Wasm,
+    /// Trusted: the guest runs as native host code. Requires its own consent.
+    Native,
+}
+
+impl Tier {
+    /// Whether consent at this tier covers a request at `other`.
+    ///
+    /// Native covers both; wasm covers only wasm. The asymmetry is the whole
+    /// point -- see the type docs.
+    #[must_use]
+    pub const fn covers(self, other: Self) -> bool {
+        matches!((self, other), (Self::Native, _) | (Self::Wasm, Self::Wasm))
+    }
+}
+
+/// A granted set together with the tier it was consented for.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GrantedRecord {
+    /// The mounts consented to.
+    #[serde(flatten)]
+    pub set: GrantedSet,
+    /// The tier the consent was for. Defaults to the least-trust tier for a
+    /// record written before tiers were recorded.
+    #[serde(default)]
+    pub tier: Tier,
+}
+
 /// Everything the user has consented to on this machine.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TrustStore {
     #[serde(default)]
-    granted: Vec<GrantedSet>,
+    granted: Vec<GrantedRecord>,
 }
 
 impl TrustStore {
@@ -147,40 +195,55 @@ impl TrustStore {
         }
     }
 
-    /// Whether `request` is covered by something already granted.
+    /// Whether `request` at `tier` is covered by something already granted.
+    ///
+    /// A stored record covers the request only if its mounts are a superset
+    /// *and* its tier covers the requested tier ([`Tier::covers`]). So a native
+    /// request is never satisfied by a wasm-only grant, however broad the
+    /// mounts -- the tier is part of what was consented to, not a mode on top of
+    /// it.
     #[must_use]
-    pub fn decide(&self, request: &GrantedSet) -> Decision {
-        if let Some(covering) = self
+    pub fn decide(&self, request: &GrantedSet, tier: Tier) -> Decision {
+        if self
             .granted
             .iter()
-            .find(|granted| request.is_subset_of(granted))
+            .any(|g| g.tier.covers(tier) && request.is_subset_of(&g.set))
         {
-            let _ = covering;
             return Decision::Accept;
         }
-        // The excess is reported against the *closest* stored set, so the
-        // message names what is actually new rather than the whole request.
+        // The excess is reported against the closest stored set *of a tier that
+        // would cover this request*, so the message names what is actually new.
+        // A run refused only because its tier escalates reports its whole set,
+        // since no covering-tier record exists to diff against.
         let closest = self
             .granted
             .iter()
-            .min_by_key(|granted| request.beyond(granted).len());
+            .filter(|g| g.tier.covers(tier))
+            .min_by_key(|g| request.beyond(&g.set).len());
         let excess = closest.map_or_else(
             || request.mounts().to_vec(),
-            |granted| request.beyond(granted).into_iter().cloned().collect(),
+            |g| request.beyond(&g.set).into_iter().cloned().collect(),
         );
         Decision::Ask(excess)
     }
 
-    /// Records a set as granted.
+    /// Records a set as granted at `tier`.
     ///
-    /// Sets already covered by a stored one are not added, so the store does
-    /// not grow every time a project is narrowed and run again.
-    pub fn record(&mut self, set: GrantedSet) {
-        if self.granted.iter().any(|g| set.is_subset_of(g)) {
+    /// A record already covering this one -- superset mounts at a covering tier
+    /// -- means nothing is added. Records this one now covers are dropped, so
+    /// recording a native grant supersedes a narrower wasm one but not the other
+    /// way around.
+    pub fn record(&mut self, set: GrantedSet, tier: Tier) {
+        if self
+            .granted
+            .iter()
+            .any(|g| g.tier.covers(tier) && set.is_subset_of(&g.set))
+        {
             return;
         }
-        self.granted.retain(|g| !g.is_subset_of(&set));
-        self.granted.push(set);
+        self.granted
+            .retain(|g| !(tier.covers(g.tier) && g.set.is_subset_of(&set)));
+        self.granted.push(GrantedRecord { set, tier });
     }
 }
 
@@ -218,6 +281,15 @@ pub fn granted_set(mounts: &brush_vfs::MountTable) -> GrantedSet {
 mod tests {
     use super::*;
 
+    // The mount-subset tests predate tiers and are tier-agnostic, so they run
+    // at one tier. The tier *asymmetry* has its own cases below.
+    fn record_native(store: &mut TrustStore, set: GrantedSet) {
+        store.record(set, Tier::Native);
+    }
+    fn decide_native(store: &TrustStore, set: &GrantedSet) -> Decision {
+        store.decide(set, Tier::Native)
+    }
+
     fn mount(at: &str, host: &str, writable: bool) -> GrantedMount {
         GrantedMount {
             at: at.to_owned(),
@@ -230,26 +302,26 @@ mod tests {
     fn narrowing_never_re_asks() {
         // The property the whole keying choice exists for.
         let mut store = TrustStore::default();
-        store.record(GrantedSet::new([
-            mount("/work", "/p", true),
-            mount("/home/user", "/h", true),
-        ]));
+        record_native(
+            &mut store,
+            GrantedSet::new([mount("/work", "/p", true), mount("/home/user", "/h", true)]),
+        );
 
         let narrower = GrantedSet::new([mount("/work", "/p", true)]);
-        assert_eq!(store.decide(&narrower), Decision::Accept);
+        assert_eq!(decide_native(&store, &narrower), Decision::Accept);
 
         // Less *access*, not just fewer mounts, is also narrowing.
         let read_only = GrantedSet::new([mount("/work", "/p", false)]);
-        assert_eq!(store.decide(&read_only), Decision::Accept);
+        assert_eq!(decide_native(&store, &read_only), Decision::Accept);
     }
 
     #[test]
     fn a_superset_asks_and_names_only_what_is_new() {
         let mut store = TrustStore::default();
-        store.record(GrantedSet::new([mount("/work", "/p", true)]));
+        record_native(&mut store, GrantedSet::new([mount("/work", "/p", true)]));
 
         let wider = GrantedSet::new([mount("/work", "/p", true), mount("/extra", "/e", true)]);
-        match store.decide(&wider) {
+        match decide_native(&store, &wider) {
             Decision::Ask(excess) => assert_eq!(excess, vec![mount("/extra", "/e", true)]),
             Decision::Accept => unreachable!("a superset must ask"),
         }
@@ -260,10 +332,10 @@ mod tests {
         // The case a naive set comparison gets wrong: same mount point, same
         // host directory, and strictly more authority.
         let mut store = TrustStore::default();
-        store.record(GrantedSet::new([mount("/work", "/p", false)]));
+        record_native(&mut store, GrantedSet::new([mount("/work", "/p", false)]));
 
         let writable = GrantedSet::new([mount("/work", "/p", true)]);
-        assert!(matches!(store.decide(&writable), Decision::Ask(_)));
+        assert!(matches!(decide_native(&store, &writable), Decision::Ask(_)));
     }
 
     #[test]
@@ -271,9 +343,9 @@ mod tests {
         // Why consent is not path-keyed: a different checkout behind the same
         // virtual path is a different grant.
         let mut store = TrustStore::default();
-        store.record(GrantedSet::new([mount("/work", "/one", true)]));
+        record_native(&mut store, GrantedSet::new([mount("/work", "/one", true)]));
         let other = GrantedSet::new([mount("/work", "/two", true)]);
-        assert!(matches!(store.decide(&other), Decision::Ask(_)));
+        assert!(matches!(decide_native(&store, &other), Decision::Ask(_)));
     }
 
     #[test]
@@ -287,19 +359,19 @@ mod tests {
     fn the_store_does_not_grow_on_repeated_narrowing() {
         let mut store = TrustStore::default();
         let wide = GrantedSet::new([mount("/work", "/p", true), mount("/extra", "/e", true)]);
-        store.record(wide);
-        store.record(GrantedSet::new([mount("/work", "/p", true)]));
+        record_native(&mut store, wide);
+        record_native(&mut store, GrantedSet::new([mount("/work", "/p", true)]));
         assert_eq!(store.granted.len(), 1);
     }
 
     #[test]
     fn recording_a_superset_replaces_what_it_covers() {
         let mut store = TrustStore::default();
-        store.record(GrantedSet::new([mount("/work", "/p", true)]));
-        store.record(GrantedSet::new([
-            mount("/work", "/p", true),
-            mount("/extra", "/e", true),
-        ]));
+        record_native(&mut store, GrantedSet::new([mount("/work", "/p", true)]));
+        record_native(
+            &mut store,
+            GrantedSet::new([mount("/work", "/p", true), mount("/extra", "/e", true)]),
+        );
         assert_eq!(store.granted.len(), 1, "the narrower set is subsumed");
     }
 
@@ -326,13 +398,68 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("sub").join("trust.toml");
         let mut store = TrustStore::default();
-        store.record(GrantedSet::new([mount("/work", "/p", true)]));
+        record_native(&mut store, GrantedSet::new([mount("/work", "/p", true)]));
         store.save(&path).expect("saves");
 
         let loaded = TrustStore::load(&path);
         assert_eq!(
-            loaded.decide(&GrantedSet::new([mount("/work", "/p", true)])),
+            decide_native(&loaded, &GrantedSet::new([mount("/work", "/p", true)])),
             Decision::Accept
+        );
+    }
+
+    #[test]
+    fn native_consent_covers_a_later_wasm_run() {
+        // The user accepted the riskier tier, so the safer one is already
+        // covered -- no second prompt for running the same code sandboxed.
+        let mut store = TrustStore::default();
+        let set = GrantedSet::new([mount("/work", "/p", true)]);
+        store.record(set.clone(), Tier::Native);
+        assert_eq!(store.decide(&set, Tier::Wasm), Decision::Accept);
+        assert_eq!(store.decide(&set, Tier::Native), Decision::Accept);
+    }
+
+    #[test]
+    fn wasm_consent_does_not_escalate_to_native() {
+        // The asymmetry that is the point of D19: consenting to a sandboxed run
+        // is not consenting to run the same code natively, in the same address
+        // space as the vfs. A native request re-prompts even though the mounts
+        // are identical.
+        let mut store = TrustStore::default();
+        let set = GrantedSet::new([mount("/work", "/p", true)]);
+        store.record(set.clone(), Tier::Wasm);
+        assert_eq!(store.decide(&set, Tier::Wasm), Decision::Accept);
+        assert!(
+            matches!(store.decide(&set, Tier::Native), Decision::Ask(_)),
+            "wasm consent must not grant a native run"
+        );
+    }
+
+    #[test]
+    fn an_unlabelled_stored_record_grants_only_wasm() {
+        // A store written before tiers existed has no tier field; it must
+        // default to the least-trust tier, so a native run re-prompts rather
+        // than inheriting a consent that predates the distinction.
+        let toml = "[[granted]]\nmounts = [{ at = \"/work\", host = \"/p\", writable = true }]\n";
+        let store: TrustStore = toml::from_str(toml).expect("parses");
+        let set = GrantedSet::new([mount("/work", "/p", true)]);
+        assert_eq!(store.decide(&set, Tier::Wasm), Decision::Accept);
+        assert!(
+            matches!(store.decide(&set, Tier::Native), Decision::Ask(_)),
+            "an untiered record must not silently grant native"
+        );
+    }
+
+    #[test]
+    fn a_native_grant_supersedes_a_narrower_wasm_one() {
+        let mut store = TrustStore::default();
+        record_native(&mut store, GrantedSet::new([mount("/work", "/p", true)]));
+        // A wasm grant that a native record already covers is not added.
+        store.record(GrantedSet::new([mount("/work", "/p", true)]), Tier::Wasm);
+        assert_eq!(
+            store.granted.len(),
+            1,
+            "the native record already covers it"
         );
     }
 }

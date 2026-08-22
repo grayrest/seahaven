@@ -548,7 +548,10 @@ fn derive_project_namespace(
     let mut store = crate::trust::TrustStore::load(&store_path);
     let request = crate::trust::granted_set(&mounts);
 
-    match store.decide(&request) {
+    // The native tier: the only one that exists (D17's wasm tier is not built),
+    // and the privileged one, so it demands its own consent. See `trust::Tier`.
+    let tier = crate::trust::Tier::Native;
+    match store.decide(&request, tier) {
         crate::trust::Decision::Accept => {}
         crate::trust::Decision::Ask(excess) => {
             // D29: no approve-all flag exists, so a run with nowhere to ask
@@ -559,7 +562,7 @@ fn derive_project_namespace(
             if !prompt_for_grant(&excess)? {
                 return Err("refused".to_owned());
             }
-            store.record(request);
+            store.record(request, tier);
             store
                 .save(&store_path)
                 .map_err(|e| format!("cannot record consent: {e}"))?;

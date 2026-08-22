@@ -788,6 +788,20 @@ Tier differs only in speed and TCB. Had native been privileged, every author wou
 want it and there would be one trust level again — the weak one. Tier is a
 launcher decision recorded in the same per-project trust store as mount grants.
 
+**Implemented in the trust store** (`brush-shell/src/trust.rs`,
+`plans/2026-08-22-platform.md` step 8). A record is `(GrantedSet, Tier)`, and
+the two tiers are *asymmetric in consent*: a native grant covers a later wasm
+run of the same mounts, because the user already accepted the riskier tier;
+wasm consent does not escalate to native, because running the guest as host code
+in the vfs's address space (D17's miscompile included) is the more dangerous
+thing this entry exists to keep off the silent default. An unlabelled record
+from a store written before tiers existed defaults to `Wasm`, the least-trust
+tier, so a native run re-prompts rather than inheriting a consent that predates
+the distinction. Only `Native` is requested today; the wasm tier's runtime is
+D17's unbuilt work, but the record exists before it, which is the point -- a
+milestone whose only tier is the privileged one is this entry's own failure
+mode, and the store now refuses to let native consent be assumed.
+
 ## D20 — `/dev` is a synthetic namespace, not a mount
 
 `sys/unix/fs.rs:224` is `const fn try_open_special_file(_) -> None`, so `>/dev/null`
