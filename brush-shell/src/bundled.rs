@@ -161,6 +161,14 @@ pub fn maybe_dispatch() -> Option<i32> {
     };
 
     let Some(func) = REGISTRY.get().and_then(|r| r.get(name_str)) else {
+        // A shell is not a bundled utility, but a confined recipe runner invokes
+        // one for every recipe (`sh -c "<body>"`). Rather than fail it, run the
+        // body through brush itself, confined: its commands become brush's own
+        // builtins and the bundled utilities, and an arbitrary external program
+        // is refused (D2). See `crate::entry::run_confined_shell`.
+        if matches!(name_str, "sh" | "bash") {
+            return Some(crate::entry::run_confined_shell(args));
+        }
         eprintln!("brush: unknown bundled command: {name_str}");
         return Some(exit_code(ExecutionExitCode::NotFound));
     };

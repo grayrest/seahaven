@@ -51,6 +51,9 @@ mod io_effects;
 mod marshal;
 mod misc_effects;
 
+#[cfg(all(not(test), feature = "shell-executor"))]
+mod shell_exec;
+
 #[cfg(test)]
 mod host_tests;
 
@@ -291,18 +294,28 @@ fn install_identity_session() {
         let _ = session.set_cwd(&cwd.to_string_lossy());
     }
 
-    #[cfg_attr(not(feature = "broker-executor"), expect(unused_mut))]
+    #[cfg_attr(
+        not(any(feature = "broker-executor", feature = "shell-executor")),
+        expect(unused_mut)
+    )]
     let mut platform = VfsPlatform::new(session.clone(), host_identity_facts());
 
     // The executor serves this same namespace to every child and re-invokes this
-    // binary as the trampoline (see `main`). Without the `broker-executor`
-    // feature, `Cmd` is `Unsupported`; with it, a bundled utility runs confined
-    // to the session's mounts.
+    // binary as the trampoline (see `main`). Without an executor `Cmd` is
+    // `Unsupported`; with it, a bundled utility (or a `sh`/`bash` recipe body)
+    // runs confined.
     #[cfg(feature = "broker-executor")]
     if let Ok(executor) = brush_broker_exec::BrokerExecutor::for_current_exe(
         session,
         brush_shell::bundled::DISPATCH_FLAG,
     ) {
+        platform = platform.with_executor(Box::new(executor));
+    }
+
+    // The broker-less alternative for a toolchain that cannot link the embedded
+    // shell (see `shell_exec`): delegate to an external `brush` trampoline.
+    #[cfg(all(feature = "shell-executor", not(feature = "broker-executor")))]
+    if let Some(executor) = shell_exec::ShellExec::from_env() {
         platform = platform.with_executor(Box::new(executor));
     }
 

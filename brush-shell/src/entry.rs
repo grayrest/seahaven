@@ -196,6 +196,102 @@ pub fn run() {
     std::process::exit(i32::from(exit_code));
 }
 
+/// Runs a shell command line through brush itself, confined -- the dispatch
+/// target for a `sh`/`bash` invocation (see [`bundled::maybe_dispatch`]).
+///
+/// A confined recipe runner (rocjust on the seahaven platform, or the shell's own
+/// closed world) runs every recipe through `sh -c "<body>"`. A shell is not a
+/// bundled utility, so that invocation would fail as an unknown command. Instead
+/// it runs *here*, as `brush --closed-world --restrict-builtins <shell args>`:
+/// the body's commands are then brush's own builtins and the bundled utilities
+/// (confined), and an arbitrary external program is refused (D2). The namespace
+/// is the identity one -- the caller was already confined to it -- so the only
+/// boundary this adds is the execution one.
+///
+/// `shell_args` are the arguments after the shell name -- e.g. `["-cu", body]`.
+/// Returns the shell's exit code.
+#[must_use]
+pub fn run_confined_shell(shell_args: &[std::ffi::OsString]) -> i32 {
+    let mut argv: Vec<String> = vec![
+        String::from("brush"),
+        String::from("--closed-world"),
+        String::from("--restrict-builtins"),
+    ];
+    argv.extend(normalize_shell_flags(shell_args));
+
+    let parsed = match CommandLineArgs::try_parse_from(argv.iter().cloned()) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            let _ = e.print();
+            return 2;
+        }
+    };
+
+    let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    else {
+        return 1;
+    };
+
+    match runtime.block_on(run_async(&argv, parsed)) {
+        Ok(code) => i32::from(code),
+        Err(err) => {
+            eprintln!("brush: {err:#}");
+            1
+        }
+    }
+}
+
+/// Normalizes a `sh`-style argument list for brush's clap parser.
+///
+/// A POSIX shell reads `sh -cu "<cmd>"` as the flags `c` and `u` followed by the
+/// command string. clap, given the combined group `-cu`, folds the trailing `u`
+/// into `-c`'s value unless `-c` is last — so `sh -cu "echo hi"` would run the
+/// command `u`. This splits leading short-flag groups into individual flags and
+/// emits `-c` last, so the command string that follows is what `-c` receives.
+/// Long options and the command string (and any arguments after it) pass through
+/// untouched.
+fn normalize_shell_flags(shell_args: &[std::ffi::OsString]) -> Vec<String> {
+    let mut short_flags: Vec<char> = Vec::new();
+    let mut rest: Vec<String> = Vec::new();
+    let mut still_flags = true;
+
+    for arg in shell_args {
+        let text = arg.to_string_lossy().into_owned();
+        // A combined short-flag group: `-` then one or more letters (so not
+        // `--long`, not a bare `-`, not the command string). `strip_prefix`
+        // avoids slicing a string by byte index (which the lint wall forbids).
+        let group = text.strip_prefix('-').filter(|body| {
+            still_flags
+                && !body.is_empty()
+                && !body.starts_with('-')
+                && body.chars().all(|c| c.is_ascii_alphabetic())
+        });
+        if let Some(body) = group {
+            short_flags.extend(body.chars());
+            // After a `-c` group the next argument is the command, not a flag.
+            if short_flags.contains(&'c') {
+                still_flags = false;
+            }
+        } else {
+            still_flags = false;
+            rest.push(text);
+        }
+    }
+
+    let mut out: Vec<String> = short_flags
+        .iter()
+        .filter(|&&c| c != 'c')
+        .map(|c| format!("-{c}"))
+        .collect();
+    if short_flags.contains(&'c') {
+        out.push(String::from("-c"));
+    }
+    out.extend(rest);
+    out
+}
+
 /// Installs panic handlers to report our panic and cleanly exit on panic.
 fn install_panic_handlers() {
     //
