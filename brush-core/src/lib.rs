@@ -9,6 +9,7 @@ pub mod builtins;
 pub mod callstack;
 pub mod commands;
 pub mod completion;
+pub mod datetime;
 pub mod env;
 pub mod error;
 pub mod escape;

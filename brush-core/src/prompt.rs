@@ -90,7 +90,7 @@ fn format_prompt_piece(
             basename,
         } => format_current_working_directory(shell, tilde_replaced, basename),
         brush_parser::prompt::PromptPiece::Date(format) => {
-            format_date(&chrono::Local::now(), &format)
+            format_date(&crate::datetime::now_local(), &format)
         }
         brush_parser::prompt::PromptPiece::DollarOrPound => {
             if users::is_root() {
@@ -158,7 +158,7 @@ fn format_prompt_piece(
                 .unwrap_or_default()
         }
         brush_parser::prompt::PromptPiece::Time(time_fmt) => {
-            format_time(&chrono::Local::now(), &time_fmt)
+            format_time(&crate::datetime::now_local(), &time_fmt)
         }
     };
 

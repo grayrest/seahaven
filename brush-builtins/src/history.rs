@@ -209,7 +209,7 @@ fn display_history(
         let mut formatted_timestamp = String::new();
 
         if let Some(timestamp) = item.timestamp {
-            let local_timestamp = timestamp.with_timezone(&chrono::Local);
+            let local_timestamp = timestamp.with_timezone(&brush_core::datetime::local_offset());
             if let Some(time_format) = &config.time_format {
                 let fmt_items = chrono::format::StrftimeItems::new(time_format);
                 formatted_timestamp = local_timestamp.format_with_items(fmt_items).to_string();
