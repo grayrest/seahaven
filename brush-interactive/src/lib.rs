@@ -38,8 +38,9 @@ mod basic;
 #[cfg(feature = "basic")]
 pub use basic::BasicInputBackend;
 
-// Minimal shell
-#[cfg(feature = "minimal")]
+// Minimal shell. Always available: it is a std-only, no-op-UI backend that reads
+// a program from stdin, so it needs no feature-gated dependency. A non-interactive
+// or headless run (e.g. a confined `-c` recipe shell) can use it without opting
+// into any UI backend, and the default backend for a non-terminal run is Minimal.
 mod minimal;
-#[cfg(feature = "minimal")]
 pub use minimal::MinimalInputBackend;

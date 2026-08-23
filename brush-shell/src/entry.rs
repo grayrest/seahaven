@@ -384,13 +384,13 @@ async fn run_async(
         #[cfg(not(feature = "basic"))]
         InputBackendType::Basic => Err(brush_interactive::ShellError::InputBackendNotSupported),
 
-        #[cfg(feature = "minimal")]
+        // Always available: `MinimalInputBackend` is std-only and needs no UI
+        // feature, so a headless run (a non-terminal `-c`, e.g. a confined recipe
+        // shell) works whatever backend features are compiled in.
         InputBackendType::Minimal => {
             let mut input_backend = brush_interactive::MinimalInputBackend;
             run_in_shell(&shell, args, &mut input_backend, &ui_options).await
         }
-        #[cfg(not(feature = "minimal"))]
-        InputBackendType::Minimal => Err(brush_interactive::ShellError::InputBackendNotSupported),
     };
 
     // Display any error that percolated up.

@@ -13,6 +13,7 @@ mod ci;
 mod codemod;
 mod common;
 mod generate;
+mod sysroot;
 mod test;
 mod vendor;
 
@@ -57,6 +58,8 @@ enum Command {
     /// Generate documentation, completions, and schemas.
     #[clap(subcommand)]
     Gen(generate::GenCommand),
+    /// Build the macOS platform sysroot the roc linker consumes (frameworks).
+    Sysroot,
     /// Run tests.
     Test(Box<test::TestCommand>),
 }
@@ -72,6 +75,7 @@ fn main() -> Result<()> {
         Command::Codemod(cmd) => codemod::run(cmd, verbose),
         Command::VendorFork(cmd) => vendor::run(cmd, verbose),
         Command::VendorLocales(cmd) => vendor::run_locales(cmd, verbose),
+        Command::Sysroot => sysroot::run(verbose),
         Command::Test(cmd) => test::run(cmd, verbose),
         Command::Ci(cmd) => ci::run(cmd, verbose),
     }

@@ -40,16 +40,33 @@ for. `cargo xtask check platform` builds it so it does not rot.
   binary, served this session's mounts (D24) — the executor itself is proven end
   to end in `brush-broker-exec`'s tests.
 
-## What remains (the link)
+## The link, end to end
 
-- The **link and run**: producing the platform's `targets/libhost.a`, building
-  rocjust against it, and running its differential harness end to end.
+rocjust builds against this platform and runs. Point rocjust's `app/main.roc`
+at `../../flatland/platform/main.roc`, then:
 
-That exercises the **true ABI** -- the calling convention across the language
-boundary, and leak-freedom under a real workload -- which the host-side tests
-reach up to but not through. Miri over `cargo test` is the intended leak gate for
-the marshalling once the glue's manual allocation arithmetic is vetted against
-it.
+    cargo xtask sysroot                      # macOS only, once (see below)
+    CARGO_PROFILE_RELEASE_LTO=off cargo build --release   # -> target/release/libhost.a
+    cp target/release/libhost.a ../platform/targets/arm64mac/libhost.a
+    cd ../../rocjust/app && roc build --opt=dev main.roc
+
+The result runs `just` confined: parsing, evaluation and the CLI all work; a
+recipe's commands run through the embedded brush shell (bundled utilities and
+builtins), and an arbitrary external program is refused (D2). Against upstream
+just's suite it scores **1706 / 1834** — the ~128 failures are the boundary
+itself (interactive `choose`/`confirm`, recipes shelling out to real tools).
+
+### The macOS sysroot
+
+`cargo xtask sysroot` builds `platform/targets/macos-sysroot`: framework TBD
+stubs symlinked from the local SDK. roc's linker (`findPlatformSysroot`)
+auto-adds `-framework X` for each framework present, which is how a native
+framework gets linked (there is no `roc build` flag for it). The host reaches
+CoreFoundation (`chrono -> iana-time-zone`, via `reedline`), so it is declared
+there. The symlinks are machine-local (gitignored); rerun after an SDK update.
+
+`--opt=dev` and `LTO=off` keep roc's compile and the archive link within a
+constrained machine's memory; a roomier host can drop both.
 
 ## Regenerating the glue
 

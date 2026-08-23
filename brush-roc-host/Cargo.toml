@@ -24,11 +24,6 @@ crate-type = ["staticlib"]
 # the executor's own end-to-end tests already cover.
 default = ["broker-executor"]
 broker-executor = ["dep:brush-broker-exec", "dep:brush-shell"]
-# The broker-less alternative (see `src/shell_exec.rs`): delegates to an external
-# `brush` binary named by `SEAHAVEN_BRUSH`. Std-only -- no `brush-core`, so no
-# `chrono` -> CoreFoundation, which the roc toolchain cannot link. Used to run
-# rocjust's harness where the embedded executor will not link.
-shell-executor = []
 
 [dependencies]
 brush-platform = { path = "../brush-platform" }
