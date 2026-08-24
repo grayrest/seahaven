@@ -62,6 +62,22 @@ pub fn uninstall() {
     *guard = None;
 }
 
+/// A clone of the installed session, or `None` if none is installed.
+///
+/// Lets a host lift the confined namespace a bundled dispatch installed here
+/// (D24) back out into its own world. The Roc host uses it for a nested
+/// self-invocation (`just` calling `just`): the re-invoked child receives the
+/// parent's namespace over the broker, `maybe_dispatch` installs it here, and
+/// the host reads it back to run `roc_main` against that same namespace rather
+/// than a fresh identity one.
+#[must_use]
+pub fn snapshot() -> Option<Session> {
+    SESSION
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /// A cheap snapshot of the installed session, or an error if none is installed.
 fn current() -> io::Result<Session> {
     let guard = SESSION

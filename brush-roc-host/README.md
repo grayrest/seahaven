@@ -56,6 +56,15 @@ builtins), and an arbitrary external program is refused (D2). Against upstream
 just's suite it scores **1706 / 1834** — the ~128 failures are the boundary
 itself (interactive `choose`/`confirm`, recipes shelling out to real tools).
 
+A recipe that runs `just` itself — the near-universal `default: just --list` — is
+served by re-invoking *this* binary rather than a `just` on `PATH` (which a
+confined recipe has none of). `just` is registered as a bundled name (D30), so
+the recipe shell resolves it to a shim that re-invokes `<self> --invoke-bundled
+just …`; the host intercepts that name and runs `roc_main` again, against the
+same broker-delivered namespace the recipe has (D24). The nested `just` therefore
+sees exactly the recipe's confined filesystem, and its own recipes' commands
+route back through the broker in turn. See `just_self_entry` in `src/lib.rs`.
+
 ### The macOS sysroot
 
 `cargo xtask sysroot` builds `platform/targets/macos-sysroot`: framework TBD

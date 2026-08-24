@@ -71,11 +71,29 @@ pub fn install(commands: HashMap<String, BundledFn>) {
 /// once, before [`maybe_dispatch`], so both the dispatch fast path and the
 /// shell's shim builtins see a populated registry.
 pub fn install_default_providers() {
+    install_default_providers_with(HashMap::new());
+}
+
+/// Installs the default providers plus host-supplied commands.
+///
+/// The extras are merged on top of the feature-selected providers, so a host
+/// can register its own names in the same registry the shell's shims are built
+/// from. The Roc host registers its self-name (`just`) this way: the entry
+/// gives the confined shell a shim that re-invokes the host binary (D30), and
+/// the host intercepts that re-invocation to run its app rather than a utility.
+/// Idempotent like [`install`]: only the first call takes effect.
+#[allow(
+    clippy::implicit_hasher,
+    reason = "registry uses the default hasher; callers build with HashMap::new()"
+)]
+pub fn install_default_providers_with(extra: HashMap<String, BundledFn>) {
     #[allow(unused_mut)]
     let mut commands: HashMap<String, BundledFn> = HashMap::new();
 
     #[cfg(feature = "experimental-bundled-coreutils")]
     commands.extend(brush_coreutils_builtins::bundled_commands());
+
+    commands.extend(extra);
 
     install(commands);
 }

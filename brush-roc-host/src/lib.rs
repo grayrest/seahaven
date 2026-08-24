@@ -173,7 +173,19 @@ pub extern "C" fn main(argc: i32, argv: *const *const c_char) -> i32 {
     // nothing to dispatch.
     #[cfg(feature = "broker-executor")]
     {
-        brush_shell::bundled::install_default_providers();
+        // Register the coreutils *and* this binary's own self-name (`just`), so
+        // the confined recipe shell gets a `just` shim (D30) that re-invokes
+        // this executable. A `just` inside a recipe then runs the app again,
+        // confined, instead of failing to find an external `just` -- which is
+        // how a justfile's `default: just --list` works here (see
+        // `just_self_entry`).
+        let mut extras: std::collections::HashMap<String, brush_shell::bundled::BundledFn> =
+            std::collections::HashMap::new();
+        extras.insert(
+            SELF_NAME.to_owned(),
+            just_self_entry as brush_shell::bundled::BundledFn,
+        );
+        brush_shell::bundled::install_default_providers_with(extras);
         if let Some(code) = brush_shell::bundled::maybe_dispatch() {
             return code;
         }
@@ -291,13 +303,23 @@ fn install_identity_session() {
         let _ = session.set_cwd(&cwd.to_string_lossy());
     }
 
+    install_session(session);
+}
+
+/// Wraps a namespace in the host platform and installs it as the session every
+/// effect resolves against.
+///
+/// The facts are the identity tier's (the host's own environment); the executor,
+/// with the `broker-executor` feature, serves this same namespace to every child
+/// and re-invokes this binary as the trampoline (see [`main`]). Without the
+/// feature `Cmd` is `Unsupported`. Shared by the top-level identity install and
+/// the nested self-invocation (see [`just_self_entry`]), which differ only in
+/// where the namespace comes from.
+#[cfg(not(test))]
+fn install_session(session: Session) {
     #[cfg_attr(not(feature = "broker-executor"), expect(unused_mut))]
     let mut platform = VfsPlatform::new(session.clone(), host_identity_facts());
 
-    // The executor serves this same namespace to every child and re-invokes this
-    // binary as the trampoline (see `main`). Without the `broker-executor`
-    // feature `Cmd` is `Unsupported`; with it, a bundled utility (or a `sh`/`bash`
-    // recipe body) runs confined.
     #[cfg(feature = "broker-executor")]
     if let Ok(executor) = brush_broker_exec::BrokerExecutor::for_current_exe(
         session,
@@ -307,6 +329,74 @@ fn install_identity_session() {
     }
 
     SESSION.with_borrow_mut(|slot| *slot = Some(platform));
+}
+
+/// This binary's own name in the bundled registry. A `just` inside a recipe
+/// resolves to a shim that re-invokes this executable rather than an external
+/// `just`, and `just_executable()` in a justfile names this same binary.
+#[cfg(all(not(test), feature = "broker-executor"))]
+const SELF_NAME: &str = "just";
+
+/// The bundled-registry entry for [`SELF_NAME`]: run the Roc app in place of a
+/// coreutil, against the namespace the broker just delivered.
+///
+/// Reached only as the dispatch target of `<self> --invoke-bundled just <args>`,
+/// which the confined recipe shell spawns for a `just` in a recipe body. By the
+/// time this runs, `maybe_dispatch` has completed the broker handshake and
+/// installed the parent's namespace in `brush_vfs::ambient` (D24); this lifts
+/// that same namespace into the host session and runs `roc_main`, so the nested
+/// `just` sees exactly the recipe's confined filesystem -- and its own recipes'
+/// commands route back through the broker in turn.
+#[cfg(all(not(test), feature = "broker-executor"))]
+fn just_self_entry(args: Vec<std::ffi::OsString>) -> i32 {
+    let Some(session) = brush_vfs::ambient::snapshot() else {
+        eprintln!("just: no confined session was delivered for the nested invocation");
+        return 1;
+    };
+    install_session(session);
+
+    let host = roc_host();
+    let list = build_args_list_from(&args, &host);
+    let code = unsafe { roc_main(list) };
+
+    // The dispatch fast path returns before `main`'s own flush, so drain the
+    // guest's buffered output (D28) here, exactly as `main` does for a normal run.
+    flush_guest_output();
+    code
+}
+
+/// Marshals an owned argument slice into a `RocList<OsStr>`, mirroring
+/// [`build_args_list`] for the self-invocation path (which already holds the
+/// args as `OsString`s rather than a C `argv`). `args[0]` is the program name
+/// (`just`), matching the process argv `roc_main` expects.
+#[cfg(all(not(test), feature = "broker-executor"))]
+fn build_args_list_from(args: &[std::ffi::OsString], host: &RocHost) -> RocList<OsStr> {
+    if args.is_empty() {
+        return RocList::empty();
+    }
+    let list = unsafe { RocList::<OsStr>::allocate(args.len(), host) };
+    for (index, arg) in args.iter().enumerate() {
+        let element = os_str_from_os(arg, host);
+        unsafe { list.elements.add(index).write(element) };
+    }
+    list
+}
+
+/// An `OsStr` value marshalled from a borrowed `OsString`, reusing the same
+/// UTF-8/bytes split as the C-`argv` path. On unix the raw bytes round-trip a
+/// non-UTF-8 argument losslessly; the non-unix fallback is lossy, but the
+/// broker executor this path serves is unix-only.
+#[cfg(all(not(test), feature = "broker-executor"))]
+fn os_str_from_os(arg: &std::ffi::OsStr, host: &RocHost) -> OsStr {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        os_str_from_bytes(arg.as_bytes(), host)
+    }
+    #[cfg(not(unix))]
+    {
+        os_str_from_bytes(arg.to_string_lossy().as_bytes(), host)
+    }
 }
 
 /// The facts an unconfined identity session reports: the host's own.
