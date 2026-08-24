@@ -1,215 +1,99 @@
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/266b83a6-bacb-408c-afb7-2a2ddf37b272"/>
-</div>
+# seahaven
 
-<br/>
+A platform for building constrained [Roc](https://www.roc-lang.org/) CLI applications.
+Roc apps, on their own, have no access to the outside world. If we give them a fake
+POSIX environment that can only write to a fixed set of directories or run
+a fixed set of programs in theory there's no way for them to break out. This
+platform was built with [roc-just](https://github/grayrest/roc-just) as the initial
+client. The idea was that if a build system can work on the platform then most
+other apps should be expressable. The api is very close to `basic-cli` but it
+currently lacks sqlite and network features.
 
-<!-- Primary badges -->
-<p align="center">
-  <!-- crates.io version badge -->
-  <a href="https://crates.io/crates/brush-shell"><img src="https://img.shields.io/crates/v/brush-shell?style=flat-square"/></a>
-  <!-- msrv badge -->
-  <img src="https://img.shields.io/crates/msrv/brush-shell"/>
-  <!-- license badge -->
-  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"/>
-  <br/>
-  <!-- crates.io download badge -->
-  <a href="https://crates.io/crates/brush-shell"><img src="https://img.shields.io/crates/d/brush-shell?style=flat-square"/></a>
-  <!-- compat tests badge -->
-  <img src="https://img.shields.io/badge/compat_tests-1389-brightgreen?style=flat-square" alt="1389 compatibility tests"/>
-  <!-- Packaging badges -->
-  <a href="https://repology.org/project/brush/versions">
-    <img src="https://repology.org/badge/tiny-repos/brush.svg" alt="Packaging status"/>
-  </a>
-  <!-- Social badges -->
-  <a href="https://discord.gg/kPRgC9j3Tj">
-    <img src="https://dcbadge.limes.pink/api/server/https://discord.gg/kPRgC9j3Tj?compact=true&style=flat" alt="Discord invite"/>
-  </a>
-</p>
+seahaven is a fork of [`brush`](https://github.com/reubeno/brush), a bash- and
+POSIX-compatible shell in Rust. brush is the substrate: its parser, builtins,
+and a bundled set of coreutils become the confined command surface an app runs
+against, so a Roc program can shell out — run a recipe, a pipeline, a utility —
+without the ability to run *arbitrary* programs or touch files outside its
+namespace. 
 
-<a href="https://repology.org/project/brush/versions">
-</a>
+## Is this actually secure?
 
-</p>
+**No.** It's an exploration of what a constrained platform would need to look like.
+The author is not a security expert and this has not been tested in earnest.
 
-<hr/>
+## What confinement means today
 
-`brush` (**B**o(u)rn(e) **RU**sty **SH**ell) is a modern [bash-](https://www.gnu.org/software/bash/) and [POSIX-](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html) compatible shell written in Rust. Run your existing scripts and `.bashrc` unchanged -- with syntax highlighting and auto-suggestions built in.
+- **A composed virtual root.** This project builds on wasmtime's `cap-std` virtual
+  file system. By default the platform is constrained to the nearest parent with
+  a source control root. Additional access policies are allowed including an
+  identity policy that allows full access to everything (used for testing brush
+  compatibility). The platform works with the real filesystem within its virutalized
+  root.
 
-## At a glance
+- **A closed world of execution.** Under `--closed-world` (the default) there is no
+  arbitrary external execution: the only things that run are the bundled
+  utilities inside the binary and the app re-invoking *itself*.
 
-✅ Your existing `.bashrc` just works—aliases, functions, completions, all of it.<br/>
-✨ Syntax highlighting and auto-suggestions built in.<br/>
-🧪 Validated against bash with [~1700 compatibility tests](brush-shell/tests/cases).<br/>
-🧩 Easily embeddable in your Rust apps using `brush_core::Shell`.<br/>
+- **Bundled utilities.** `cat`, `ls`, `grep`, `find`, `sed`, and the
+  rest ship inside the binary as forks of `uutils/{coreutils,findutils,grep}`
+  and `sed`, with their filesystem access rewritten to the vfs by a
+  signature-preserving codemod.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/0e64d1b9-7e4e-43be-8593-6c1b9607ac52" width="80%"/>
-</p>
+- **A session broker.** A utility runs in its own child process; the
+  parent hands it the confined namespace over an `SCM_RIGHTS` handshake,
+  authenticated by kernel peer credentials, so the child is confined too
+  rather than falling back to ambient authority.
 
-> ⚠️ **Not everything works yet:** `select` and some edge cases aren't supported. See the [Compatibility Reference](docs/reference/compatibility.md) for details.
+## The pieces
 
-### Quick start:
+| Crate | Role |
+| --- | --- |
+| `brush-vfs` | The virtual filesystem: mounts, the virtual-path grammar, the session handle, and the `ambient` façade that routed utility code calls. |
+| `brush-platform` | The `PlatformEffects` trait every hosted effect routes through, and `VfsPlatform`, its vfs-backed implementation with session facts and an executor. |
+| `brush-roc-host` | The Roc host: a `staticlib` the Roc compiler links, marshalling Roc's refcounted `Str`/`List`/`OsStr` and forwarding all 55 hosted effects into `brush-platform`. |
+| `brush-broker-exec` | The broker-backed `Executor`: spawns a confined child and serves it the session (D24). |
+| `brush-shell` | The shell entrypoint, the bundled-command registry and dispatch trampoline (D30), and the confined recipe runner. |
+| `brush-core`, `brush-parser`, `brush-builtins` | brush's shell engine, parser, and builtins. |
+| `brush-coreutils-builtins`, `forks/` | The bundled utilities and their generated forks. |
+| `platform/` | The Roc side of the platform: `main.roc`, `Host.roc`, and one module per exposed name (`Path`, `Cmd`, `Env`, the stream modules, …). |
 
-```console
-$ cargo binstall brush-shell         # using cargo-binstall
-$ brew install brush                 # using Homebrew
-$ pacman -S brush                    # Arch Linux
-$ cargo install --locked brush-shell # Build from sources
+## The Roc platform surface
+
+This is intended as a *mostly* drop-in replacement for `basic-cli`. The main
+API difference is that paths are `Str` because the scripting environment is
+intended to be cross platform. This means there are paths that are inaccessible
+on some platforms and those paths are dropped/invisible.
+
+Missing features:
+
+* `Http` - no network support yet
+* `Tcp` - no network support yet
+* `Url` - no network support yet
+* `Sqlite` - Removed in the interest of reducing API surface
+* `Sleep` - Not in use by the current client projects
+* `Locale` - Not in use by the current client projects
+* `File` - Not in use by the current client projects
+
+## Building
+
+The confined host and its Roc link are documented in
+[`brush-roc-host/README.md`](brush-roc-host/README.md). In brief, on macOS:
+
+```sh
+cargo xtask sysroot                                     # framework stubs the roc linker consumes (once)
+CARGO_PROFILE_RELEASE_LTO=off cargo build --release     # -> libhost.a
+# then `roc build --opt=speed` an app against platform/main.roc
 ```
 
-`brush` is ready for use as a daily driver. We test every change against `bash` to keep it that way.
+`cargo xtask check` builds the workspace, the excluded host, and the platform so
+none of them rot.
 
-More detailed installation instructions are available below.
+## Relationship to brush, and license
 
-## ✨ Features
+seahaven tracks brush and preserves its behaviour on the default, unconfined
+(identity) path — brush remains a working bash/POSIX shell, and confinement is
+opt-in axes (`--closed-world`, `--mount`) layered on top. Credit for the shell,
+its parser, and the compatibility suite belongs upstream to
+[brush](https://github.com/reubeno/brush).
 
-### 🐚 `bash` Compatibility
-
-| | Feature | Description |
-|--|---------|-------------|
-| ✅ | **50+ builtins** | `echo`, `declare`, `read`, `complete`, `trap`, `ulimit`, ... |
-| ✅ | **Full expansions** | brace, parameter, arithmetic, command/process substitution, globs, `extglob`, `globstar` |
-| ✅ | **Control flow** | `if`/`for`/`while`/`until`/`case`, `&&`/`\|\|`, subshells, pipelines, etc. |
-| ✅ | **Redirection** | here docs, here strings, fd duplication, process substitution redirects |
-| ✅ | **Arrays & variables** | indexed/associative arrays, dynamic variables, standard well-known variables, etc. |
-| ✅ | **Programmable completion** | Works with [bash-completion](https://github.com/scop/bash-completion) out of the box |
-| ✅ | **Job control** | background jobs, suspend/resume, `fg`/`bg`/`jobs` |
-| 🔷 | **Traps & options** | `DEBUG`/`ERR`/`EXIT` traps work; signal traps and options in progress |
-
-### ⌨️ User Experience
-
-| | Feature | Description |
-|--|---------|-------------|
-| ✅ | **Syntax highlighting** | Real-time as you type ([reedline](https://github.com/nushell/reedline)) |
-| ✅ | **Auto-suggestions** | History-based hints as you type ([reedline](https://github.com/nushell/reedline)) |
-| ✅ | **Rich prompts** | `PS1`/`PROMPT_COMMAND`, right prompts, [starship](https://starship.rs) compatible |
-| ✅ | **TOML config** | `~/.config/brush/config.toml` for persistent settings |
-| 🧪 | **Extras** | `fzf`/`atuin` support, zsh-style `precmd`/`preexec` hooks (experimental), VS Code terminal integration |
-
-## Installation
-
-_When you run `brush`, it should look exactly as `bash` does on your system: it processes your `.bashrc` and
-other standard configuration. If you'd like to distinguish the look of `brush` from the other shells
-on your system, you may author a `~/.brushrc` file._
-
-<details>
-<summary>🍺 <b>Installing using Homebrew</b> (macOS/Linux)</summary>
-
-Homebrew users can install using [the `brush` formula](https://formulae.brew.sh/formula/brush):
-
-```bash
-brew install brush
-```
-
-</details>
-
-<details>
-<summary><img src="https://archlinux.org/favicon.ico" width="16" height="16" style="vertical-align: middle;"> <b>Installing on Arch Linux</b></summary>
-
-Arch Linux users can install `brush` from the official [extra repository](https://archlinux.org/packages/extra/x86_64/brush/):
-
-```bash
-pacman -S brush
-```
-
-</details>
-
-<details>
-<summary><img src="https://packages.msys2.org/static/images/logo.svg" alt="icon" width="20" height="20" style="vertical-align: middle;"> <b>Installing on MSYS2</b></summary>
-
-MSYS2 users can install `brush` from the [repository](https://packages.msys2.org/base/mingw-w64-brush):
-
-```bash
-pacman -S mingw-w64-ucrt-x86_64-brush # or mingw-w64-clang-x86_64-brush or mingw-w64-clang-aarch64-brush
-```
-
-</details>
-
-<details>
-<summary>🚀 <b>Installing prebuilt binaries via `cargo binstall`</b></summary>
-
-You may use [cargo binstall](https://github.com/cargo-bins/cargo-binstall) to install pre-built `brush` binaries. Once you've installed `cargo-binstall` you can run:
-
-```bash
-cargo binstall brush-shell
-```
-
-</details>
-
-<details>
-<summary>🚀 <b>Installing prebuilt binaries from GitHub</b></summary>
-
-We publish prebuilt binaries of `brush` for Linux (x86_64, aarch64) and macOS (aarch64) to GitHub for official [releases](https://github.com/reubeno/brush/releases). You can manually download and extract the `brush` binary from one of the archives published there, or otherwise use the GitHub CLI to download it, e.g.:
-
-```bash
-gh release download --repo reubeno/brush --pattern "brush-x86_64-unknown-linux-gnu.*"
-```
-
-After downloading the archive for your platform, you may verify its authenticity using the [GitHub CLI](https://cli.github.com/), e.g.:
-
-```bash
-gh attestation verify brush-x86_64-unknown-linux-gnu.tar.gz --repo reubeno/brush
-```
-
-</details>
-
-<details>
-<summary>🐧 <b>Installing using Nix</b></summary>
-
-If you are a Nix user, you can use the registered version:
-
-```bash
-nix run 'github:NixOS/nixpkgs/nixpkgs-unstable#brush' -- --version
-```
-
-</details>
-
-<details>
-<summary> 🔨 <b>Building from sources</b></summary>
-
-To build from sources, first install a working (and recent) `rust` toolchain; we recommend installing it via [`rustup`](https://rustup.rs/). Then run:
-
-```bash
-cargo install --locked brush-shell
-```
-
-</details>
-
-## Community & Contributing
-
-This project started out of curiosity and a desire to learn—we're keeping that attitude. If something doesn't work the way you'd expect, [let us know](https://github.com/reubeno/brush/issues)!
-
-* [Discord server](https://discord.gg/kPRgC9j3Tj) — chat with the community
-* [Building from source](docs/how-to/build.md) — development workflow
-* [Contribution guidelines](CONTRIBUTING.md) — how to submit changes
-* [Technical docs](docs/README.md) — architecture and reference
-
-## Related Projects
-
-Other POSIX-ish shells implemented in non-C/C++ languages:
-
-* [`nushell`](https://www.nushell.sh/) — modern Rust shell (provides `reedline`)
-* [`fish`](https://fishshell.com) — user-friendly shell ([Rust port in 4.0](https://fishshell.com/blog/rustport/))
-* [`Oils`](https://github.com/oils-for-unix/oils) — bash-compatible with new Oil language
-* [`mvdan/sh`](https://github.com/mvdan/sh) — Go implementation
-* [`rusty_bash`](https://github.com/shellgei/rusty_bash) — another Rust bash-like shell
-
-<details>
-<summary><b>🙏 Credits</b></summary>
-
-This project relies on many excellent OSS crates:
-
-* [`reedline`](https://github.com/nushell/reedline) — readline-like input and interactive features
-* [`clap`](https://github.com/clap-rs/clap) — command-line parsing
-* [`fancy-regex`](https://github.com/fancy-regex/fancy-regex) — regex support
-* [`tokio`](https://github.com/tokio-rs/tokio) — async runtime
-* [`nix`](https://github.com/nix-rust/nix) — Unix/POSIX APIs
-* [`criterion.rs`](https://github.com/bheisler/criterion.rs) — benchmarking
-* [`bash-completion`](https://github.com/scop/bash-completion) — completion test suite
-
-</details>
-
----
-
-Licensed under the [MIT license](LICENSE).
+MIT licensed, like brush — see [`LICENSE`](LICENSE).
