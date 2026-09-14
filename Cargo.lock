@@ -380,27 +380,25 @@ dependencies = [
 
 [[package]]
 name = "bon"
-version = "3.9.3"
+version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a602c73c7b0148ec6d12af6fd5cc7a46e2eacc8878271a999abac56eed12f561"
+checksum = "9e3fac94a66da67200398458a25412bcc3f9b6443b5119a6cad9cf3ccfcd8cc6"
 dependencies = [
  "bon-macros",
- "rustversion",
 ]
 
 [[package]]
 name = "bon-macros"
-version = "3.9.3"
+version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dee98b0db6a962de883bf5d20362dee4d7ca0d12fe39a7c6c73c844e1cd7c1f"
+checksum = "d4654961ad0494e4774c5c60b4cb4cd0ae9b9d92d039d901638b1dba97ebebf5"
 dependencies = [
- "darling 0.23.0",
+ "darling 0.24.1",
  "ident_case",
  "prettyplease",
  "proc-macro2",
  "quote",
- "rustversion",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -430,8 +428,8 @@ dependencies = [
  "cfg-if",
  "chrono",
  "clap",
- "fancy-regex 0.19.0",
- "itertools 0.14.0",
+ "fancy-regex 0.19.1",
+ "itertools 0.15.0",
  "nix 0.31.3",
  "pretty_assertions",
  "procfs",
@@ -460,12 +458,12 @@ dependencies = [
  "clap",
  "color-print",
  "command-fds",
- "fancy-regex 0.19.0",
+ "fancy-regex 0.19.1",
  "futures",
  "getrandom 0.4.3",
  "hostname",
  "inherent",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libc",
  "nix 0.31.3",
  "normalize-path",
@@ -483,7 +481,7 @@ dependencies = [
  "uuid",
  "uzers",
  "whoami",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -496,7 +494,7 @@ dependencies = [
  "tempfile",
  "uu_arch",
  "uu_b2sum",
- "uu_base32",
+ "uu_base32 0.10.0",
  "uu_base64",
  "uu_basename",
  "uu_basenc",
@@ -527,7 +525,7 @@ dependencies = [
  "uu_join",
  "uu_link",
  "uu_ln",
- "uu_ls",
+ "uu_ls 0.10.0",
  "uu_md5sum",
  "uu_mkdir",
  "uu_mktemp",
@@ -643,7 +641,7 @@ dependencies = [
  "tracing",
  "utf8-chars",
  "uuid",
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -703,7 +701,7 @@ dependencies = [
  "test-with",
  "thiserror 2.0.20",
  "tokio",
- "toml 1.1.4+spec-1.1.0",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -753,7 +751,7 @@ dependencies = [
  "thiserror 2.0.20",
  "unicode-normalization",
  "walkdir",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -836,9 +834,9 @@ dependencies = [
 
 [[package]]
 name = "cap-fs-ext"
-version = "4.0.2"
+version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d78e5a3368ae89b7cb68186411452b4b9fac8b41be9c19bf3f47c2d2c8e36e6b"
+checksum = "56ff379b70af8e08307a8f65e7040c7301cb4a572538ade16b4984f0da77847f"
 dependencies = [
  "cap-primitives",
  "cap-std",
@@ -848,9 +846,9 @@ dependencies = [
 
 [[package]]
 name = "cap-primitives"
-version = "4.0.2"
+version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdadbd7c002d3a484b35243669abdae85a0ebaded5a61117169dc3400f9a7ff0"
+checksum = "8b5f74729fd2f44701d1a8eb47e906cdb3ccd9ec0f02baad85a744b791940b18"
 dependencies = [
  "ambient-authority",
  "fs-set-times",
@@ -866,9 +864,9 @@ dependencies = [
 
 [[package]]
 name = "cap-std"
-version = "4.0.2"
+version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7281235d6e96d3544ca18bba9049be92f4190f8d923e3caef1b5f66cfa752608"
+checksum = "c1ec78e242cfa2cfe276807ac2ecc00315a6c97786977414bcd1c3963b6c91b8"
 dependencies = [
  "cap-primitives",
  "io-extras",
@@ -1038,9 +1036,9 @@ dependencies = [
 
 [[package]]
 name = "clap_mangen"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c630ddc90572b3d9abd3f887f0007b4e048faf5c5a59ae607f8ac1c5e3790873"
+checksum = "211d617eaa4b735c96c9e0228fcbdb5120ef623f2b8cb67ffb84c3e02dbc28a4"
 dependencies = [
  "clap",
  "roff",
@@ -1395,12 +1393,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.23.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d"
+checksum = "ed17f5901b6630b993ca003def43f2f8ef4014fc13b047b57aad617ff32bc2ec"
 dependencies = [
- "darling_core 0.23.0",
- "darling_macro 0.23.0",
+ "darling_core 0.24.1",
+ "darling_macro 0.24.1",
 ]
 
 [[package]]
@@ -1419,15 +1417,15 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.23.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9865a50f7c335f53564bb694ef660825eb8610e0a53d3e11bf1b0d3df31e03b0"
+checksum = "6837e2cf7485aaae18f86181d2f0e9a7ed297a025e220aeabf63fdebd3a2ddff"
 dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1443,13 +1441,13 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.23.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac3984ec7bd6cfa798e62b4a642426a5be0e68f9401cfc2a01e3fa9ea2fcdb8d"
+checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
 dependencies = [
- "darling_core 0.23.0",
+ "darling_core 0.24.1",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1630,18 +1628,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dns-lookup"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e39034cee21a2f5bbb66ba0e3689819c4bb5d00382a282006e802a7ffa6c41d"
-dependencies = [
- "cfg-if",
- "libc",
- "socket2",
- "windows-sys 0.60.2",
-]
-
-[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1777,9 +1763,9 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "476de73bddf2ef8490aa4ee8f1cf40b430bf1d56c48c22080e5186952cd580e6"
+checksum = "52e0387578e845beb7a1acff126228499f26cb18edf12919cc513bb863266464"
 dependencies = [
  "bit-set",
  "regex-automata",
@@ -1953,9 +1939,9 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a88cf1f829d945f548cf8fec32c61b1f202b6d93b45848602fc02af4b12ad218"
+checksum = "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -1968,9 +1954,9 @@ dependencies = [
 
 [[package]]
 name = "futures-channel"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "262590f4fe6afeb0bc83be1daa64e52657fe185690a958af7f3ad0e92085c5ae"
+checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -1978,15 +1964,15 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cd50c473c80f6d7c3670a752354b8e569b1a7cbfdc0419ec88e5edad85e0dc7"
+checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
 
 [[package]]
 name = "futures-executor"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6754879cc9f2c66f88c6e5c35344bb0bdb0708b0352b1201815667c7eabc7458"
+checksum = "031b47cf1a3c6cc8bc2fc76cd437f521619387907d469316e7c0bc278f1f5432"
 dependencies = [
  "futures-core",
  "futures-task",
@@ -1995,38 +1981,38 @@ dependencies = [
 
 [[package]]
 name = "futures-io"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4577ecaa3c4f96589d473f679a71b596316f6641bc350038b962a5daf0085d7a"
+checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
 
 [[package]]
 name = "futures-macro"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d6d3cde68c518367be28956066ddfef33813991b77a55005a69dae04bf3b10b"
+checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
 name = "futures-sink"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e34418ac499d6305c2fb5ad0ed2f6ac998c5f8ca209b4510f7f94242c647e307"
+checksum = "1944426bf7d03f1d14f708785e4b33efd750b36d48a157b836b3efc15ede8e1d"
 
 [[package]]
 name = "futures-task"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b231ed28831efb4a61a08580c4bc233ec56bc009f4cd8f52da2c3cb97df0c109"
+checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
 
 [[package]]
 name = "futures-util"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77a90a256fce34da66415271e30f94ee91c57b04b8a2c042d9cf3220179deaa"
+checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -2211,7 +2197,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sysinfo 0.38.4",
- "toml 1.1.4+spec-1.1.0",
+ "toml",
  "uuid",
 ]
 
@@ -2548,9 +2534,9 @@ checksum = "964de6e86d545b246d84badc0fef527924ace5134f30641c203ef52ba83f58d5"
 
 [[package]]
 name = "indexmap"
-version = "2.14.0"
+version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
@@ -2662,15 +2648,6 @@ name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -3359,7 +3336,7 @@ checksum = "f15dc0ed203652fed0fc0e2b4de76bca160565afe16507973df55e6407b84353"
 dependencies = [
  "jiff",
  "num-traits",
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -3647,12 +3624,12 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.37"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
 dependencies = [
  "proc-macro2",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4704,21 +4681,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.9.12+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
-dependencies = [
- "indexmap",
- "serde_core",
- "serde_spanned",
- "toml_datetime 0.7.5+spec-1.1.0",
- "toml_parser",
- "toml_writer",
- "winnow 0.7.15",
-]
-
-[[package]]
-name = "toml"
 version = "1.1.4+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3aace63f4bbcdfc2c965b059de67119c89c4017a70d633be6c104910f67056f5"
@@ -4726,19 +4688,10 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
  "toml_writer",
- "winnow 1.0.4",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "0.7.5+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
-dependencies = [
- "serde_core",
+ "winnow",
 ]
 
 [[package]]
@@ -4756,7 +4709,7 @@ version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
 dependencies = [
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -4965,26 +4918,26 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uu_arch"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd12d4db43c69782c793816593162c9b16557246c457fad3ab9f4de7be93f2a"
+checksum = "a88757991daf19c6192d481fe296a61393b984eb7c59f33ca19160267e657750"
 dependencies = [
  "clap",
  "fluent",
  "platform-info",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_b2sum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54e5dfa3c0e99416d579bfe37a0830142083f7a8dc5b9f1f3dbee252804633e5"
+checksum = "50043640c2a5c4d6bd538cee0eb9f6c751d9ab96ca3747f5b8297cf6d60c95af"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -4999,38 +4952,50 @@ dependencies = [
 ]
 
 [[package]]
-name = "uu_base64"
-version = "0.10.0"
+name = "uu_base32"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb89c59759ce85c0d1a8ccb00338087ed88416de4b2bf6f80e2d96ce24baf2e"
+checksum = "053257b1a994fe36412bab90951ce1825a00277f25a70b2781faa9313dcdbbce"
 dependencies = [
  "clap",
  "fluent",
- "uu_base32",
- "uucore 0.10.0",
+ "rustix",
+ "uucore 0.11.0",
+]
+
+[[package]]
+name = "uu_base64"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "294e5baa9b1bdd3905de36811ee5c77059b63aa56ddb340a80fa686ccc8d3ea8"
+dependencies = [
+ "clap",
+ "fluent",
+ "uu_base32 0.11.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_basename"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0bdf3798da2b31c99179404019920ec5d9e95ff90f8bd418fa06084e75bccdf"
+checksum = "1a2d4a977f33a99d1a54bb4c063ba2e5911dbf82071d9667d3425b7868a43b26"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_basenc"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "408abebae7e7617dad77bc2fe38f89967d4da775e466121f837d1f69c79ff4a9"
+checksum = "190973c868d790d39230fdd25be9648b28a628bf5a751eb37f8117061ca983d3"
 dependencies = [
  "clap",
  "fluent",
- "uu_base32",
- "uucore 0.10.0",
+ "uu_base32 0.11.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5050,25 +5015,25 @@ dependencies = [
 
 [[package]]
 name = "uu_checksum_common"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ea2e4a2fc2028d8f3926b995562aa2e1f7a430e969631d91725b4743be8e3c9"
+checksum = "7360f79c95e9e24ef60ecffe6c4468a88ba42c0189cfaaaa1480bccc9735631c"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_cksum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c26e16bf110593c6a0f6421258bedf6a61f03735829839a361996c74094bed4"
+checksum = "8682c30ff57e6aac8300052559d03cc787533af6a4c5a1eff4db5a44bbb781c1"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5112,15 +5077,15 @@ dependencies = [
 
 [[package]]
 name = "uu_cut"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e6c35efb6e0da8a80d2cf0e6218e9e600d8ac35b7097d49b1ae704254d4ae8f"
+checksum = "805e88917d86b5b9a22530c5320726080932572b13d3367c767c6a2e0c266cd7"
 dependencies = [
  "bstr",
  "clap",
  "fluent",
  "memchr",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5170,13 +5135,13 @@ dependencies = [
 
 [[package]]
 name = "uu_dir"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51591984282aa88fe1ef715ef949100e0b45bbc06e6b3dcb00e3f6fff973740d"
+checksum = "216d9b6a8e676a625332733a36843af225cde3361a0a47eacaaf299f9bc3074d"
 dependencies = [
  "clap",
- "uu_ls",
- "uucore 0.10.0",
+ "uu_ls 0.11.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5191,13 +5156,13 @@ dependencies = [
 
 [[package]]
 name = "uu_dirname"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6a985a5e80290c29792e4e9bcaceef141fa4d38bf2d9e9ddbc6d841bdffa9c5"
+checksum = "b31e63b0c61ead6c58c1fce0e513c86f48b8134892a39c38461eae92546dfe73"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5216,27 +5181,27 @@ dependencies = [
 
 [[package]]
 name = "uu_echo"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b386f00815895ba593db0796aa9b3f9f1a4c1b7936715447309d494f070f19"
+checksum = "a3d1426ed16ce7978af832c7d39bb5fe11c2372e3bbb031ee47e6b60b63497a8"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_env"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7386a5aaf492ef63016f483de32ac52e1fe8d1e199d08b23ba955eac490ed9f5"
+checksum = "70a79594ff945e7d7e2bb5c12a2182411fe11b4acd7a3503c341b88258127b04"
 dependencies = [
  "clap",
  "fluent",
  "nix 0.31.3",
  "rust-ini",
  "thiserror 2.0.20",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5253,9 +5218,9 @@ dependencies = [
 
 [[package]]
 name = "uu_expr"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5e937a28833ee292fac9a623d3ba8c56815aa1a0b7c95a85f4af51cdcf39884"
+checksum = "43fa3d42ce20e955b9a0032c9b770c263882678d421e455a2d186f9646b901e2"
 dependencies = [
  "clap",
  "fluent",
@@ -5263,32 +5228,32 @@ dependencies = [
  "num-traits",
  "onig",
  "thiserror 2.0.20",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_factor"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9eaa6fb948555de68ab67a4a74bfd5f80b551b0039ee85af67e040e6e8f6af6"
+checksum = "61980bdef403e8dac6772c58187cc713b4ebf83e8b1efb66e3d7140a8ac83637"
 dependencies = [
  "clap",
  "fluent",
  "memchr",
  "num-bigint",
  "num-prime",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_false"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b5f9413940d9d447f01193914ad2e6af032ec19ea6e4570058ed7f6e4ba5a8d"
+checksum = "602a8d587f127f7c9de15362f9b1b94e93e59faa1724b4034d17a197afc15ad3"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5340,15 +5305,14 @@ dependencies = [
 
 [[package]]
 name = "uu_hostname"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a2d266ddce09eb850abff5219ff8af5d05218c8eee2625fa2019a279f14c01e"
+checksum = "12f091a6f5cb3324ecbefc71510cbbb72b291404aa6c4f1f473c76a7569c8d54"
 dependencies = [
  "clap",
- "dns-lookup",
  "fluent",
  "hostname",
- "uucore 0.10.0",
+ "uucore 0.11.0",
  "windows-sys 0.61.2",
 ]
 
@@ -5405,15 +5369,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "uu_md5sum"
-version = "0.10.0"
+name = "uu_ls"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16ba1645b4a1a1a6072625259dd2039f7fd1ef05b377e046f5a0c30f7ed91d84"
+checksum = "ec42cc041e65cbeefa34776204634908ee26264e4c7c49f86203136f8039b205"
+dependencies = [
+ "ansi-width",
+ "clap",
+ "fluent",
+ "glob",
+ "hostname",
+ "lscolors",
+ "rustc-hash",
+ "terminal_size",
+ "thiserror 2.0.20",
+ "uucore 0.11.0",
+ "uutils_term_grid",
+]
+
+[[package]]
+name = "uu_md5sum"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7346dfcd9665a9781a64445676a301098601dc4a79978dfafcc686036b6e996c"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5429,16 +5412,16 @@ dependencies = [
 
 [[package]]
 name = "uu_mktemp"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2a08d239cbf5cab40eac714d6b423e488d099e0541d48e81618612039b6fbe7"
+checksum = "1abc52fb0cb4735aab79dd8f087c408b4cbbd1b1f13b1c4b0367369a4b325e99"
 dependencies = [
  "clap",
  "fluent",
  "rand 0.10.2",
  "tempfile",
  "thiserror 2.0.20",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5495,15 +5478,15 @@ dependencies = [
 
 [[package]]
 name = "uu_numfmt"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7abced0680e895b5e8a36cc6a7c98285b555d3c969a7192efa2da80712de40b2"
+checksum = "136719b22cc8f5c89ede762efc1d63436e78fb083e5ccef8a4a6e28701c42711"
 dependencies = [
  "clap",
  "fluent",
  "memchr",
  "thiserror 2.0.20",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5546,24 +5529,24 @@ dependencies = [
 
 [[package]]
 name = "uu_printenv"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6278a4ed040dff58a5088fc0aab504a1f6e22f01bea3638068b98472f39add27"
+checksum = "da156372b7f87e61312c5098125da027fba39e45f51b6ab9dbc6367b6e5f9ffb"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_printf"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15543f4f80e4d307fdf96d3f0d0eb0cf7814906996c3e4e5270d59db05ebee23"
+checksum = "9e09f0302e18b79c5f32e4a2df2936244df7c750062799bda185a6dd28589a51"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5635,9 +5618,9 @@ dependencies = [
 
 [[package]]
 name = "uu_seq"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e32ef2883060d24df418c300f3f5c2a66c0fa6f73c1abd0ea4bef44f87906e2"
+checksum = "75e329fdfe4f1523a615c56548eaa02c3f93f9ab01f4c714872bdff906b161f3"
 dependencies = [
  "bigdecimal",
  "clap",
@@ -5645,67 +5628,67 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "thiserror 2.0.20",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_sha1sum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec848bb96eadc4529c197a07dd06106d067c0c1426fe072fc9a372a98cd31fdf"
+checksum = "295c0790fa6ee78c1ba2f900a644a9af8337fb42592fdc05ebabd0eac99bc02b"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_sha224sum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67ef239f5c776da378e90473adf017bceafc5dc4aa70af8a98dc74146f2727db"
+checksum = "f5658e98cb30100f17a4002472b0f0c7e4eaa7322ff667e3c354200300d9fa9e"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_sha256sum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c4fbf7d1bf213198630d51484ac4706ff146ff8e5c6e142002b68521e586884"
+checksum = "679e7b150e4ed5e17acbc508bd5383ef348f34286db7895045f95766fb4ee164"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_sha384sum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9c6fcd9b641a105b5e81827007a237ec51e14312d8c1d82cc2266f974b864e"
+checksum = "245125290253c4355a2f1c6010f3a38c0b6cf3a0939088a1a3101eade09eaac0"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_sha512sum"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff60383512a3e62d2cc72c81ea38348d1251b1b9a14952b391319649054db2fa"
+checksum = "0623fdc7fba2971bccbadbdcc51a909c237678c2ea076f0ae12405934fa58c58"
 dependencies = [
  "clap",
  "fluent",
  "uu_checksum_common",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5737,13 +5720,13 @@ dependencies = [
 
 [[package]]
 name = "uu_sleep"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d74751dc4ebdc69902c25f0c35ccbd0c14075accdf9d4c57a6a3a4eb3dc379b"
+checksum = "22dec9542e4f5ba721416b4052571f7d1932d84e3f8cd312377ff93a92d867fc"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5839,14 +5822,14 @@ dependencies = [
 
 [[package]]
 name = "uu_tee"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "740b219f8f61712bc7969312774a7935e9c0d56e9f0ccc175a44e0ea555a6007"
+checksum = "6f267ff74a1a0dd64f6ee4f2c24a35f58746d734802f3d0d1fd3c081a97ec72a"
 dependencies = [
  "clap",
  "fluent",
  "rustix",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5880,26 +5863,26 @@ dependencies = [
 
 [[package]]
 name = "uu_tr"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "606d803fd01a228c2ad775ab798b2a06d283ef41c76645c4f629cca1a1f62a78"
+checksum = "759cc76005888baa8828f2eb527d5fb11cb27a9f368fb124507a58c0d52e7ffa"
 dependencies = [
  "bytecount",
  "clap",
  "fluent",
  "nom 8.0.0",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
 name = "uu_true"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89344a39e43d47257aa32f6a0146cbadb069531c7712aaf82b1872ba2296bbe4"
+checksum = "dc049130a2aabaca4356fcd3fe7e7da297a336380cbdf04efec92549deafb241"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5928,14 +5911,14 @@ dependencies = [
 
 [[package]]
 name = "uu_uname"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4172bcf234496351f8a4882ebc67f03f455ed576f245f3dea727788450a2faad"
+checksum = "23c22ce059e04eda84240884575e49dd34fbd4d3a56624fe51198a777f7085fe"
 dependencies = [
  "clap",
  "fluent",
  "platform-info",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5972,13 +5955,13 @@ dependencies = [
 
 [[package]]
 name = "uu_vdir"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63b9d8e15de1e0d12d8479337e4ae8261d5f2ac4b5a7752cefac19638035c1a0"
+checksum = "cdcaa79647b5dd88bb82f0709a148e1a3230cb9afba45e0c156b926df972fc5a"
 dependencies = [
  "clap",
- "uu_ls",
- "uucore 0.10.0",
+ "uu_ls 0.11.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -5998,27 +5981,27 @@ dependencies = [
 
 [[package]]
 name = "uu_whoami"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bab724c2272666b8c041b340507acfdbcecb191e9a301f2269271d8c0a135cbf"
+checksum = "e1ceddf31cfe9c40583293d488e6e42c3ec493e8a1ba1c8cea35c447b67c91f3"
 dependencies = [
  "clap",
  "fluent",
- "uucore 0.10.0",
+ "uucore 0.11.0",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "uu_yes"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b56fb2eef47de71d0a6bb02b71f78ede4890d9e9ee85ae7fca025b42ca9bd9e"
+checksum = "2cfc1ab8ed82c8c69efbeaea47d709472626c5fe0ea69a83e193b024ea47a1c1"
 dependencies = [
  "clap",
  "fluent",
  "itertools 0.15.0",
  "rustix",
- "uucore 0.10.0",
+ "uucore 0.11.0",
 ]
 
 [[package]]
@@ -6091,9 +6074,54 @@ version = "0.10.0"
 dependencies = [
  "base64-simd",
  "bigdecimal",
+ "brush-vfs",
+ "bstr",
+ "clap",
+ "data-encoding",
+ "data-encoding-macro",
+ "dunce",
+ "fluent",
+ "fluent-syntax",
+ "glob",
+ "icu_calendar",
+ "icu_collator",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale",
+ "icu_provider",
+ "itertools 0.15.0",
+ "jiff",
+ "jiff-icu",
+ "libc",
+ "nix 0.31.3",
+ "num-traits",
+ "os_display",
+ "procfs",
+ "rustc-hash",
+ "rustix",
+ "thiserror 2.0.20",
+ "unic-langid",
+ "unicode-width 0.2.2",
+ "unit-prefix",
+ "uucore_procs 0.10.0",
+ "walkdir",
+ "wild",
+ "winapi-util",
+ "windows-sys 0.61.2",
+ "xattr",
+ "z85",
+]
+
+[[package]]
+name = "uucore"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9962a5082023875505c7b74a6ef8b5b5d50081b7b09b998973f6da7b9514eed8"
+dependencies = [
+ "base64-simd",
+ "bigdecimal",
  "blake2b_simd",
  "blake3",
- "brush-vfs",
  "bstr",
  "clap",
  "crc-fast",
@@ -6105,15 +6133,12 @@ dependencies = [
  "fluent-syntax",
  "glob",
  "hex",
- "icu_calendar",
  "icu_collator",
- "icu_datetime",
  "icu_decimal",
  "icu_locale",
  "icu_provider",
  "itertools 0.15.0",
  "jiff",
- "jiff-icu",
  "libc",
  "md-5",
  "memchr",
@@ -6132,10 +6157,8 @@ dependencies = [
  "unic-langid",
  "unicode-width 0.2.2",
  "unit-prefix",
- "uucore_procs 0.10.0",
- "walkdir",
+ "uucore_procs 0.11.0",
  "wild",
- "winapi-util",
  "windows-sys 0.61.2",
  "xattr",
  "z85",
@@ -6182,10 +6205,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "uuid"
-version = "1.24.0"
+name = "uucore_procs"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+checksum = "92ef57c6e2299a853551cabee2fae52f340575621903d5250271738773c6a6e6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "uuid"
+version = "1.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -6363,18 +6396,18 @@ dependencies = [
 
 [[package]]
 name = "which"
-version = "8.0.5"
+version = "8.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f3ef584124b911bcc3875c2f1472e80f24361ceb789bd1c62b3e9a3df9ff43c"
+checksum = "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "whoami"
-version = "2.1.2"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "998767ef88740d1f5b0682a9c53c24431453923962269c2db68ee43788c5a40d"
+checksum = "626c4bac6755d76ffc12cb01b2eac751db1996b9e0041de9aa02c8c211ddc82c"
 dependencies = [
  "libc",
  "libredox",
@@ -6922,12 +6955,6 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winnow"
-version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-
-[[package]]
-name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
@@ -7010,7 +7037,7 @@ dependencies = [
  "clap",
  "clap-markdown",
  "clap_complete",
- "clap_mangen 0.3.2",
+ "clap_mangen 0.3.3",
  "libc",
  "num_cpus",
  "proc-macro2",
@@ -7019,9 +7046,9 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "syn 2.0.119",
+ "syn 3.0.3",
  "tempfile",
- "toml 0.9.12+spec-1.1.0",
+ "toml",
  "xshell",
 ]
 
