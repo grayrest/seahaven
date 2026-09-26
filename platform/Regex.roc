@@ -15,7 +15,7 @@ Regex :: [].{
 	## ```roc
 	## Regex.is_match!("^a.c$", "abc")? # Bool.True
 	## ```
-	is_match! : Str, Str => Try(Bool, [RegexErr(Str), ..])
+	is_match! : Str, Str => Try(Bool, [RegexErr(Str)])
 	is_match! = |pattern, haystack|
 		# Re-tagged rather than passed through: the hosted signature is a CLOSED
 		# union, which would not unify with an app's own error type.
@@ -31,7 +31,7 @@ Regex :: [].{
 	## ```roc
 	## Regex.replace_all!("a+", "aaabaaa", "-")? # "-b-"
 	## ```
-	replace_all! : Str, Str, Str => Try(Str, [RegexErr(Str), ..])
+	replace_all! : Str, Str, Str => Try(Str, [RegexErr(Str)])
 	replace_all! = |pattern, haystack, replacement|
 		match Host.regex_replace_all!(pattern, haystack, replacement) {
 			Ok(value) => Ok(value)

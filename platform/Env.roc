@@ -37,7 +37,7 @@ Env :: [].{
 	## Reads the given environment variable.
 	##
 	## Returns `Err(VarNotFound(name))` if the variable is not set.
-	var! : OsStr => Try(OsStr, [VarNotFound(OsStr), EnvErr(IOErr), ..])
+	var! : OsStr => Try(OsStr, [VarNotFound(OsStr), EnvErr(IOErr)])
 	var! = |name|
 		match Host.env_var!(OsStr.to_raw(name)) {
 			Ok(raw) => Ok(OsStr.from_raw(raw))
@@ -46,7 +46,7 @@ Env :: [].{
 		}
 
 	## Reads the given environment variable as a string if its native value is valid text.
-	var_str! : OsStr => Try(Str, [VarNotFound(OsStr), EnvErr(IOErr), InvalidStr(U64), ..])
+	var_str! : OsStr => Try(Str, [VarNotFound(OsStr), EnvErr(IOErr), InvalidStr(U64)])
 	var_str! = |name|
 		match var!(name) {
 			Ok(value) =>
@@ -62,7 +62,7 @@ Env :: [].{
 	## from the environment.
 	##
 	## Returns `Err(CwdUnavailable)` if the cwd cannot be determined.
-	cwd! : () => Try(Path.Path, [CwdUnavailable, ..])
+	cwd! : () => Try(Path.Path, [CwdUnavailable])
 	cwd! = ||
 		match Host.env_cwd!() {
 			Ok(raw) => Ok(Path.from_raw(raw))
@@ -73,7 +73,7 @@ Env :: [].{
 	##
 	## Returns `Err(InvalidCwd(err))` when the path cannot be used as a working
 	## directory. The process-wide change remains in effect until changed again.
-	set_cwd! : Path.Path => Try({}, [InvalidCwd(IOErr), ..])
+	set_cwd! : Path.Path => Try({}, [InvalidCwd(IOErr)])
 	set_cwd! = |path|
 		Host.env_set_cwd!(Path.to_raw(path))
 			.map_err(|err| InvalidCwd(err))
@@ -81,7 +81,7 @@ Env :: [].{
 	## Gets the path to the currently-running executable.
 	##
 	## Returns `Err(ExePathUnavailable)` if the path cannot be determined.
-	exe_path! : () => Try(Path.Path, [ExePathUnavailable, ..])
+	exe_path! : () => Try(Path.Path, [ExePathUnavailable])
 	exe_path! = ||
 		match Host.env_exe_path!() {
 			Ok(raw) => Ok(Path.from_raw(raw))
