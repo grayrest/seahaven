@@ -1,4 +1,4 @@
-import IOErr exposing [IOErr]
+import IOErr
 
 ## Declare the hosted effects and ABI-safe data exchanged with the native host.
 ##
