@@ -20,7 +20,7 @@ Tty :: [].{
 	## Which standard stream to ask about. They are asked about separately
 	## because they are redirected separately: `prog | less` leaves stderr on
 	## the terminal while stdout is a pipe.
-	Stream : [Stdout, Stderr]
+	StdHandle : [Stdout, Stderr]
 
 	## Whether that stream is attached to a terminal rather than to a pipe or a
 	## file.
@@ -28,7 +28,7 @@ Tty :: [].{
 	## This is what decides whether colour is wanted when the choice is left to
 	## the program: a pipe usually wants the escape sequences left out, since
 	## whatever reads it will not interpret them.
-	is_terminal! : Stream => Bool
+	is_terminal! : StdHandle => Bool
 	is_terminal! = |stream|
 		Host.tty_is_terminal!(
 			match stream {

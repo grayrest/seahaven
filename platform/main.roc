@@ -6,7 +6,7 @@
 ## recipe runner needs: no network (D9), no sqlite, no sleep, no locale.
 platform ""
 	requires {
-		main! : List([Utf8(Str), UnixBytes(List(U8)), WindowsU16s(List(U16))]) => Try({}, [Exit(I32), ..])
+		main! : List(OsStr) => Try({}, [Exit(I32), ..])
 	}
 	exposes [Cmd, Env, IOErr, OsStr, Path, Random, Regex, Signal, Stdin, Stdout, Stderr, Tty, Utc]
 	packages {}
